@@ -1569,7 +1569,8 @@ export default function ChatApp() {
       const payload = await api(`/api/models?${query.toString()}`);
       const available = payload.models || [];
       setModels(available);
-      if (available.length > 0 && !available.some((item) => item.id === model)) {
+      const currentIsInstalled = available.some((item) => item.id === model && item.available !== false);
+      if (available.length > 0 && !currentIsInstalled) {
         const preferred = available.find((item) => item.available !== false) || available[0];
         setModel(preferred.id);
       }
