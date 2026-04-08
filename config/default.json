@@ -1,0 +1,5 @@
+{
+  "provider": "ollama",
+  "ollamaModel": "llama3",
+  "openAICompatibleModel": "gpt-4o-mini"
+}

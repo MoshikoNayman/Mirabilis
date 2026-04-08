@@ -1,0 +1,21 @@
+{
+  "name": "local-ai-chat-backend",
+  "version": "26.2R1",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^2.1.1",
+    "ssh2": "^1.17.0",
+    "uuid": "^11.0.3"
+  }
+}
