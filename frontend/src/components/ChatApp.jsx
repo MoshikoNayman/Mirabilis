@@ -430,6 +430,8 @@ export default function ChatApp() {
   const [webSearchStatus, setWebSearchStatus] = useState('off');
   // modelId → { pct: number|null, status: string, ctrl: AbortController } while pulling
   const [pullingModels, setPullingModels] = useState({});
+  // modelId → true while a delete request is in-flight
+  const [deletingModels, setDeletingModels] = useState({});
   const [isTeachPanelOpen, setIsTeachPanelOpen] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
@@ -1653,6 +1655,22 @@ export default function ChatApp() {
       delete n[modelId];
       return n;
     });
+  }
+
+  async function deleteModel(ollamaId, modelId) {
+    if (provider !== 'ollama') return;
+    setDeletingModels((prev) => ({ ...prev, [modelId]: true }));
+    try {
+      await api(`/api/models/${encodeURIComponent(ollamaId || modelId)}`, { method: 'DELETE' });
+      setStatusText(`Removed: ${modelId}`);
+      await refreshModels();
+      // if the deleted model was selected, clear the selection
+      setModel((prev) => (prev === modelId ? '' : prev));
+    } catch (err) {
+      setStatusText(`Remove failed: ${err.message}`);
+    } finally {
+      setDeletingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });
+    }
   }
 
   function installModel(ollamaId, modelId) {
@@ -3075,11 +3093,13 @@ export default function ChatApp() {
                               .filter((item) => (item.group || 'Models') === group)
                               .map((item) => {
                                 const pulling = pullingModels[item.id];
+                                const isDeleting = deletingModels[item.id];
                                 const isSelected = item.id === model;
                                 const isInstalled = item.available !== false;
+                                const canDelete = isInstalled && provider === 'ollama' && !pulling && !isDeleting;
                                 return (
+                                <div key={item.id} className="group/row relative flex items-center">
                                 <button
-                                  key={item.id}
                                   type="button"
                                   onClick={() => {
                                     if (!isInstalled && !pulling) {
@@ -3114,7 +3134,7 @@ export default function ChatApp() {
                                       }
                                     }
                                   }}
-                                  className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                                  className={`flex min-w-0 flex-1 items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
                                     isSelected
                                       ? 'bg-accentSoft text-ink dark:bg-accentSoft dark:text-ink'
                                       : isInstalled
@@ -3122,7 +3142,7 @@ export default function ChatApp() {
                                       : 'text-slate-400 hover:bg-black/5 dark:text-slate-500 dark:hover:bg-white/5'
                                   }`}
                                 >
-                                  <span className="flex items-center gap-1.5 truncate">
+                                  <span className="flex min-w-0 items-center gap-1.5 truncate">
                                     {isInstalled && !isSelected && (
                                       <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                                     )}
@@ -3163,6 +3183,18 @@ export default function ChatApp() {
                                     </span>
                                   ) : null}
                                 </button>
+                                {canDelete && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); deleteModel(item.ollamaId || item.id, item.id); }}
+                                    className="ml-0.5 shrink-0 rounded p-1 text-[10px] text-slate-300 opacity-0 transition hover:text-red-500 group-hover/row:opacity-100 dark:text-slate-600 dark:hover:text-red-400"
+                                    title={`Remove ${item.label} to free space`}
+                                  >✕</button>
+                                )}
+                                {isDeleting && (
+                                  <span className="ml-1 shrink-0 animate-pulse text-[10px] text-red-400">…</span>
+                                )}
+                                </div>
                                 );
                               })}
                                 </div>

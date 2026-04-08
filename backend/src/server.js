@@ -706,6 +706,30 @@ app.post('/api/models/pull', async (req, res) => {
   res.end();
 });
 
+// ── Model delete (remove from Ollama) ─────────────────────────────────────
+
+app.delete('/api/models/:modelId', async (req, res) => {
+  const modelId = decodeURIComponent(req.params.modelId || '');
+  if (!modelId || !SAFE_MODEL_RE.test(modelId)) {
+    return res.status(400).json({ error: 'Invalid model ID' });
+  }
+  try {
+    const ollamaBase = config.ollamaBaseUrl || 'http://127.0.0.1:11434';
+    const upstream = await fetch(`${ollamaBase}/api/delete`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: modelId })
+    });
+    if (!upstream.ok) {
+      const msg = await upstream.text().catch(() => 'Delete failed');
+      return res.status(upstream.status).json({ error: msg });
+    }
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Delete error' });
+  }
+});
+
 // ── Remote Control (localhost exec + SSH) ─────────────────────────────────
 
 // In-memory connection state — only one active connection at a time
