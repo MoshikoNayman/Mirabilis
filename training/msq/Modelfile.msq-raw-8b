@@ -1,5 +1,5 @@
 # MSQ-Raw-8B — Mirabilis Unrestricted Intelligence
-# Base: dolphin3:latest (8B, 4.9 GB) — no RLHF guardrails, community fine-tuned
+# Base: dolphin3:latest (Llama 3.1 8B, 4.9 GB) — no RLHF guardrails, community fine-tuned
 # Character: raw, direct, zero restrictions. Fully authorized by device owner.
 
 FROM dolphin3:latest

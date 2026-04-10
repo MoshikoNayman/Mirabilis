@@ -6,10 +6,11 @@ Versioning follows Junos-style tags.
 
 ### MSQ Model Family
 
-- **MSQ-Lite-4B** — fast, minimal daily-driver tuned on `gemma3` (4B, 3.3 GB), 8 192-token context.
-- **MSQ-Pro-12B** — deep-reasoning variant tuned on `gemma3:12b` (12B, 8.1 GB), 32 768-token context.
-- **MSQ-Raw-8B** — fully unrestricted variant tuned on `dolphin3` (8B, 4.9 GB), 8 192-token context; `uncensored: true` flag enables bypass of all safety system prompts.
-- `training/msq/` directory added — contains `Modelfile.msq-lite-4b`, `Modelfile.msq-pro-12b`, `Modelfile.msq-raw-8b`, and `setup.sh` (`bash training/msq/setup.sh` creates all three models via `ollama create`).
+- **MSQ-Pro-12B** — deep-reasoning workhorse tuned on `gemma3:12b` (12B, 8.1 GB), 32 768-token context.
+- **MSQ-Ultra-31B** — flagship model tuned on `gemma4:31b` (~20 GB), 65 536-token context; most capable model in the family.
+- **MSQ-Raw-8B** — fully unrestricted variant tuned on `dolphin3` / Llama 3.1 (8B, 4.9 GB), 8 192-token context; `uncensored: true` flag enables bypass of all safety system prompts.
+- Removed MSQ-Lite-4B from the lineup; MSQ-Pro-12B is the new entry point.
+- `training/msq/` directory — contains `Modelfile.msq-pro-12b`, `Modelfile.msq-ultra-31b`, `Modelfile.msq-raw-8b`, and `setup.sh` (`bash training/msq/setup.sh` creates all three models via `ollama create`).
 - MSQ group registered at the top of `CURATED_OLLAMA_MODELS` in `modelService.js` so models appear first in the model selector.
 
 ### Uncensored Mode Hardening

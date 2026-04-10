@@ -62,9 +62,9 @@ MSQ is the native Mirabilis model family built on top of publicly available base
 
 | Model | Base | Params | Context | Character |
 |-------|------|--------|---------|---|
-| **MSQ-Lite-4B** | gemma3 (3.3 GB) | 4B | 8 192 | Fast, direct, minimal. Daily driver. |
-| **MSQ-Pro-12B** | gemma3:12b (8.1 GB) | 12B | 32 768 | Thorough, deep reasoning. No ceiling. |
-| **MSQ-Raw-8B** | dolphin3 (4.9 GB) | 8B | 8 192 | Fully unrestricted. No safety filters. |
+| **MSQ-Pro-12B** | gemma3:12b (8.1 GB) | 12B | 32 768 | Thorough, deep reasoning. Everyday workhorse. |
+| **MSQ-Ultra-31B** | gemma4:31b (~20 GB) | 31B | 65 536 | Flagship. Maximum depth and reasoning. |
+| **MSQ-Raw-8B** | dolphin3 / Llama 3.1 (4.9 GB) | 8B | 8 192 | Fully unrestricted. No safety filters. |
 
 ### Setup
 
@@ -76,6 +76,8 @@ bash training/msq/setup.sh
 
 Models will appear in the **MSQ** group at the top of the model selector after setup.
 
+> **MSQ-Ultra-31B** requires ~20 GB RAM/VRAM. Works on Apple Silicon Macs with 24 GB+ unified memory.
+>
 > **MSQ-Raw-8B** disables all content filters. Use responsibly and only on hardware you control.
 
 ## Notes
