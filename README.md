@@ -58,7 +58,7 @@ uninstall.sh    Cleanup script
 
 ## MSQ Model Family
 
-MSQ is the native Mirabilis model family built on top of publicly available base models and tuned for use with this app.
+MSQ is a model family created by Moshiko Nayman, built on top of publicly available base models and tuned specifically for Mirabilis.
 
 | Model | Base | Params | Context | Character |
 |-------|------|--------|---------|---|
