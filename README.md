@@ -60,11 +60,11 @@ uninstall.sh    Cleanup script
 
 MSQ is a model family created by Moshiko Nayman, built on top of publicly available base models and tuned specifically for Mirabilis.
 
-| Model | Base | Params | Context | Character |
-|-------|------|--------|---------|---|
-| **MSQ-Pro-12B** | gemma3:12b (8.1 GB) | 12B | 32 768 | Thorough, deep reasoning. Everyday workhorse. |
-| **MSQ-Ultra-31B** | gemma4:31b (~20 GB) | 31B | 65 536 | Flagship. Maximum depth and reasoning. |
-| **MSQ-Raw-8B** | dolphin3 / Llama 3.1 (4.9 GB) | 8B | 8 192 | Fully unrestricted. No safety filters. |
+| Model             | Base                           | Params | Context | Character                                     |
+|-------------------|--------------------------------|-------:|--------:|-----------------------------------------------|
+| **MSQ-Raw-8B**    | dolphin3 / Llama 3.1 (4.9 GB) |     8B |   8 192 | Fully unrestricted. No safety filters.        |
+| **MSQ-Pro-12B**   | gemma3:12b (8.1 GB)            |    12B |  32 768 | Thorough, deep reasoning. Everyday workhorse. |
+| **MSQ-Ultra-31B** | gemma4:31b (~20 GB)            |    31B |  65 536 | Flagship. Maximum depth and reasoning.        |
 
 ### Setup
 
