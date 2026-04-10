@@ -744,6 +744,9 @@ export default function ChatApp() {
   const speechSynthesisRef = useRef(null);
   const piperAudioRef = useRef(null);
   const chatScrollPositions = useRef({});
+  // Incremented by clearAllChats so any in-flight refreshChats() calls that started
+  // before the clear (and resolve after it) bail out instead of resurrecting deleted chats.
+  const chatListEpochRef = useRef(0);
   // Refs for renderMessageContent (stable across renders without re-passing as props)
   const remoteConnectedRef = useRef(false);
   const remoteTargetRef = useRef('');
@@ -1837,7 +1840,10 @@ export default function ChatApp() {
   }
 
   async function refreshChats() {
+    const epoch = chatListEpochRef.current;
     const payload = await api('/api/chats');
+    // Bail out if clearAllChats() ran while we were awaiting — would resurrect deleted chats
+    if (chatListEpochRef.current !== epoch) return;
     setChats(payload.chats || []);
   }
 
@@ -1973,6 +1979,7 @@ export default function ChatApp() {
     // Abort stream first — otherwise the post-stream saveChat fires after the
     // DELETE and immediately re-adds the last chat (intermittent "comes back" bug)
     stopStreaming();
+    chatListEpochRef.current++; // invalidate any in-flight refreshChats() calls
     await api('/api/chats', { method: 'DELETE' });
     setActiveChatId(null);
     setMessages([]);
