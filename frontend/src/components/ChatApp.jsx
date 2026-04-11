@@ -3100,7 +3100,7 @@ export default function ChatApp() {
   return (
     <main className="relative h-screen w-screen p-3 sm:p-6">
       <div className="mx-auto flex h-full max-w-7xl gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
-        <aside className="flex w-28 shrink-0 flex-col gap-3 rounded-2xl border border-[var(--panel-border)] bg-white/65 p-2 dark:bg-slate-950/45 sm:w-80 sm:p-4">
+        <aside className="flex w-28 shrink-0 flex-col gap-3 rounded-2xl border border-[var(--panel-border)] bg-white/65 p-2 dark:bg-slate-950/45 sm:w-72 sm:p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span aria-hidden="true" className="icq-mark" title="ICQ logo">
@@ -3520,8 +3520,9 @@ export default function ChatApp() {
                 setAutoScrollEnabled(true);
               }
             }}
-            className="flex-1 space-y-3 overflow-y-auto scroll-thin pr-1"
+            className="flex-1 overflow-y-auto scroll-thin"
           >
+            <div className="mx-auto w-full max-w-3xl space-y-3 pr-1">
             {canvasEnabled && (
               <section className="rounded-2xl border border-black/10 bg-white/80 p-3 dark:border-white/10 dark:bg-slate-900/50">
                 <div className="mb-2 flex items-center justify-between">
@@ -3593,6 +3594,7 @@ export default function ChatApp() {
                 regenerate={regenerate}
               />
             ))}
+            </div>
           </div>
 
           {isTeachPanelOpen && (
