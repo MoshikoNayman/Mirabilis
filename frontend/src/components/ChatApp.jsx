@@ -3124,7 +3124,7 @@ export default function ChatApp() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-2 self-start">
             <button
               onClick={createChat}
               className="rounded-full bg-accent px-2 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition hover:brightness-95"
@@ -3537,7 +3537,7 @@ export default function ChatApp() {
             }}
             className="flex-1 overflow-y-auto scroll-thin"
           >
-            <div className="mx-auto w-full max-w-3xl space-y-3 pr-1">
+            <div className={`mx-auto w-full space-y-3 pr-1 ${sidebarOpen ? 'max-w-3xl' : 'max-w-5xl'}`}>
             {canvasEnabled && (
               <section className="rounded-2xl border border-black/10 bg-white/80 p-3 dark:border-white/10 dark:bg-slate-900/50">
                 <div className="mb-2 flex items-center justify-between">
