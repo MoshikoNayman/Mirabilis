@@ -3124,17 +3124,17 @@ export default function ChatApp() {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 self-start">
+          <div className="flex flex-wrap gap-1.5">
             <button
               onClick={createChat}
-              className="rounded-full bg-accent px-2 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition hover:brightness-95"
+              className="rounded-full bg-accent px-3 py-1 text-xs font-semibold text-white shadow-[0_6px_14px_-8px_rgba(26,168,111,0.9)] transition hover:brightness-95"
             >
               New Chat
             </button>
             <button
               onClick={deleteLastChat}
               disabled={chats.length === 0}
-              className="rounded-full border border-black/10 px-2 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+              className="rounded-full border border-black/10 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
               title={activeChatId ? 'Delete current chat' : 'Delete most recent chat'}
             >
               {activeChatId ? 'Delete' : 'Delete Last'}
@@ -3142,7 +3142,7 @@ export default function ChatApp() {
             <button
               onClick={clearAllChats}
               disabled={chats.length === 0}
-              className="rounded-full border border-red-400/55 px-2 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-400/35 dark:text-red-300 dark:hover:bg-red-950/30"
+              className="rounded-full border border-red-400/55 px-3 py-1 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-400/35 dark:text-red-300 dark:hover:bg-red-950/30"
             >
               Clear All
             </button>
