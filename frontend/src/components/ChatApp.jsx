@@ -706,7 +706,11 @@ const MessageRow = memo(function MessageRow({
         </div>
       )}
       {message.role === 'assistant' && !message.imageGenerating && (
-        <div className="mt-2 flex items-center justify-between gap-2 border-t border-black/[0.06] pt-1.5 dark:border-white/[0.07]">
+        <div className={`sticky bottom-0 mt-2 flex items-center justify-between gap-2 rounded-b-2xl border-t border-black/[0.06] pb-0.5 pt-1.5 dark:border-white/[0.07] ${
+          speakingMessageId === message.id
+            ? 'bg-accentSoft/90 dark:bg-slate-800/90'
+            : 'bg-white/95 dark:bg-slate-800/95'
+        }`}>
           {/* Token info — left side */}
           <div className="font-mono text-[9.5px] leading-none text-slate-400 dark:text-slate-500">
             {!message.imageUrl && (
