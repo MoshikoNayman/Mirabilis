@@ -655,10 +655,10 @@ const MessageRow = memo(function MessageRow({
     <article
       className={`fade-in text-sm ${
         message.role === 'user'
-          ? 'ml-auto max-w-[90%] rounded-l-2xl px-3 py-2 shadow-sm sm:max-w-[75%] bg-accent text-white shadow-[0_10px_22px_-14px_rgba(26,168,111,0.9)]'
+          ? 'ml-auto max-w-[90%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[75%] bg-accent text-white shadow-[0_10px_22px_-14px_rgba(26,168,111,0.9)]'
           : speakingMessageId === message.id
-          ? 'w-full rounded-r-xl border-l-2 border-accent px-3 py-2 bg-accentSoft/50 text-slate-800 dark:bg-accent/15 dark:text-slate-100'
-          : 'w-full rounded-r-xl border-l-2 border-accent/30 px-3 py-2 bg-black/[0.025] text-slate-800 dark:border-accent/25 dark:bg-white/[0.04] dark:text-slate-100'
+          ? 'w-full rounded-2xl border-l-2 border-accent px-3 py-2 bg-accentSoft/50 text-slate-800 dark:bg-accent/15 dark:text-slate-100'
+          : 'w-full rounded-2xl border-l-2 border-accent/30 px-3 py-2 bg-black/[0.025] text-slate-800 dark:border-accent/25 dark:bg-white/[0.04] dark:text-slate-100'
       }`}
     >
       {isStreaming && !message.content && message.role === 'assistant' && isLast && !message.imageGenerating
