@@ -258,14 +258,19 @@ function CopyMessageButton({ text }) {
     <button
       type="button"
       onClick={handleCopy}
-      title="Copy message"
-      className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-slate-400 transition hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+      title={copied ? 'Copied!' : 'Copy message'}
+      className="rounded p-1 text-slate-400 transition hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
     >
-      <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="9" y="9" width="13" height="13" rx="2" />
-        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-      </svg>
-      {copied ? 'Copied' : 'Copy'}
+      {copied ? (
+        <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
     </button>
   );
 }
@@ -656,9 +661,6 @@ const MessageRow = memo(function MessageRow({
           : 'border border-black/10 bg-white text-slate-800 dark:border-white/10 dark:bg-slate-800 dark:text-slate-100'
       }`}
     >
-      <div className="mb-1 flex items-center justify-between gap-3 text-[10px] uppercase opacity-70">
-        <span>{message.role === 'user' ? 'You' : message.role === 'assistant' ? 'AI' : message.role}</span>
-      </div>
       {isStreaming && !message.content && message.role === 'assistant' && isLast && !message.imageGenerating
         ? (
           <div className="flex items-center gap-1.5 py-1">
@@ -706,38 +708,33 @@ const MessageRow = memo(function MessageRow({
         </div>
       )}
       {message.role === 'user' && message.content && (
-        <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/20 pb-0.5 pt-1.5">
-          <div className="font-mono text-[9.5px] leading-none text-white/60">
-            ~{(message.tokenEstimate || 0).toLocaleString()} tok
-          </div>
+        <div className="mt-1.5 flex items-center justify-between border-t border-white/20 pt-1">
+          <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-white/50">
+            You · ~{(message.tokenEstimate || 0).toLocaleString()} tok
+          </span>
           <button
             type="button"
             onClick={() => navigator.clipboard.writeText(message.content || '').catch(() => {})}
             title="Copy message"
-            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-white/70 transition hover:bg-white/10 hover:text-white"
+            className="rounded p-1 text-white/60 transition hover:bg-white/10 hover:text-white"
           >
             <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="9" y="9" width="13" height="13" rx="2" />
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
-            Copy
           </button>
         </div>
       )}
       {message.role === 'assistant' && !message.imageGenerating && (
-        <div className={`sticky bottom-0 mt-2 flex items-center justify-between gap-2 rounded-b-2xl border-t border-black/[0.06] pb-0.5 pt-1.5 dark:border-white/[0.07] ${
+        <div className={`sticky bottom-0 mt-1.5 flex items-center justify-between rounded-b-2xl border-t border-black/[0.06] pt-1 dark:border-white/[0.07] ${
           speakingMessageId === message.id
             ? 'bg-accentSoft/90 dark:bg-slate-800/90'
             : 'bg-white/95 dark:bg-slate-800/95'
         }`}>
-          {/* Token info — left side */}
-          <div className="font-mono text-[9.5px] leading-none text-slate-400 dark:text-slate-500">
-            {!message.imageUrl && (
-              <span>~{(message.tokenEstimate || 0).toLocaleString()} tok</span>
-            )}
-          </div>
-          {/* Actions — right side */}
-          <div className="flex items-center gap-0.5">
+          <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            {!message.imageUrl ? `AI · ~${(message.tokenEstimate || 0).toLocaleString()} tok` : 'AI'}
+          </span>
+          <div className="flex items-center">
             <button
               type="button"
               onClick={() => {
@@ -746,9 +743,9 @@ const MessageRow = memo(function MessageRow({
               }}
               disabled={(voiceEngine === 'browser' && !voiceSupported) || !String(message.content || '').trim()}
               title={speakingMessageId === message.id && isSpeaking ? 'Stop speaking' : 'Speak response'}
-              className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium transition disabled:opacity-40 ${
+              className={`rounded p-1 transition disabled:opacity-40 ${
                 speakingMessageId === message.id && isSpeaking
-                  ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                  ? 'text-accent'
                   : 'text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200'
               }`}
             >
@@ -759,14 +756,13 @@ const MessageRow = memo(function MessageRow({
                 <path d="M16 9v6" />
                 <path d="M20 11v2" />
               </svg>
-              {speakingMessageId === message.id && isSpeaking ? 'Stop' : 'Speak'}
             </button>
             {isLastAssistant && (
               <button
                 onClick={regenerate}
                 disabled={isStreaming}
                 title="Regenerate response"
-                className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium text-slate-400 transition hover:bg-black/5 hover:text-slate-700 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+                className="rounded p-1 text-slate-400 transition hover:bg-black/5 hover:text-slate-700 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
               >
                 <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M4 4a8 8 0 0 1 12 0" />
@@ -774,7 +770,6 @@ const MessageRow = memo(function MessageRow({
                   <polyline points="13 1 16 4 13 7" />
                   <polyline points="7 19 4 16 7 13" />
                 </svg>
-                Regenerate
               </button>
             )}
             <CopyMessageButton text={message.content || ''} />
