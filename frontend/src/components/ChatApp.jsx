@@ -2034,10 +2034,17 @@ export default function ChatApp() {
     // DELETE and immediately re-adds the last chat (intermittent "comes back" bug)
     stopStreaming();
     chatListEpochRef.current++; // invalidate any in-flight refreshChats() calls
-    await api('/api/chats', { method: 'DELETE' });
+    // Clear UI immediately — don't wait for the network roundtrip
     setActiveChatId(null);
     setMessages([]);
-    await refreshChats();
+    setChats([]);
+    setChatSearch('');
+    // Then flush to backend (fire and forget error — UI is already clear)
+    try {
+      await api('/api/chats', { method: 'DELETE' });
+    } catch {
+      // ignore — UI is already empty
+    }
   }
 
   async function deleteLastChat() {
