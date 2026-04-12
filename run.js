@@ -27,7 +27,7 @@ const managed = {
 };
 
 function usage() {
-  process.stdout.write(`Usage: ./run.sh [provider|command] [--log]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  ./run.sh\n  ./run.sh ollama\n  ./run.sh openai-compatible --log\n  ./run.sh doctor\n  ./run.sh restart koboldcpp --log\n  ./run.sh stop\n\n`);
+  process.stdout.write(`Usage: ./run.sh [provider|command] [args] [--log]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  install            - Delegate to install.sh (pre-cutover compatibility path)\n  uninstall          - Delegate to uninstall.sh (pre-cutover compatibility path)\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  ./run.sh\n  ./run.sh ollama\n  ./run.sh openai-compatible --log\n  ./run.sh doctor\n  ./run.sh restart koboldcpp --log\n  ./run.sh install\n  ./run.sh uninstall\n  ./run.sh stop\n\n`);
 }
 
 function parseArgs(argv) {
@@ -42,7 +42,8 @@ function parseArgs(argv) {
   }
   const mode = filtered[0] || 'ui';
   const arg = filtered[1] || '';
-  return { mode, arg, logEnabled };
+  const extraArgs = filtered.slice(1);
+  return { mode, arg, extraArgs, logEnabled };
 }
 
 function normalizeProvider(raw) {
@@ -345,6 +346,24 @@ function runForeground(command, args, cwd) {
   });
 }
 
+async function runScriptCommand(scriptName, args = []) {
+  const scriptPath = path.join(ROOT_DIR, scriptName);
+  if (!fs.existsSync(scriptPath)) {
+    throw new Error(`${scriptName} not found at ${scriptPath}`);
+  }
+
+  const shell = process.platform === 'win32' ? 'bash' : 'bash';
+  if (!(await commandExists(shell))) {
+    throw new Error(`Cannot execute ${scriptName}: '${shell}' not found in PATH.`);
+  }
+
+  process.stdout.write(`Delegating to ${scriptName}...\n`);
+  const code = await runForeground(shell, [scriptPath, ...args], ROOT_DIR);
+  if (code !== 0) {
+    throw new Error(`${scriptName} exited with code ${code}`);
+  }
+}
+
 async function stopAll() {
   process.stdout.write('Stopping Mirabilis and provider processes...\n');
   let stoppedAny = false;
@@ -426,7 +445,7 @@ function cleanup() {
 }
 
 async function main() {
-  const { mode, arg, logEnabled } = parseArgs(process.argv.slice(2));
+  const { mode, arg, extraArgs, logEnabled } = parseArgs(process.argv.slice(2));
   process.env.MIRABILIS_LOG = logEnabled ? '1' : '0';
 
   if (mode === '-h' || mode === '--help') {
@@ -439,6 +458,16 @@ async function main() {
     return;
   }
 
+  if (mode === 'install') {
+    await runScriptCommand('install.sh', extraArgs);
+    return;
+  }
+
+  if (mode === 'uninstall') {
+    await runScriptCommand('uninstall.sh', extraArgs);
+    return;
+  }
+
   if (mode === 'stop') {
     await stopAll();
     return;
@@ -448,7 +477,7 @@ async function main() {
   const providerCandidate = isRestart ? (arg || 'ui') : mode;
   const provider = normalizeProvider(providerCandidate);
   if (!provider) {
-    process.stderr.write('Unknown mode/provider. Use one of: ui, ollama, openai-compatible, koboldcpp, stop, restart, doctor\n');
+    process.stderr.write('Unknown mode/provider. Use one of: ui, ollama, openai-compatible, koboldcpp, stop, restart, doctor, install, uninstall\n');
     usage();
     process.exit(1);
   }

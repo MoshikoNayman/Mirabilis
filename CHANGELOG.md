@@ -2,6 +2,17 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S13] — 2026-04-12
+
+### JS Command Surface Expansion (Pre-Cutover)
+
+- Added `install` and `uninstall` subcommands to `run.js`.
+- These commands delegate to existing `install.sh` / `uninstall.sh` scripts to keep pre-cutover compatibility and rollback safety.
+- Updated launcher help and unknown-mode guidance to include lifecycle commands.
+- No cutover performed: shell scripts remain canonical compatibility entrypoints.
+
+---
+
 ## [26.3R1-S12] — 2026-04-12
 
 ### Pre-Cutover Governance (Docs)
