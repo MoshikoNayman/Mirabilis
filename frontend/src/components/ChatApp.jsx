@@ -824,7 +824,7 @@ export default function ChatApp() {
   const [colorScheme, setColorScheme] = useState(() => {
     if (typeof window !== 'undefined') {
       const v = window.localStorage.getItem('mirabilis-color-scheme') || 'mirabilis';
-      return ['mirabilis','arctic','ember','summit'].includes(v) ? v : 'mirabilis';
+      return ['mirabilis','ember','summit'].includes(v) ? v : 'mirabilis';
     }
     return 'mirabilis';
   });
@@ -3291,7 +3291,6 @@ export default function ChatApp() {
               <div className="grid grid-cols-4 gap-0.5 rounded-full border border-black/10 bg-white/80 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-white/15 dark:bg-slate-900/85">
                 {[
                   { id: 'mirabilis', label: 'Mirabilis' },
-                  { id: 'arctic',    label: 'Arctic' },
                   { id: 'ember',     label: 'Ember' },
                   { id: 'summit',    label: 'Summit' },
                 ].map(({ id, label }) => (
