@@ -3288,7 +3288,7 @@ export default function ChatApp() {
 
             <div className="space-y-1">
               <div className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-300">Palette</div>
-              <div className="grid grid-cols-4 gap-0.5 rounded-full border border-black/10 bg-white/80 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-white/15 dark:bg-slate-900/85">
+              <div className="grid grid-cols-3 gap-0.5 rounded-full border border-black/10 bg-white/80 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-white/15 dark:bg-slate-900/85">
                 {[
                   { id: 'mirabilis', label: 'Mirabilis' },
                   { id: 'ember',     label: 'Ember' },
