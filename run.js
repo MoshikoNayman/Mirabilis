@@ -6,6 +6,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { Readable } = require('node:stream');
 
 const ROOT_DIR = __dirname;
 const BACKEND_DIR = path.join(ROOT_DIR, 'backend');
@@ -61,13 +62,17 @@ async function sleep(ms) {
 }
 
 function commandExists(cmd) {
-  const checker = process.platform === 'win32' ? 'where' : 'command';
-  const args = process.platform === 'win32' ? [cmd] : ['-v', cmd];
+  const checker = process.platform === 'win32' ? 'where' : 'sh';
+  const args = process.platform === 'win32' ? [cmd] : ['-c', `command -v ${cmd}`];
   return new Promise((resolve) => {
-    const child = spawn(checker, args, { stdio: 'ignore', shell: process.platform !== 'win32' });
+    const child = spawn(checker, args, { stdio: 'ignore' });
     child.on('close', (code) => resolve(code === 0));
     child.on('error', () => resolve(false));
   });
+}
+
+function npmCommand() {
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
 }
 
 async function endpointReady(url) {
@@ -146,15 +151,14 @@ async function ensureLlamaModel(modelPath) {
   if (needsDownload) {
     process.stdout.write('Downloading llama model (one-time)...\n');
     const url = 'https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf';
-    const res = await fetch(url, { signal: AbortSignal.timeout(120000) });
+    const res = await fetch(url);
     if (!res.ok || !res.body) {
       throw new Error('Failed to download llama model.');
     }
     const tempPath = `${modelPath}.tmp`;
     const out = fs.createWriteStream(tempPath);
     await new Promise((resolve, reject) => {
-      res.body.pipe(out);
-      res.body.on('error', reject);
+      Readable.fromWeb(res.body).pipe(out);
       out.on('finish', resolve);
       out.on('error', reject);
     });
@@ -177,7 +181,12 @@ async function startOpenAICompatible(threads) {
     return false;
   }
 
-  await ensureLlamaModel(MODEL_PATH);
+  try {
+    await ensureLlamaModel(MODEL_PATH);
+  } catch (error) {
+    process.stderr.write(`${error.message || 'Failed to prepare llama model.'}\n`);
+    return false;
+  }
   process.stdout.write(`Starting llama-server (OpenAI-compatible, threads=${threads})...\n`);
 
   const out = fs.openSync(path.join(os.tmpdir(), 'llama.log'), 'a');
@@ -206,7 +215,12 @@ async function startKoboldCpp(threads) {
     return false;
   }
 
-  await ensureLlamaModel(MODEL_PATH);
+  try {
+    await ensureLlamaModel(MODEL_PATH);
+  } catch (error) {
+    process.stderr.write(`${error.message || 'Failed to prepare llama model.'}\n`);
+    return false;
+  }
   process.stdout.write(`Starting KoboldCpp (threads=${threads})...\n`);
 
   const out = fs.openSync(path.join(os.tmpdir(), 'koboldcpp.log'), 'a');
@@ -368,11 +382,11 @@ async function main() {
   env.AI_PROVIDER = aiProvider;
 
   process.stdout.write('\nStarting services...\n');
-  managed.backend = spawnLogged('npm', ['run', 'dev'], BACKEND_DIR, env, path.join(os.tmpdir(), 'backend.log'), logEnabled);
+  managed.backend = spawnLogged(npmCommand(), ['run', 'dev'], BACKEND_DIR, env, path.join(os.tmpdir(), 'backend.log'), logEnabled);
   await sleep(2000);
   process.stdout.write('  Backend: http://127.0.0.1:4000\n');
 
-  managed.frontend = spawnLogged('npm', ['run', 'dev'], FRONTEND_DIR, { ...process.env, PORT: '3000' }, path.join(os.tmpdir(), 'frontend.log'), false);
+  managed.frontend = spawnLogged(npmCommand(), ['run', 'dev'], FRONTEND_DIR, { ...process.env, PORT: '3000' }, path.join(os.tmpdir(), 'frontend.log'), false);
   await sleep(3000);
   process.stdout.write('  Frontend: http://127.0.0.1:3000\n');
 

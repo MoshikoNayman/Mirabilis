@@ -2,6 +2,18 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S7] — 2026-04-12
+
+### Launcher Bug Fixes
+
+- Fixed `run.js` model download path: converted Fetch WebStream to Node stream (`Readable.fromWeb`) before writing to file.
+- Removed hard 120-second fetch timeout for GGUF download to avoid false failures on slower links.
+- Fixed provider fallback reliability: model preparation failures now return cleanly so `openai-compatible` and `koboldcpp` can fall back to Ollama instead of crashing launcher startup.
+- Improved command detection on Unix by using `sh -c "command -v ..."` for more reliable executable checks.
+- Added cross-platform npm invocation helper (`npm` vs `npm.cmd`) to avoid Windows spawn issues.
+
+---
+
 ## [26.3R1-S6] — 2026-04-12
 
 ### Launcher Architecture
