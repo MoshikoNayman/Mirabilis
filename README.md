@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-Version: 26.3R1-S11
+Version: 26.3R1-S12
 Owner and Builder: Moshiko Nayman
 
 Mirabilis AI is a local-first assistant app with a Next.js frontend, Express backend, and optional local inference engines.
@@ -18,6 +18,42 @@ Open: http://localhost:3000
 
 `run.js` is the launcher source of truth.
 `run.sh` is kept as safe-mode fallback wrapper and delegates to `run.js`.
+
+## JS Launcher Pre-Cutover Requirements
+
+Pre-cutover means `run.sh` remains the default user entrypoint and `run.js` must prove parity first.
+
+### Required parity checks
+
+- Functional parity: `ui`, `ollama`, `openai-compatible`, `koboldcpp`, `stop`, `restart`, `doctor`, and `--log` all behave as expected.
+- Startup reliability: backend/frontend/image-service readiness checks pass and startup fails fast with actionable errors.
+- Stop reliability: PID-state stop works; fallback pattern stop works when PID state is missing.
+- Install reliability: model install, progress, cancel, retry, and refresh-survival all work from GUI.
+- Recovery paths: provider unavailable/fallback scenarios still recover to usable state.
+
+### Suggested pre-cutover verification command set
+
+```bash
+./run.sh doctor
+./run.sh restart --log
+curl -sS http://127.0.0.1:4000/health
+curl -sS http://127.0.0.1:4000/api/models
+curl -sS http://127.0.0.1:4000/api/models/install-jobs
+```
+
+## Cutover Rollback Plan (When You Decide To Cut Over)
+
+Do this right before cutover so rollback is one command.
+
+1. Create a dedicated GitHub fork for cutover safety.
+2. Tag pre-cutover state in both repos, for example:
+  - `pre-js-cutover-26.3R1-S12`
+3. Create branch for cutover work, for example:
+  - `cutover/js-launcher-primary`
+4. Keep `run.sh` wrapper in place for at least one release after cutover.
+5. If rollback is needed:
+  - Reset deployment branch to pre-cutover tag
+  - Re-release immediately from that tag
 
 ## Features
 

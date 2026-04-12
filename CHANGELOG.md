@@ -2,6 +2,17 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S12] — 2026-04-12
+
+### Pre-Cutover Governance (Docs)
+
+- Added explicit JS launcher pre-cutover requirements to README (functional parity, reliability, install/cancel/retry, fallback behavior).
+- Added a concise pre-cutover verification command set.
+- Added cutover rollback playbook with fork/tag/branch strategy and wrapper retention guidance.
+- No runtime code changes in this revision.
+
+---
+
 ## [26.3R1-S11] — 2026-04-12
 
 ### Model Install Job System
