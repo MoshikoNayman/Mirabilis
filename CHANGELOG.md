@@ -2,6 +2,17 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S6] — 2026-04-12
+
+### Launcher Architecture
+
+- Added `run.js` as a new Node.js launcher with the same modes as `run.sh` (`ui`, `ollama`, `openai-compatible`, `koboldcpp`, `stop`, `--log`).
+- Kept `run.sh` as safe fallback mode: it now delegates to `run.js` and preserves existing command habits.
+- Added cross-platform launcher behavior in `run.js` for process orchestration, logs, provider startup, and stop flow.
+- Kept existing UX intact (`./run.sh` still works) while enabling direct testing via `node run.js`.
+
+---
+
 ## [26.3R1-S5] — 2026-04-12
 
 ### System Control Tools (MCP)
