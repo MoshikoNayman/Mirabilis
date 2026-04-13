@@ -17,6 +17,7 @@ const MODEL_PATH = path.join(os.tmpdir(), 'mirabilis-llama-3.2-1b-instruct-q4_k_
 const RUN_STATE_PATH = path.join(os.tmpdir(), 'mirabilis-run-state.json');
 const LAUNCH_STARTED_AT = Date.now();
 const phaseTimings = [];
+const MIRABILIS_MANAGED_OLLAMA_MODELS = ['qwen2.5:0.5b'];
 
 let ollamaStartedByScript = false;
 const managed = {
@@ -432,6 +433,36 @@ function runForeground(command, args, cwd) {
   });
 }
 
+function runCaptured(command, args, cwd) {
+  return new Promise((resolve) => {
+    let stdout = '';
+    let stderr = '';
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('close', (code) => resolve({ code: code || 0, stdout, stderr }));
+    child.on('error', () => resolve({ code: 1, stdout, stderr }));
+  });
+}
+
+async function getInstalledOllamaModels() {
+  const { code, stdout } = await runCaptured('ollama', ['list'], ROOT_DIR);
+  if (code !== 0) return new Set();
+
+  const models = new Set();
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('NAME')) continue;
+    const [name] = trimmed.split(/\s{2,}/);
+    if (name) models.add(name);
+  }
+  return models;
+}
+
 async function installOllama() {
   statusLine('INFO', 'Ollama not found — attempting auto-install...');
   if (process.platform === 'darwin') {
@@ -831,9 +862,12 @@ async function runUninstall() {
         // Remove Ollama models
         if (await commandExists('ollama')) {
           statusLine('INFO', 'Removing Ollama models...');
-          for (const model of ['llama3', 'mistral']) {
-            const code = await runForeground('ollama', ['list'], ROOT_DIR);
-            // Best effort; don't fail if models don't exist
+          const installedModels = await getInstalledOllamaModels();
+          const removableModels = MIRABILIS_MANAGED_OLLAMA_MODELS.filter((model) => installedModels.has(model));
+          if (removableModels.length === 0) {
+            statusLine('INFO', 'No Mirabilis-managed Ollama models found.');
+          }
+          for (const model of removableModels) {
             const rmCode = await runForeground('ollama', ['rm', model], ROOT_DIR);
             if (rmCode === 0) {
               statusLine('OK', `Removed Ollama model: ${model}`);
@@ -846,9 +880,12 @@ async function runUninstall() {
         [
           path.join(BACKEND_DIR, 'node_modules'),
           path.join(FRONTEND_DIR, 'node_modules'),
+          path.join(IMAGE_SERVICE_DIR, '.venv'),
           path.join(BACKEND_DIR, 'data', 'chats.json'),
           path.join(BACKEND_DIR, '.env'),
-          path.join(FRONTEND_DIR, '.env.local')
+          path.join(FRONTEND_DIR, '.env.local'),
+          MODEL_PATH,
+          RUN_STATE_PATH
         ].forEach(dir => {
           if (fs.existsSync(dir)) {
             if (fs.lstatSync(dir).isDirectory()) {
