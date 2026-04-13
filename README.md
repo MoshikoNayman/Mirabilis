@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-Version: 26.3R1-S16
+Version: 26.3R1-S17
 Owner and Builder: Moshiko Nayman
 
 Mirabilis AI is a local-first assistant app with a Next.js frontend, Express backend, and optional local inference engines.

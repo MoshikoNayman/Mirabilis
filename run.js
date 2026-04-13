@@ -253,13 +253,13 @@ async function waitForEndpoint(url, timeoutMs, label, processObj, logFile) {
 function ensureDeps() {
   const missingNode = !fs.existsSync(path.join(BACKEND_DIR, 'node_modules')) || !fs.existsSync(path.join(FRONTEND_DIR, 'node_modules'));
   if (missingNode) {
-    throw new Error('Dependencies not installed. Run: ./install.sh');
+    throw new Error('Dependencies not installed. Run: node run.js install');
   }
 
   const venvUnix = path.join(IMAGE_SERVICE_DIR, '.venv', 'bin', 'python');
   const venvWin = path.join(IMAGE_SERVICE_DIR, '.venv', 'Scripts', 'python.exe');
   if (!fs.existsSync(venvUnix) && !fs.existsSync(venvWin)) {
-    throw new Error('Python environment not set up. Run: ./install.sh');
+    throw new Error('Python environment not set up. Run: node run.js install');
   }
 }
 
@@ -343,7 +343,7 @@ async function ensureLlamaModel(modelPath) {
 async function startOpenAICompatible(threads) {
   const llamaBin = path.join(PROVIDERS_DIR, process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
   if (!fs.existsSync(llamaBin)) {
-    process.stderr.write('llama-server not found. Run: ./install.sh\n');
+    process.stderr.write('llama-server not found. Run: node run.js install\n');
     return false;
   }
 
@@ -377,7 +377,7 @@ async function startOpenAICompatible(threads) {
 async function startKoboldCpp(threads) {
   const koboldBin = path.join(PROVIDERS_DIR, process.platform === 'win32' ? 'koboldcpp.exe' : 'koboldcpp');
   if (!fs.existsSync(koboldBin)) {
-    process.stderr.write('koboldcpp not found. Run: ./install.sh\n');
+    process.stderr.write('koboldcpp not found. Run: node run.js install\n');
     return false;
   }
 
@@ -428,22 +428,207 @@ function runForeground(command, args, cwd) {
   });
 }
 
-async function runScriptCommand(scriptName, args = []) {
-  const scriptPath = path.join(ROOT_DIR, scriptName);
-  if (!fs.existsSync(scriptPath)) {
-    throw new Error(`${scriptName} not found at ${scriptPath}`);
+async function runInstall() {
+  statusLine('INFO', 'Installing Mirabilis dependencies...');
+
+  // Check Node.js
+  if (!(await commandExists('node'))) {
+    throw new Error('Node.js not found. Install from https://nodejs.org');
+  }
+  statusLine('OK', `Node.js: ${require('child_process').execSync('node -v', { encoding: 'utf8' }).trim()}`);
+
+  // Check Ollama
+  if (!(await commandExists('ollama'))) {
+    throw new Error(`Ollama is required but not installed.\n${process.platform === 'darwin' ? '  Install with: brew install ollama' : '  Install from: https://ollama.com/download'}\nThen start Ollama and rerun: node run.js install`);
+  }
+  statusLine('OK', 'Ollama: installed');
+
+  // Install backend
+  statusLine('INFO', 'Installing backend dependencies...');
+  const backendCode = await runForeground(npmCommand(), ['install', '--legacy-peer-deps'], BACKEND_DIR);
+  if (backendCode !== 0) {
+    throw new Error('Backend npm install failed');
   }
 
-  const shell = process.platform === 'win32' ? 'bash' : 'bash';
-  if (!(await commandExists(shell))) {
-    throw new Error(`Cannot execute ${scriptName}: '${shell}' not found in PATH.`);
+  // Install frontend
+  statusLine('INFO', 'Installing frontend dependencies...');
+  const frontendCode = await runForeground(npmCommand(), ['install', '--legacy-peer-deps'], FRONTEND_DIR);
+  if (frontendCode !== 0) {
+    throw new Error('Frontend npm install failed');
   }
 
-  process.stdout.write(`Delegating to ${scriptName}...\n`);
-  const code = await runForeground(shell, [scriptPath, ...args], ROOT_DIR);
-  if (code !== 0) {
-    throw new Error(`${scriptName} exited with code ${code}`);
+  // Setup Python venv
+  statusLine('INFO', 'Setting up Python environment...');
+  const venvPath = path.join(IMAGE_SERVICE_DIR, '.venv');
+  if (!fs.existsSync(venvPath)) {
+    const venvCode = await runForeground('python3', ['-m', 'venv', venvPath], IMAGE_SERVICE_DIR);
+    if (venvCode !== 0) {
+      throw new Error('Python venv creation failed');
+    }
   }
+
+  const pythonExe = imagePythonPath();
+  const pipCode = await runForeground(pythonExe, ['-m', 'pip', 'install', '-q', '--upgrade', 'pip'], IMAGE_SERVICE_DIR);
+  if (pipCode !== 0) {
+    throw new Error('pip upgrade failed');
+  }
+
+  const reqsCode = await runForeground(pythonExe, ['-m', 'pip', 'install', '-q', '-r', 'requirements.txt'], IMAGE_SERVICE_DIR);
+  if (reqsCode !== 0) {
+    throw new Error('Python requirements install failed');
+  }
+
+  // Provider binaries (macOS only for auto-install)
+  if (process.platform === 'darwin') {
+    statusLine('INFO', 'Installing provider runtimes (macOS detected)...');
+    const arch = process.arch;
+
+    // llama-server
+    if (!fs.existsSync(path.join(PROVIDERS_DIR, 'llama-server'))) {
+      statusLine('INFO', 'Installing llama-server...');
+      const llamaUrl = arch === 'arm64'
+        ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-arm64.zip'
+        : 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-x64.zip';
+      
+      const zipPath = path.join(PROVIDERS_DIR, 'llama.zip');
+      const res = await fetch(llamaUrl);
+      if (!res.ok) throw new Error('Failed to download llama-server');
+      const buf = await res.arrayBuffer();
+      await fsp.writeFile(zipPath, Buffer.from(buf));
+
+      const { execSync } = require('child_process');
+      try {
+        execSync(`cd "${PROVIDERS_DIR}" && unzip -qo llama.zip`, { stdio: 'inherit' });
+      } catch {
+        throw new Error('llama-server extraction failed');
+      }
+
+      if (fs.existsSync(path.join(PROVIDERS_DIR, 'build', 'bin', 'llama-server'))) {
+        fs.renameSync(path.join(PROVIDERS_DIR, 'build', 'bin', 'llama-server'), path.join(PROVIDERS_DIR, 'llama-server'));
+      }
+      if (fs.existsSync(path.join(PROVIDERS_DIR, 'build', 'bin', 'llama-cli'))) {
+        fs.renameSync(path.join(PROVIDERS_DIR, 'build', 'bin', 'llama-cli'), path.join(PROVIDERS_DIR, 'llama-cli'));
+      }
+      execSync(`rm -rf "${path.join(PROVIDERS_DIR, 'build')}" "${zipPath}"`, { stdio: 'ignore' });
+      fs.chmodSync(path.join(PROVIDERS_DIR, 'llama-server'), 0o755);
+      statusLine('OK', 'llama-server installed');
+    } else {
+      statusLine('OK', 'llama-server already exists');
+    }
+
+    // koboldcpp
+    if (!fs.existsSync(path.join(PROVIDERS_DIR, 'koboldcpp'))) {
+      if (arch === 'arm64') {
+        statusLine('INFO', 'Installing KoboldCpp...');
+        const releaseUrl = 'https://api.github.com/repos/LostRuins/koboldcpp/releases/latest';
+        const releaseRes = await fetch(releaseUrl);
+        const release = await releaseRes.json();
+        const asset = release.assets?.find(a => a.name === 'koboldcpp-mac-arm64');
+        if (!asset) throw new Error('KoboldCpp release asset not found');
+
+        const koboldRes = await fetch(asset.browser_download_url);
+        if (!koboldRes.ok) throw new Error('Failed to download KoboldCpp');
+        const koboldBuf = await koboldRes.arrayBuffer();
+        await fsp.writeFile(path.join(PROVIDERS_DIR, 'koboldcpp'), Buffer.from(koboldBuf));
+        fs.chmodSync(path.join(PROVIDERS_DIR, 'koboldcpp'), 0o755);
+        statusLine('OK', 'koboldcpp installed');
+      } else {
+        statusLine('WARN', 'KoboldCpp auto-install only supports macOS arm64');
+      }
+    } else {
+      statusLine('OK', 'koboldcpp already exists');
+    }
+  } else {
+    statusLine('WARN', 'Non-macOS detected. Provider runtime auto-install skipped.');
+  }
+
+  // Validation
+  statusLine('INFO', 'Validating installation...');
+  let validationFailed = false;
+
+  if (!fs.existsSync(path.join(BACKEND_DIR, 'node_modules'))) {
+    statusLine('FAIL', 'Backend node_modules missing');
+    validationFailed = true;
+  }
+
+  if (!fs.existsSync(path.join(FRONTEND_DIR, 'node_modules'))) {
+    statusLine('FAIL', 'Frontend node_modules missing');
+    validationFailed = true;
+  }
+
+  if (!fs.existsSync(imagePythonPath())) {
+    statusLine('FAIL', 'Python venv not set up');
+    validationFailed = true;
+  }
+
+  if (validationFailed) {
+    throw new Error('Installation failed validation');
+  }
+
+  statusLine('OK', 'Installation complete!');
+  statusLine('INFO', 'Next: node run.js [ui|ollama|openai-compatible|koboldcpp]');
+}
+
+async function runUninstall() {
+  // Prompt for confirmation
+  process.stdout.write('\n');
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve) => {
+    rl.question('Remove Mirabilis files and caches? (yes/no): ', async (answer) => {
+      rl.close();
+
+      if (answer !== 'yes') {
+        process.stdout.write('Cancelled.\n');
+        resolve();
+        return;
+      }
+
+      try {
+        // Remove Ollama models
+        if (await commandExists('ollama')) {
+          statusLine('INFO', 'Removing Ollama models...');
+          for (const model of ['llama3', 'mistral']) {
+            const code = await runForeground('ollama', ['list'], ROOT_DIR);
+            // Best effort; don't fail if models don't exist
+            const rmCode = await runForeground('ollama', ['rm', model], ROOT_DIR);
+            if (rmCode === 0) {
+              statusLine('OK', `Removed Ollama model: ${model}`);
+            }
+          }
+        }
+
+        // Remove dependencies
+        statusLine('INFO', 'Removing dependencies...');
+        [
+          path.join(BACKEND_DIR, 'node_modules'),
+          path.join(FRONTEND_DIR, 'node_modules'),
+          path.join(BACKEND_DIR, 'data', 'chats.json'),
+          path.join(BACKEND_DIR, '.env'),
+          path.join(FRONTEND_DIR, '.env.local')
+        ].forEach(dir => {
+          if (fs.existsSync(dir)) {
+            if (fs.lstatSync(dir).isDirectory()) {
+              fs.rmSync(dir, { recursive: true, force: true });
+              statusLine('OK', `Removed ${dir}`);
+            } else {
+              fs.unlinkSync(dir);
+              statusLine('OK', `Removed ${dir}`);
+            }
+          }
+        });
+
+        statusLine('INFO', 'Uninstall complete.');
+      } catch (error) {
+        statusLine('FAIL', error.message);
+        process.exit(1);
+      }
+    });
+  });
 }
 
 async function stopAll() {
@@ -542,12 +727,12 @@ async function main() {
   }
 
   if (mode === 'install') {
-    await runScriptCommand('install.sh', extraArgs);
+    await withPhase('Install', runInstall);
     return;
   }
 
   if (mode === 'uninstall') {
-    await runScriptCommand('uninstall.sh', extraArgs);
+    await runUninstall();
     return;
   }
 
@@ -596,7 +781,7 @@ async function main() {
   await withPhase('Providers', async () => {
     if (provider === 'ui') {
       statusLine('INFO', 'Starting Mirabilis with provider selection in UI');
-      if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run ./install.sh.');
+      if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run node run.js.');
       if (!(await ensureOllamaModel())) throw new Error('Could not ensure an Ollama model is available.');
 
       let openaiReady = false;
@@ -623,7 +808,7 @@ async function main() {
       statusLine('INFO', `Provider status: ollama=ready openai-compatible=${openaiReady ? 'ready' : 'unavailable'} koboldcpp=${koboldReady ? 'ready' : 'unavailable'}`);
     } else if (provider === 'ollama') {
       statusLine('INFO', 'Using Ollama provider');
-      if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run ./install.sh.');
+      if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run node run.js.');
       if (!(await ensureOllamaModel())) throw new Error('Could not ensure an Ollama model is available.');
       aiProvider = 'ollama';
     } else if (provider === 'openai-compatible') {
@@ -634,7 +819,7 @@ async function main() {
       } else {
         statusLine('WARN', 'OpenAI-compatible failed; falling back to Ollama');
         aiProvider = 'ollama';
-        if (!(await ensureOllamaReady())) throw new Error('Ollama is also unavailable. Start Ollama or run ./install.sh.');
+        if (!(await ensureOllamaReady())) throw new Error('Ollama is also unavailable. Start Ollama or run node run.js.');
         await ensureOllamaModel();
       }
     } else if (provider === 'koboldcpp') {
@@ -645,7 +830,7 @@ async function main() {
       } else {
         statusLine('WARN', 'KoboldCpp failed; falling back to Ollama');
         aiProvider = 'ollama';
-        if (!(await ensureOllamaReady())) throw new Error('Ollama is also unavailable. Start Ollama or run ./install.sh.');
+        if (!(await ensureOllamaReady())) throw new Error('Ollama is also unavailable. Start Ollama or run node run.js.');
         await ensureOllamaModel();
       }
     }

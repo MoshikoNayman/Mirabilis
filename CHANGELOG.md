@@ -2,6 +2,23 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S17] — 2026-04-12
+
+### JS Launcher Full Autonomy (Install/Uninstall Migrated)
+
+- **Migrated install logic into run.js**: `node run.js install` now runs pure JavaScript instead of delegating to `install.sh`.
+  - Validates Node.js and Ollama prerequisites
+  - Installs backend/frontend npm dependencies with error handling
+  - Sets up Python venv for image service
+  - Downloads llama-server and koboldcpp binaries (macOS only)
+  - Final validation to confirm all deps actually installed
+- **Migrated uninstall logic into run.js**: `node run.js uninstall` is now pure JavaScript, removing node_modules, venv, chat data, and optional Ollama models.
+- **Removed shell script dependency**: Shell wrappers (`install.sh` / `uninstall.sh`) are no longer required. `run.js` is completely self-contained.
+- **Updated error messages**: All references to `./install.sh` changed to `node run.js install`.
+- **Significance**: Achieves full JavaScript autonomy pre-cutover. No shell scripts needed for any operation.
+
+---
+
 ## [26.3R1-S16] — 2026-04-12
 
 ### Backend Error Visibility & Installer Hardening
@@ -14,6 +31,7 @@ Versioning follows Junos-style tags.
 ---
 
 ## [26.3R1-S15] — 2026-04-12
+
 
 ### Installer Prerequisite Guard
 
