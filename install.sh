@@ -16,6 +16,20 @@ if ! command -v node &> /dev/null; then
 fi
 echo "✅ Node.js: $(node -v)"
 
+# Check for Ollama (required for default UI flow)
+if ! command -v ollama &> /dev/null; then
+  echo ""
+  echo "❌ Ollama is required but not installed."
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo "Install with: brew install ollama"
+  else
+    echo "Install from: https://ollama.com/download"
+  fi
+  echo "Then start Ollama and rerun: ./install.sh"
+  exit 1
+fi
+echo "✅ Ollama: $(ollama --version 2>/dev/null || echo installed)"
+
 # Install backend
 echo ""
 echo "📦 Installing backend dependencies..."

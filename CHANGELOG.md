@@ -2,6 +2,16 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S15] — 2026-04-12
+
+### Installer Prerequisite Guard
+
+- Added fail-fast Ollama prerequisite check to `install.sh`.
+- Installer now exits with a clear actionable message if Ollama is missing, instead of printing "installation complete" and failing later at `./run.sh ui`.
+- Added platform-specific guidance (`brew install ollama` on macOS, download link otherwise).
+
+---
+
 ## [26.3R1-S14] — 2026-04-12
 
 ### Chat Performance Optimization
