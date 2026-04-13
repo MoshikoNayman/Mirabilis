@@ -219,13 +219,31 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
   return combined;
 }
 
-export function getEffectiveModel({ provider, model, config }) {
-  if (model) {
-    return model;
-  }
+export async function getEffectiveModel({ provider, model, config }) {
+  if (model) return model;
   if (provider === 'openai-compatible') return config.openAIModel;
   if (provider === 'koboldcpp') return config.koboldModel || config.openAIModel;
-  return config.ollamaModel;
+
+  // For ollama: verify configured model is installed; fall back to first installed model
+  const configured = config.ollamaModel;
+  try {
+    const res = await fetch(`${config.ollamaBaseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      const body = await res.json();
+      const installed = (body.models || []).map(m => m.name);
+      if (installed.length > 0) {
+        const match = installed.find(n =>
+          n === configured ||
+          n.split(':')[0] === configured ||
+          n.split(':')[0] === (configured || '').split(':')[0]
+        );
+        return match || installed[0];
+      }
+    }
+  } catch {
+    // Ollama not reachable — return configured and let the stream fail with a clear error
+  }
+  return configured;
 }
 
 export async function listModels(config, provider = config.aiProvider, options = {}) {

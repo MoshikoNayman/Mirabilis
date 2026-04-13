@@ -1879,7 +1879,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   req.on('close', () => abortController.abort());
 
   const effectiveProvider = provider || config.aiProvider;
-  let effectiveModel = getEffectiveModel({ provider: effectiveProvider, model, config });
+  let effectiveModel = await getEffectiveModel({ provider: effectiveProvider, model, config });
   if (chatUncensoredMode && effectiveProvider === 'ollama') {
     try {
       const forcedModel = await pickMostUncensoredOllamaModel(config);
