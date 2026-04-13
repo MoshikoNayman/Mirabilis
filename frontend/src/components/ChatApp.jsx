@@ -827,7 +827,22 @@ const MessageRow = memo(function MessageRow({
       {message.role === 'assistant' && !message.imageGenerating && (
         <div className="mt-1.5 flex items-center justify-between border-t border-black/[0.06] pt-1 dark:border-white/[0.07]">
           <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-slate-400 dark:text-slate-500">
-            {!message.imageUrl ? `AI · ~${(message.tokenEstimate || 0).toLocaleString()} tok` : 'AI'}
+            {!message.imageUrl ? (
+              <>
+                {message.effectiveProvider ? (
+                  <span title={message.effectiveModel || message.effectiveProvider}>
+                    {{
+                      openai: 'OpenAI', grok: 'Grok', groq: 'Groq', openrouter: 'OpenRouter',
+                      gemini: 'Gemini', claude: 'Claude', gpuaas: 'GPUaaS',
+                      'openai-compatible': 'Custom', koboldcpp: 'KoboldCpp', ollama: 'Ollama'
+                    }[message.effectiveProvider] || message.effectiveProvider}
+                    {message.effectiveModel ? ` / ${message.effectiveModel.length > 28 ? message.effectiveModel.slice(0, 28) + '…' : message.effectiveModel}` : ''}
+                    {' · '}
+                  </span>
+                ) : null}
+                ~{(message.tokenEstimate || 0).toLocaleString()} tok
+              </>
+            ) : 'AI'}
           </span>
           <div className="flex items-center">
             <button
@@ -3222,6 +3237,19 @@ export default function ChatApp() {
           }
 
           const payload = JSON.parse(dataText);
+
+          if (event === 'meta' && payload.provider) {
+            setMessages((prev) => {
+              const next = [...prev];
+              if (next.length > 0) {
+                const last = next[next.length - 1];
+                if (last.role === 'assistant') {
+                  next[next.length - 1] = { ...last, effectiveProvider: payload.provider, effectiveModel: payload.model || '' };
+                }
+              }
+              return next;
+            });
+          }
 
           if (event === 'token') {
             refreshStallWatchdog();
