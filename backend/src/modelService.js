@@ -220,12 +220,11 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
 }
 
 export async function getEffectiveModel({ provider, model, config }) {
-  if (model) return model;
   if (provider === 'openai-compatible') return config.openAIModel;
   if (provider === 'koboldcpp') return config.koboldModel || config.openAIModel;
 
-  // For ollama: verify configured model is installed; fall back to first installed model
-  const configured = config.ollamaModel;
+  // For ollama: verify requested/configured model is installed; fall back to first installed model
+  const preferred = model || config.ollamaModel;
   try {
     const res = await fetch(`${config.ollamaBaseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
@@ -233,17 +232,17 @@ export async function getEffectiveModel({ provider, model, config }) {
       const installed = (body.models || []).map(m => m.name);
       if (installed.length > 0) {
         const match = installed.find(n =>
-          n === configured ||
-          n.split(':')[0] === configured ||
-          n.split(':')[0] === (configured || '').split(':')[0]
+          n === preferred ||
+          n.split(':')[0] === preferred ||
+          n.split(':')[0] === (preferred || '').split(':')[0]
         );
         return match || installed[0];
       }
     }
   } catch {
-    // Ollama not reachable — return configured and let the stream fail with a clear error
+    // Ollama not reachable — return preferred and let the stream fail with a clear error
   }
-  return configured;
+  return preferred;
 }
 
 export async function listModels(config, provider = config.aiProvider, options = {}) {
@@ -294,6 +293,7 @@ export async function listModels(config, provider = config.aiProvider, options =
   }
 
   const discoveredModels = await listOllamaModels(config.ollamaBaseUrl);
+  const selectedOllamaModel = await getEffectiveModel({ provider: 'ollama', config });
   const discoveredSet = new Set(discoveredModels.map((m) => m.name));
   const discoveredBaseSet = new Set(discoveredModels.map((m) => normalizeModelId(m.name)));
   // Two param maps: exact full name (e.g. 'gemma3:latest') and base name (e.g. 'gemma3')
@@ -337,7 +337,7 @@ export async function listModels(config, provider = config.aiProvider, options =
     return {
       ...model,
       available: isAvailable,
-      selected: normalizeModelId(model.id) === normalizeModelId(config.ollamaModel),
+      selected: normalizeModelId(model.id) === normalizeModelId(selectedOllamaModel),
       paramSize
     };
   });
@@ -349,7 +349,7 @@ export async function listModels(config, provider = config.aiProvider, options =
       label: name,
       group: 'Installed locally',
       available: true,
-      selected: name === config.ollamaModel,
+      selected: name === selectedOllamaModel,
       paramSize: paramSize || null
     }));
 
