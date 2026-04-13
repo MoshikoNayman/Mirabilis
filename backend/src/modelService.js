@@ -222,15 +222,18 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
 
 export async function getEffectiveModel({ provider, model, config }) {
   if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'gpuaas' || provider === 'openai-compatible') {
-    const preferred = model && model !== 'auto' ? model : config.openAIModel;
+    const isCloudOnly = provider !== 'openai-compatible';
+    let preferred = model && model !== 'auto' ? model : (isCloudOnly ? null : config.openAIModel);
+    // Guard: reject local GGUF filenames being sent to cloud APIs
+    if (isCloudOnly && preferred && preferred.toLowerCase().endsWith('.gguf')) preferred = null;
     if (preferred && preferred !== 'auto') return preferred;
     if (provider === 'openai') return 'gpt-4o-mini';
     if (provider === 'grok') return 'grok-3-mini';
     if (provider === 'groq') return 'llama-3.1-8b-instant';
     if (provider === 'openrouter') return 'openai/gpt-4o-mini';
     if (provider === 'gemini') return 'gemini-2.0-flash';
-    if (provider === 'gpuaas') return 'model.gguf';
-    return 'model.gguf';
+    if (provider === 'gpuaas') return config.openAIModel || 'model';
+    return config.openAIModel || 'model.gguf';
   }
   if (provider === 'claude') {
     const preferred = model && model !== 'auto' ? model : config.openAIModel;
@@ -283,20 +286,41 @@ export async function listModels(config, provider = config.aiProvider, options =
       : provider === 'gpuaas'
       ? ''
       : config.openAIBaseUrl;
+
+    // Cloud-only providers — never mix in local GGUF files; they can't be loaded via a remote API.
+    const isCloudOnly = provider !== 'openai-compatible';
+    // Per-provider sensible fallback model name (used when remote listing fails/unavailable).
+    const providerFallbackModel = provider === 'openai'
+      ? 'gpt-4o-mini'
+      : provider === 'grok'
+      ? 'grok-3-mini'
+      : provider === 'groq'
+      ? 'llama-3.1-8b-instant'
+      : provider === 'openrouter'
+      ? 'openai/gpt-4o-mini'
+      : provider === 'gemini'
+      ? 'gemini-2.0-flash'
+      : provider === 'gpuaas'
+      ? null   // no meaningful default — user must specify
+      : config.openAIModel;
+
     const baseUrl = overrideBaseUrl || defaultBase;
     const apiKey = overrideApiKey !== undefined ? overrideApiKey : config.openAIApiKey;
     const remote = await listOpenAICompatibleModels({ baseUrl, apiKey }).catch(() => []);
-    const locals = await listLocalGgufModels();
+    const locals = isCloudOnly ? [] : await listLocalGgufModels();
     if (remote.length > 0) {
-      const selectedId = config.openAIModel;
+      // For cloud providers, don't try to pre-select using the generic config model name
+      // (which may be a local GGUF path). Let UI auto-select the first available model.
+      const selectedId = isCloudOnly ? '' : config.openAIModel;
       return buildEndpointCatalog({ remoteModels: remote, selectedModelId: selectedId, localModels: locals });
     }
     if (locals.length > 0) {
       return buildEndpointCatalog({ remoteModels: [], selectedModelId: config.openAIModel, localModels: locals });
     }
+    if (!providerFallbackModel) return []; // gpuaas with no config yet — return empty
     return [{
-      id: config.openAIModel,
-      label: prettifyEndpointModelLabel(config.openAIModel),
+      id: providerFallbackModel,
+      label: prettifyEndpointModelLabel(providerFallbackModel),
       group: 'Configured endpoint',
       available: true,
       selected: true,
