@@ -71,7 +71,7 @@ Mirabilis is 100% pure JavaScript for the launcher and all lifecycle operations:
 - **Startup**: `node run.js [provider]` — orchestrates backend, frontend, image-service, and AI providers
 - **Lifecycle**: `stop`, `restart`, `doctor`, `logs`, `uninstall` — all pure JS, no shell scripts
 - **No shell dependencies** — works cross-platform without shell script fallbacks
-- **Autonomous** — fully self-contained; shell wrappers optional for legacy compatibility
+- **Autonomous** — fully self-contained; no shell wrappers required
 
 No shell scripts (`install.sh`, `run.sh`, `uninstall.sh`) are included in this repo. All operations via `node run.js`.
 
@@ -105,26 +105,19 @@ No shell scripts (`install.sh`, `run.sh`, `uninstall.sh`) are included in this r
 Run modes:
 
 ```bash
-./run.sh                          # UI mode (auto-start local providers)
-./run.sh ollama
-./run.sh openai-compatible
-./run.sh koboldcpp
-./run.sh stop
-./run.sh doctor
-./run.sh restart
-./run.sh install                   # Delegates to install.sh (pre-cutover)
-./run.sh uninstall                 # Delegates to uninstall.sh (pre-cutover)
-./run.sh --log                    # Any mode with live backend + MCP logs
-./run.sh ollama --log
-
-# Direct JavaScript launcher (same behavior)
 node run.js
 node run.js ollama
+node run.js openai-compatible
+node run.js koboldcpp
+node run.js stop
 node run.js doctor
+node run.js restart
 node run.js restart openai-compatible --log
+node run.js logs
+node run.js --log                 # Any mode with live backend + MCP logs
+node run.js ollama --log
 node run.js install
 node run.js uninstall
-node run.js stop
 ```
 
 ## CPU / Core Usage
@@ -134,8 +127,8 @@ For `openai-compatible` and `koboldcpp`, Mirabilis uses all logical CPU cores by
 Override thread count:
 
 ```bash
-MIRABILIS_THREADS=8 ./run.sh openai-compatible
-MIRABILIS_THREADS=8 ./run.sh koboldcpp
+MIRABILIS_THREADS=8 node run.js openai-compatible
+MIRABILIS_THREADS=8 node run.js koboldcpp
 ```
 
 ## MCP Server
@@ -168,7 +161,7 @@ Add to `.vscode/mcp.json`:
   "servers": {
     "mirabilis": {
       "url": "http://127.0.0.1:4000/mcp",
-      "description": "Mirabilis local AI — start with ./run.sh first"
+      "description": "Mirabilis local AI — start with node run.js first"
     }
   }
 }
@@ -182,7 +175,7 @@ By default, no logs are written and no console output is produced.
 Pass `--log` to enable live terminal output and audit file (`backend/data/mcp-server-audit.jsonl`):
 
 ```bash
-./run.sh --log
+node run.js --log
 ```
 
 ## MCP Client
@@ -198,9 +191,7 @@ backend/        Express API + provider adapters
 image-service/  Local image generation service
 providers/      Local runtime binaries (llama-server, koboldcpp)
 training/msq/   MSQ model family — Modelfiles and setup script
-install.sh      One-time setup
-run.sh          Unified launcher and stop command
-uninstall.sh    Cleanup script
+run.js          Unified launcher, installer, doctor, logs, and cleanup commands
 ```
 
 ## MSQ Model Family
