@@ -5772,7 +5772,7 @@ export default function ChatApp() {
       <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-slate-700/90 dark:text-slate-300/90">
         Mirabilis AI by Moshiko Nayman
         <span className="mx-1.5 opacity-40">·</span>
-          <span className="opacity-55">v26.3R1-S26</span>
+          <span className="opacity-55">v26.3R1-S25</span>
       </footer>
     </main>
   );

@@ -2,29 +2,21 @@
 
 Versioning follows Junos-style tags.
 
-## [26.3R1-S26] - 2026-04-23
+## [26.3R1-S25] - 2026-04-23
 
-### Provider Binary Management + UI Polish
+### Chat Control, Provider Management + UI Polish
 
-- **In-app provider install**: Local providers (`llama-server`, `KoboldCpp`) are now greyed out in the provider dropdown when their binary is missing. An **Install** button appears inline and streams live download/install progress. Status refreshes automatically on completion.
-- **In-app provider uninstall**: Installed local providers show an **Uninstall** button that removes the binary immediately and resets the provider state.
-- **Image service log cleanup**: Verbose HuggingFace HTTP request logs are no longer printed to the terminal during startup - redirected to the log file only.
-- **Sidebar button alignment**: New Chat / Delete / Clear All buttons now stretch to the full sidebar width, correctly aligned with the chat list below.
+- **Instruction profiles**: Built-in instruction profiles in the chat UI - Mirabilis Default, Network Engineer, Research Analyst, Guided Tutor, and Remote Operator.
+- **Saved custom profiles**: Current instructions can be saved as reusable custom profiles and deleted from the UI.
+- **Per-chat instruction persistence**: Selected profile and instruction text persist with each chat.
+- **Chat branching**: Any conversation can be cloned into a new branch to explore alternate paths without mutating the source.
+- **Snapshots**: Active chats can save restore points and roll back to a selected snapshot later.
+- **Sidebar metadata**: Chat list rows show branch and snapshot badges.
+- **In-app provider install**: Local providers (`llama-server`, `KoboldCpp`) are greyed out when their binary is missing. Install inline with live progress streaming.
+- **In-app provider uninstall**: Installed local providers show an Uninstall button that removes the binary immediately.
+- **Image service log cleanup**: Verbose HuggingFace HTTP logs no longer printed to terminal - redirected to log file only.
+- **Sidebar button alignment**: New Chat / Delete / Clear All buttons stretch to full sidebar width.
 - **Security**: Upgraded `uuid` dependency to clear a moderate audit advisory.
-
----
-
-## [26.3R1-S25] - 2026-04-15
-
-### Chat Control: Instruction Profiles, Branching, and Snapshots
-
-- **Instruction profiles**: Added built-in instruction profiles in the chat UI, including Mirabilis Default, Network Engineer, Research Analyst, Guided Tutor, and Remote Operator.
-- **Saved custom profiles**: Current instructions can now be saved as reusable custom profiles and deleted from the UI when no longer needed.
-- **Per-chat instruction persistence**: Selected profile and instruction text now persist with each chat instead of living only in browser-local state.
-- **Chat branching**: Any existing conversation can now be cloned into a new branch so users can explore alternate prompts, edits, or reasoning paths without mutating the source chat.
-- **Snapshots**: Active chats can now save restore points and roll back to a selected snapshot later.
-- **Sidebar metadata**: Chat list rows now show branch and snapshot badges for faster scanning.
-- **Scope**: This phase deliberately stayed within the existing chat model and JSON store, avoiding a heavier workspace migration while still adding real conversational control.
 
 ## [26.3R1-S24] - 2026-04-13
 
