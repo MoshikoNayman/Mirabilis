@@ -1306,7 +1306,7 @@ async function main() {
       label: 'Image service',
       url: 'http://127.0.0.1:7860/health',
       timeoutMs: imageStartupTimeoutMs,
-      spawnService: () => spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, imageLogFile, true)
+      spawnService: () => spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, imageLogFile, false)
     });
     statusLine('OK', 'Image service: http://127.0.0.1:7860');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
