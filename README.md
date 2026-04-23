@@ -226,21 +226,13 @@ run.js          Unified launcher, installer, doctor, logs, and cleanup
 
 ## MSQ Model Family
 
-MSQ is a custom model family created by Moshiko Nayman, built on publicly available base models and tuned specifically for Mirabilis workflows.
-
-| Model | Base | Use Case |
-|---|---|---|
-| MSQ Raw-8B | 8B base | Fast local inference, general use |
-| MSQ Pro-12B | 12B base | Balanced quality and speed |
-| MSQ Ultra-31B | 31B base | Maximum local quality |
-
-Install via `training/msq/setup.sh` or pull directly through the Ollama panel in the UI.
+MSQ is a custom model family created by Moshiko Nayman, built on publicly available base models and tuned specifically for Mirabilis workflows. Install via `training/msq/setup.sh` or pull directly through the Ollama panel in the UI.
 
 | Model             | Base                           | Params | Context | Character                                     |
 |-------------------|--------------------------------|-------:|--------:|-----------------------------------------------|
-| **MSQ-Raw-8B**    | dolphin3 / Llama 3.1 (4.9 GB) |     8B |   8 192 | Fully unrestricted. No safety filters.        |
-| **MSQ-Pro-12B**   | gemma3:12b (8.1 GB)            |    12B |  32 768 | Thorough, deep reasoning. Everyday workhorse. |
-| **MSQ-Ultra-31B** | gemma4:31b (~20 GB)            |    31B |  65 536 | Flagship. Maximum depth and reasoning.        |
+| **MSQ-Raw-8B**    | dolphin3 / Llama 3.1 (4.9 GB) |     8B |   8 192 | Fast local inference. Fully unrestricted, no safety filters. |
+| **MSQ-Pro-12B**   | gemma3:12b (8.1 GB)            |    12B |  32 768 | Balanced quality and speed. Thorough, deep reasoning. Everyday workhorse. |
+| **MSQ-Ultra-31B** | gemma4:31b (~20 GB)            |    31B |  65 536 | Maximum local quality. Flagship depth and reasoning. |
 
 ### Setup
 
