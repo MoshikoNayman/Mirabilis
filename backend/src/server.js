@@ -2490,6 +2490,7 @@ app.get('/api/providers/install-stream', async (req, res) => {
         platform === 'darwin' && arch === 'arm64' ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-arm64.zip' :
         platform === 'darwin' ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-x64.zip' :
         platform === 'linux' && arch === 'x64' ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-ubuntu-x64.zip' :
+        platform === 'win32' && arch === 'x64' ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-win-avx2-x64.zip' :
         null;
       if (!llamaUrl) { send('warn', `Auto-install is not supported on ${platform} ${arch}. Install llama-server manually.`); send('done', ''); res.end(); return; }
 
@@ -2501,13 +2502,17 @@ app.get('/api/providers/install-stream', async (req, res) => {
       await writeFile(zipPath, Buffer.from(buf));
       send('info', 'Extracting…');
       await new Promise((resolve, reject) => {
-        const child = spawn('unzip', ['-qo', 'llama.zip'], { cwd: PROVIDERS_DIR });
+        const child = platform === 'win32'
+          ? spawn('powershell', ['-Command', `Expand-Archive -Path "llama.zip" -DestinationPath "." -Force`], { cwd: PROVIDERS_DIR })
+          : spawn('unzip', ['-qo', 'llama.zip'], { cwd: PROVIDERS_DIR });
         child.on('close', (code) => (code === 0 ? resolve() : reject(new Error('Extraction failed'))));
         child.on('error', reject);
       });
-      const extracted = join(PROVIDERS_DIR, 'build', 'bin', 'llama-server');
-      if (existsSync(extracted)) await rename(extracted, binPath);
-      await chmod(binPath, 0o755);
+      const extractedBin = `llama-server${ext}`;
+      const extracted = join(PROVIDERS_DIR, 'build', 'bin', extractedBin);
+      if (!existsSync(extracted)) throw new Error(`Could not find extracted binary at build/bin/${extractedBin}`);
+      await rename(extracted, binPath);
+      if (platform !== 'win32') await chmod(binPath, 0o755);
       try { const { rm } = await import('node:fs/promises'); await rm(join(PROVIDERS_DIR, 'build'), { recursive: true, force: true }); await rm(zipPath, { force: true }); } catch {}
       send('done', 'llama-server installed successfully');
     }
