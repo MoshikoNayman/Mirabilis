@@ -1277,10 +1277,11 @@ async function main() {
     statusLine('OK', 'Frontend: http://127.0.0.1:3000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
-    const imageEnv = { ...process.env, IMAGE_SERVICE_PORT: '7860' };
+    const imageEnv = { ...process.env, IMAGE_SERVICE_PORT: '7860', PYTHONUNBUFFERED: '1' };
     const imageStartupTimeoutMs = Number(process.env.IMAGE_SERVICE_STARTUP_TIMEOUT_MS || 900000);
     statusLine('INFO', `Waiting for image service readiness (timeout ${Math.round(imageStartupTimeoutMs / 1000)}s). First run may download model assets.`);
-    managed.image = spawnLogged(imagePythonPath(), ['server.py'], IMAGE_SERVICE_DIR, imageEnv, path.join(os.tmpdir(), 'image-service.log'), false);
+    statusLine('INFO', `Image service logs: ${path.join(os.tmpdir(), 'image-service.log')}`);
+    managed.image = spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, path.join(os.tmpdir(), 'image-service.log'), true);
     await waitForEndpoint('http://127.0.0.1:7860/health', imageStartupTimeoutMs, 'Image service');
     statusLine('OK', 'Image service: http://127.0.0.1:7860');
     await writeRunState({ provider: aiProvider, logging: logEnabled });

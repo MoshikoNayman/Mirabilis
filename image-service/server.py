@@ -9,13 +9,23 @@ Environment:
   IMAGE_SERVICE_PORT  Port to listen on (default: 7860)
 """
 
+import os
+from io import BytesIO
+from pathlib import Path
+import base64
+import logging
+
+# Use a local writable cache by default so first-run model downloads do not fail
+# on Windows profiles with restricted access to %USERPROFILE%\.cache.
+APP_DIR = Path(__file__).resolve().parent
+HF_CACHE_DIR = APP_DIR / '.cache' / 'huggingface'
+os.environ.setdefault('HF_HOME', str(HF_CACHE_DIR))
+os.environ.setdefault('HUGGINGFACE_HUB_CACHE', str(HF_CACHE_DIR / 'hub'))
+os.environ.setdefault('TRANSFORMERS_CACHE', str(HF_CACHE_DIR / 'transformers'))
+
 from flask import Flask, request, jsonify
 import torch
 from diffusers import StableDiffusionPipeline
-from io import BytesIO
-import base64
-import logging
-import os
 
 logging.basicConfig(
     level=logging.INFO,
