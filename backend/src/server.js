@@ -2485,11 +2485,14 @@ app.get('/api/providers/install-stream', async (req, res) => {
     if (provider === 'llama-server') {
       const binPath = join(PROVIDERS_DIR, `llama-server${ext}`);
       if (existsSync(binPath)) { send('done', 'llama-server is already installed'); res.end(); return; }
-      if (platform !== 'darwin') { send('warn', `Auto-install not supported on ${platform}. Install llama.cpp manually.`); send('done', ''); res.end(); return; }
 
-      const llamaUrl = arch === 'arm64'
-        ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-arm64.zip'
-        : 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-x64.zip';
+      const llamaUrl =
+        platform === 'darwin' && arch === 'arm64' ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-arm64.zip' :
+        platform === 'darwin' ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-x64.zip' :
+        platform === 'linux' && arch === 'x64' ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-ubuntu-x64.zip' :
+        null;
+      if (!llamaUrl) { send('warn', `Auto-install is not supported on ${platform} ${arch}. Install llama-server manually.`); send('done', ''); res.end(); return; }
+
       send('info', 'Downloading llama-server…');
       const fetchRes = await fetch(llamaUrl);
       if (!fetchRes.ok) throw new Error('Failed to download llama-server');
@@ -2512,19 +2515,24 @@ app.get('/api/providers/install-stream', async (req, res) => {
     if (provider === 'koboldcpp') {
       const binPath = join(PROVIDERS_DIR, `koboldcpp${ext}`);
       if (existsSync(binPath)) { send('done', 'KoboldCpp is already installed'); res.end(); return; }
-      if (platform !== 'darwin' || arch !== 'arm64') { send('warn', `Auto-install only supports macOS arm64. Install KoboldCpp manually.`); send('done', ''); res.end(); return; }
+      const koboldAssetName =
+        platform === 'darwin' && arch === 'arm64' ? 'koboldcpp-mac-arm64' :
+        platform === 'win32' ? 'koboldcpp.exe' :
+        platform === 'linux' && arch === 'x64' ? 'koboldcpp-linux-x64' :
+        null;
+      if (!koboldAssetName) { send('warn', `Auto-install is not supported on ${platform} ${arch}. Install KoboldCpp manually.`); send('done', ''); res.end(); return; }
 
       send('info', 'Fetching latest KoboldCpp release…');
       const releaseRes = await fetch('https://api.github.com/repos/LostRuins/koboldcpp/releases/latest');
       const release = await releaseRes.json();
-      const asset = release.assets?.find((a) => a.name === 'koboldcpp-mac-arm64');
+      const asset = release.assets?.find((a) => a.name === koboldAssetName);
       if (!asset) throw new Error('KoboldCpp release asset not found');
       send('info', `Downloading ${asset.name}…`);
       const koboldRes = await fetch(asset.browser_download_url);
       if (!koboldRes.ok) throw new Error('Failed to download KoboldCpp');
       const koboldBuf = await koboldRes.arrayBuffer();
       await writeFile(binPath, Buffer.from(koboldBuf));
-      await chmod(binPath, 0o755);
+      if (platform !== 'win32') await chmod(binPath, 0o755);
       send('done', 'KoboldCpp installed successfully');
     }
   } catch (err) {
