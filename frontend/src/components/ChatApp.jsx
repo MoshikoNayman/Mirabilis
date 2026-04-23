@@ -1330,7 +1330,7 @@ export default function ChatApp() {
   function installLocalProvider(binaryId) {
     if (installingBinary?.provider === binaryId && !installingBinary?.done) return;
     setInstallingBinary({ provider: binaryId, lines: [], done: false, error: false });
-    const es = new EventSource(`/api/providers/install-stream?provider=${encodeURIComponent(binaryId)}`);
+    const es = new EventSource(`${API_BASE}/api/providers/install-stream?provider=${encodeURIComponent(binaryId)}`);
     es.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
