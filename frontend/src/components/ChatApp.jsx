@@ -4477,6 +4477,23 @@ export default function ChatApp() {
                                 {isInstalling ? 'Installing…' : 'Install'}
                               </button>
                             )}
+                            {!binaryMissing && opt.requiresBinary && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  api(`/api/providers/local/${encodeURIComponent(opt.requiresBinary)}`, { method: 'DELETE' })
+                                    .then(() => setLocalBinaryStatus((prev) => ({ ...prev, [opt.requiresBinary]: false })))
+                                    .catch(() => {});
+                                  if (provider === opt.id) setProvider('ollama');
+                                  setIsProviderMenuOpen(false);
+                                }}
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                                title="Uninstall binary"
+                              >
+                                Uninstall
+                              </button>
+                            )}
                           </div>
                         );
                       })}

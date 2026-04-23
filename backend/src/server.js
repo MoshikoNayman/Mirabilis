@@ -2533,6 +2533,25 @@ app.get('/api/providers/install-stream', async (req, res) => {
   if (!res.writableEnded) res.end();
 });
 
+app.delete('/api/providers/local/:provider', async (req, res) => {
+  const { provider } = req.params;
+  if (!['llama-server', 'koboldcpp'].includes(provider)) {
+    return res.status(400).json({ error: 'Invalid provider' });
+  }
+  const ext = process.platform === 'win32' ? '.exe' : '';
+  const binPath = join(PROVIDERS_DIR, `${provider}${ext}`);
+  if (!existsSync(binPath)) {
+    return res.status(404).json({ error: 'Binary not found' });
+  }
+  try {
+    const { rm } = await import('node:fs/promises');
+    await rm(binPath, { force: true });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Uninstall failed' });
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 await ensureStoreFile(config.chatStorePath);
