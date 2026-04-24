@@ -716,7 +716,7 @@ async function runInstall() {
   }
 
   // Setup Python venv
-  statusLine('INFO', 'Setting up Python environment...');
+  statusLine('INFO', 'Setting up Python environment (this may take several minutes on first run)...');
   const venvPath = path.join(IMAGE_SERVICE_DIR, '.venv');
   if (!fs.existsSync(venvPath)) {
     const venvCode = await runForeground('python3', ['-m', 'venv', venvPath], IMAGE_SERVICE_DIR);
@@ -726,12 +726,13 @@ async function runInstall() {
   }
 
   const pythonExe = imagePythonPath();
-  const pipCode = await runForeground(pythonExe, ['-m', 'pip', 'install', '-q', '--upgrade', 'pip'], IMAGE_SERVICE_DIR);
+  const pipCode = await runForeground(pythonExe, ['-m', 'pip', 'install', '--upgrade', 'pip'], IMAGE_SERVICE_DIR);
   if (pipCode !== 0) {
     throw new Error('pip upgrade failed');
   }
 
-  const reqsCode = await runForeground(pythonExe, ['-m', 'pip', 'install', '-q', '-r', 'requirements.txt'], IMAGE_SERVICE_DIR);
+  statusLine('INFO', 'Installing Python packages (torch/diffusers are large - this will take several minutes)...');
+  const reqsCode = await runForeground(pythonExe, ['-m', 'pip', 'install', '--progress-bar', 'on', '-r', 'requirements.txt'], IMAGE_SERVICE_DIR);
   if (reqsCode !== 0) {
     throw new Error('Python requirements install failed');
   }
