@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-**Version:** 26.3R1-S25  
+**Version:** 26.3R1-S26  
 **Author:** Moshiko Nayman
 
 Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API-your choice, per conversation.
@@ -146,6 +146,35 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **MCP Server** | Exposes Mirabilis as an MCP server to VS Code / GitHub Copilot / Claude Desktop |
 | **MCP Server** | System control tools: `system_info`, `list_dir`, `read_file`, `write_file`, `run_command` |
 | **MSQ Models** | Custom model family (Raw-8B, Pro-12B, Ultra-31B) tuned for Mirabilis |
+| **Desktop App** | Package as a native macOS `.app` or Windows `.exe` from the `desktop/` folder |
+
+---
+
+## Desktop App
+
+Mirabilis can be packaged as a native desktop app (Electron) using the `desktop/` folder.
+The build system stages everything in a temp directory and cleans up automatically — no mess.
+
+### macOS
+
+```bash
+cd desktop
+./build.sh
+```
+
+Output: `desktop/dist/mac-arm64/Mirabilis AI.app`  
+Copy to `/Applications` or double-click to run.
+
+### Windows
+
+```bat
+cd desktop
+build.bat
+```
+
+Output: `desktop/dist/Mirabilis AI Setup.exe` (NSIS installer with custom install directory + desktop shortcut).
+
+> **Requirements:** Node.js 18+ must be installed on the machine running the build. The resulting app is self-contained and does not require Node.js on the end-user machine.
 
 ---
 

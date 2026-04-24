@@ -1,0 +1,50 @@
+{
+  "name": "mirabilis-desktop",
+  "version": "26.3.25",
+  "description": "Mirabilis AI – Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "dev": "npx electron ."
+  },
+  "build": {
+    "productName": "Mirabilis AI",
+    "appId": "com.mirabilis.ai",
+    "asar": true,
+    "asarUnpack": [
+      "backend/**/*",
+      "frontend/.next/standalone/**/*"
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "icons/**/*",
+      "backend/**/*",
+      "frontend/.next/standalone/**/*",
+      "!frontend/.next/standalone/frontend/.next/cache/**/*"
+    ],
+    "mac": {
+      "icon": "icons/icon.icns"
+    },
+    "win": {
+      "icon": "icons/icon.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "linux": {
+      "icon": "icons/icon.png"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^25.1.8"
+  }
+}
