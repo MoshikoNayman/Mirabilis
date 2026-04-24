@@ -64,8 +64,8 @@ function startBackend() {
     backendProc.stdout.pipe(out);
     backendProc.stderr.pipe(out);
 
-    // Give backend up to 15s to start
-    const deadline = Date.now() + 15000;
+    // Give backend up to 30s to start (Windows + Defender needs extra time)
+    const deadline = Date.now() + 30000;
     const check = setInterval(async () => {
       try {
         const res = await fetch('http://localhost:4000/api/providers/health', { signal: AbortSignal.timeout(1000) });
@@ -76,6 +76,12 @@ function startBackend() {
     }, 500);
 
     backendProc.on('error', (err) => { clearInterval(check); reject(err); });
+    backendProc.on('exit', (code) => {
+      if (code !== 0 && code !== null) {
+        clearInterval(check);
+        reject(new Error(`Backend exited with code ${code} — check ${path.join(LOG_DIR, 'backend.log')}`));
+      }
+    });
   });
 }
 
