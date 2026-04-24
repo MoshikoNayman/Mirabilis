@@ -238,35 +238,123 @@ async function endpointReady(url) {
 
 async function waitForEndpoint(url, timeoutMs, label, processObj, logFile) {
   const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    if (await endpointReady(url)) return;
-    // Check if process crashed
-    if (processObj && processObj.exitCode !== null) {
-      let errorMsg = `${label} exited with code ${processObj.exitCode}`;
-      if (logFile && fs.existsSync(logFile)) {
-        try {
-          const logs = fs.readFileSync(logFile, 'utf8').split('\n').slice(-20).join('\n');
-          errorMsg += `\n\nLast output:\n${logs}`;
-        } catch {
-          // Ignore if can't read log
-        }
+  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  let spinnerIndex = 0;
+  const spinnerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - started) / 1000);
+    const frame = spinnerFrames[spinnerIndex % spinnerFrames.length];
+    process.stdout.write(`\r  ${frame} Waiting for ${label}... ${elapsed}s`);
+    spinnerIndex += 1;
+  }, 100);
+
+  try {
+    while (Date.now() - started < timeoutMs) {
+      if (await endpointReady(url)) {
+        clearInterval(spinnerInterval);
+        process.stdout.write('\r');
+        return;
       }
-      throw new Error(errorMsg);
+      // Check if process crashed
+      if (processObj && processObj.exitCode !== null) {
+        clearInterval(spinnerInterval);
+        process.stdout.write('\r');
+        let errorMsg = `${label} exited with code ${processObj.exitCode}`;
+        if (logFile && fs.existsSync(logFile)) {
+          try {
+            const logs = fs.readFileSync(logFile, 'utf8').split('\n').slice(-20).join('\n');
+            errorMsg += `\n\nLast output:\n${logs}`;
+          } catch {
+            // Ignore if can't read log
+          }
+        }
+        throw new Error(errorMsg);
+      }
+      await sleep(1000);
     }
-    await sleep(1000);
+    clearInterval(spinnerInterval);
+    process.stdout.write('\r');
+    throw new Error(`${label} did not become ready at ${url}`);
+  } catch (error) {
+    clearInterval(spinnerInterval);
+    throw error;
   }
-  throw new Error(`${label} did not become ready at ${url}`);
 }
 
-async function ensureServiceRunning({ label, url, timeoutMs, spawnService }) {
+async function ensureServiceRunning({ label, url, timeoutMs, spawnService, logFile }) {
   if (await endpointReady(url)) {
     statusLine('INFO', `${label} already running; reusing existing service`);
     return null;
   }
 
   const processObj = spawnService();
-  await waitForEndpoint(url, timeoutMs, label, processObj);
+  await waitForEndpoint(url, timeoutMs, label, processObj, logFile);
   return processObj;
+}
+
+async function getListeningPidsOnPort(port) {
+  if (!Number.isInteger(port) || port <= 0) return [];
+
+  if (process.platform === 'win32') {
+    const { code, stdout } = await runCaptured('netstat', ['-ano', '-p', 'tcp'], ROOT_DIR);
+    if (code !== 0) return [];
+
+    const pids = new Set();
+    for (const rawLine of stdout.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (!line.includes('LISTENING')) continue;
+      if (!line.includes(`:${port}`)) continue;
+      const parts = line.split(/\s+/);
+      const pid = Number(parts[parts.length - 1]);
+      if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+    }
+    return [...pids];
+  }
+
+  const { code, stdout } = await runCaptured('lsof', ['-nP', '-iTCP:' + String(port), '-sTCP:LISTEN', '-t'], ROOT_DIR);
+  if (code !== 0) return [];
+  return stdout
+    .split('\n')
+    .map((s) => Number(s.trim()))
+    .filter((pid) => Number.isInteger(pid) && pid > 0);
+}
+
+async function getPidCommandLine(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return '';
+
+  if (process.platform === 'win32') {
+    const command = `$p = Get-CimInstance Win32_Process -Filter \"ProcessId = ${pid}\"; if ($null -ne $p) { $p.CommandLine }`;
+    const { code, stdout } = await runCaptured('powershell.exe', ['-NoProfile', '-Command', command], ROOT_DIR);
+    if (code !== 0) return '';
+    return stdout.trim();
+  }
+
+  const { code, stdout } = await runCaptured('ps', ['-p', String(pid), '-o', 'command='], ROOT_DIR);
+  if (code !== 0) return '';
+  return stdout.trim();
+}
+
+async function terminateStaleMirabilisFrontendOnPort(port) {
+  const pids = await getListeningPidsOnPort(port);
+  if (pids.length === 0) return 0;
+
+  const frontendDirNorm = FRONTEND_DIR.toLowerCase().replace(/\//g, '\\');
+  let terminated = 0;
+
+  for (const pid of pids) {
+    const cmdLine = await getPidCommandLine(pid);
+    if (!cmdLine) continue;
+    const cmdNorm = cmdLine.toLowerCase().replace(/\//g, '\\');
+    const isMirabilisFrontend =
+      cmdNorm.includes(frontendDirNorm) &&
+      (cmdNorm.includes('next\\dist\\server\\lib\\start-server.js') || cmdNorm.includes('next dev'));
+
+    if (!isMirabilisFrontend) continue;
+    const stopped = await terminatePid(pid);
+    if (stopped) terminated += 1;
+  }
+
+  return terminated;
 }
 
 function ensureDeps() {
@@ -291,7 +379,13 @@ function imagePythonPath() {
 function missingImagePythonPackages() {
   const py = imagePythonPath();
   const moduleChecks = [
-    { module: 'flask', pkg: 'flask' }
+    { module: 'flask', pkg: 'flask' },
+    { module: 'torch', pkg: 'torch' },
+    { module: 'torchvision', pkg: 'torchvision' },
+    { module: 'diffusers', pkg: 'diffusers' },
+    { module: 'transformers', pkg: 'transformers' },
+    { module: 'accelerate', pkg: 'accelerate' },
+    { module: 'PIL', pkg: 'Pillow' }
   ];
 
   const missing = [];
@@ -1282,18 +1376,44 @@ async function main() {
       label: 'Backend',
       url: 'http://127.0.0.1:4000/health',
       timeoutMs: 45000,
+      logFile: backendLogFile,
       spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', 'dev']), BACKEND_DIR, env, backendLogFile, logEnabled)
     });
     statusLine('OK', 'Backend: http://127.0.0.1:4000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
     const frontendLogFile = path.join(os.tmpdir(), 'frontend.log');
-    managed.frontend = await ensureServiceRunning({
-      label: 'Frontend',
-      url: 'http://127.0.0.1:3000',
-      timeoutMs: 60000,
-      spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', 'dev']), FRONTEND_DIR, { ...process.env, PORT: '3000' }, frontendLogFile, false)
-    });
+    try {
+      managed.frontend = await ensureServiceRunning({
+        label: 'Frontend',
+        url: 'http://127.0.0.1:3000',
+        timeoutMs: 60000,
+        logFile: frontendLogFile,
+        spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', 'dev']), FRONTEND_DIR, { ...process.env, PORT: '3000' }, frontendLogFile, false)
+      });
+    } catch (error) {
+      const message = String(error?.message || '');
+      const hasPortConflictHint = /eaddrinuse|address already in use|frontend exited with code 0/i.test(message);
+      const frontendReady = await endpointReady('http://127.0.0.1:3000');
+
+      if (!frontendReady && hasPortConflictHint) {
+        const terminated = await terminateStaleMirabilisFrontendOnPort(3000);
+        if (terminated > 0) {
+          statusLine('WARN', `Frontend port 3000 was occupied by stale Mirabilis process(es); cleaned ${terminated} and retrying once`);
+          managed.frontend = await ensureServiceRunning({
+            label: 'Frontend',
+            url: 'http://127.0.0.1:3000',
+            timeoutMs: 60000,
+            logFile: frontendLogFile,
+            spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', 'dev']), FRONTEND_DIR, { ...process.env, PORT: '3000' }, frontendLogFile, false)
+          });
+        } else {
+          throw error;
+        }
+      } else {
+        throw error;
+      }
+    }
     statusLine('OK', 'Frontend: http://127.0.0.1:3000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
@@ -1306,6 +1426,7 @@ async function main() {
       label: 'Image service',
       url: 'http://127.0.0.1:7860/health',
       timeoutMs: imageStartupTimeoutMs,
+      logFile: imageLogFile,
       spawnService: () => spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, imageLogFile, false)
     });
     statusLine('OK', 'Image service: http://127.0.0.1:7860');
