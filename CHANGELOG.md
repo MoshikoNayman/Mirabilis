@@ -2,6 +2,17 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S26] - 2026-04-24
+
+### Desktop App (Electron)
+
+- **Desktop build system**: New `desktop/` folder contains everything needed to package Mirabilis as a native desktop app.
+- **macOS**: Run `./build.sh` from `desktop/` to produce `Mirabilis AI.app` (arm64).
+- **Windows**: Run `build.bat` from `desktop/` to produce `Mirabilis AI Setup.exe` (NSIS installer, x64).
+- **Zero mess**: All build staging happens in a system temp directory and is cleaned up automatically on completion, failure, or Ctrl+C. Only `dist/` is written into `desktop/`.
+- **Self-contained app**: The packaged app bundles the backend, frontend standalone build, and all dependencies. No Node.js or separate install step required to run the app on another machine.
+- **App icon**: Custom Mirabilis flower icon with proper macOS squircle proportions.
+
 ## [26.3R1-S25] - 2026-04-23
 
 ### Chat Control, Provider Management + UI Polish
