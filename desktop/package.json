@@ -4,7 +4,8 @@
   "description": "Mirabilis AI – Desktop App",
   "main": "main.js",
   "scripts": {
-    "dev": "npx electron ."
+    "dev": "npx electron .",
+    "verify:build": "node verify-build.js"
   },
   "build": {
     "productName": "Mirabilis AI",

@@ -58,15 +58,58 @@ let servicesStarted = false;
 // ── Resolve paths ──────────────────────────────────────────────────────────
 const BACKEND_DIR  = path.join(SPAWN_ROOT, 'backend');
 const FRONTEND_DIR = path.join(ROOT_DIR, 'frontend');
-// Standalone server.js is at frontend/.next/standalone/frontend/server.js
-// (Next.js inferred workspace root as Mirabilis-electron root)
-const STANDALONE_SERVER = path.join(SPAWN_ROOT, 'frontend', '.next', 'standalone', 'frontend', 'server.js');
+// Next standalone output can be either:
+// - frontend/.next/standalone/frontend/server.js
+// - frontend/.next/standalone/server.js
+const STANDALONE_SERVER_CANDIDATES = [
+  path.join(SPAWN_ROOT, 'frontend', '.next', 'standalone', 'frontend', 'server.js'),
+  path.join(SPAWN_ROOT, 'frontend', '.next', 'standalone', 'server.js')
+];
+
+function resolveStandaloneServer() {
+  for (const candidate of STANDALONE_SERVER_CANDIDATES) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return STANDALONE_SERVER_CANDIDATES[0];
+}
 const LOG_DIR      = app.getPath('logs');
 
 // ── Logging helpers ────────────────────────────────────────────────────────
 function makeLog(name) {
   const logPath = path.join(LOG_DIR, `${name}.log`);
   return fs.createWriteStream(logPath, { flags: 'a' });
+}
+
+function buildStartupDiagnostics(err) {
+  const checks = [
+    { label: 'Backend dir', value: BACKEND_DIR, exists: fs.existsSync(BACKEND_DIR) },
+    { label: 'Backend entry', value: path.join(BACKEND_DIR, 'src', 'server.js'), exists: fs.existsSync(path.join(BACKEND_DIR, 'src', 'server.js')) },
+    {
+      label: 'Frontend standalone entry',
+      value: resolveStandaloneServer(),
+      exists: STANDALONE_SERVER_CANDIDATES.some((candidate) => fs.existsSync(candidate))
+    },
+    { label: 'Backend log', value: path.join(LOG_DIR, 'backend.log'), exists: fs.existsSync(path.join(LOG_DIR, 'backend.log')) },
+    { label: 'Frontend log', value: path.join(LOG_DIR, 'frontend.log'), exists: fs.existsSync(path.join(LOG_DIR, 'frontend.log')) }
+  ];
+
+  const lines = [
+    `Reason: ${err?.message || String(err)}`,
+    `Platform: ${process.platform}`,
+    `Packaged: ${app.isPackaged ? 'yes' : 'no'}`,
+    `resourcesPath: ${process.resourcesPath}`,
+    `userData: ${app.getPath('userData')}`,
+    `logs: ${LOG_DIR}`,
+    '',
+    'Checks:'
+  ];
+
+  for (const item of checks) {
+    lines.push(`- ${item.label}: ${item.exists ? 'OK' : 'MISSING'}`);
+    lines.push(`  ${item.value}`);
+  }
+
+  return lines.join('\n');
 }
 
 // ── Start backend (Express) ────────────────────────────────────────────────
@@ -121,8 +164,9 @@ function startFrontend() {
 
     if (app.isPackaged) {
       // Packaged: use the standalone server.js (no npm/node_modules needed)
-      frontendProc = spawn(process.execPath, [STANDALONE_SERVER], {
-        cwd: path.dirname(STANDALONE_SERVER),
+      const standaloneServer = resolveStandaloneServer();
+      frontendProc = spawn(process.execPath, [standaloneServer], {
+        cwd: path.dirname(standaloneServer),
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, PORT: '3000', HOSTNAME: '127.0.0.1', NEXT_TELEMETRY_DISABLED: '1', ELECTRON_RUN_AS_NODE: '1' }
       });
@@ -263,7 +307,20 @@ app.whenReady().then(async () => {
     await Promise.all([startBackend(), startFrontend()]);
     servicesStarted = true;
   } catch (err) {
-    dialog.showErrorBox('Mirabilis failed to start', err.message);
+    const details = buildStartupDiagnostics(err);
+    const choice = dialog.showMessageBoxSync({
+      type: 'error',
+      title: 'Mirabilis failed to start',
+      message: 'Mirabilis failed to start',
+      detail: details,
+      buttons: ['Open Logs Folder', 'Quit'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true
+    });
+    if (choice === 0) {
+      shell.openPath(LOG_DIR);
+    }
     app.quit();
     return;
   }
