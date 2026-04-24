@@ -24,32 +24,10 @@ cd /d "%MIRABILIS%\frontend"
 call npm install --silent
 if errorlevel 1 goto error
 
-echo =^> Patching next.config.js for standalone build...
-set NEXT_CONFIG=%MIRABILIS%\frontend\next.config.js
-set NEXT_CONFIG_BAK=%TEMP%\mirabilis-next-config-%RANDOM%.bak
-copy "%NEXT_CONFIG%" "%NEXT_CONFIG_BAK%" >nul
-echo /** @type {import('next').NextConfig} */ > "%NEXT_CONFIG%"
-echo const path = require^('path'^); >> "%NEXT_CONFIG%"
-echo const nextConfig = { >> "%NEXT_CONFIG%"
-echo   reactStrictMode: true, >> "%NEXT_CONFIG%"
-echo   output: 'standalone', >> "%NEXT_CONFIG%"
-echo   outputFileTracingRoot: path.resolve^(__dirname, '..'^), >> "%NEXT_CONFIG%"
-echo }; >> "%NEXT_CONFIG%"
-echo module.exports = nextConfig; >> "%NEXT_CONFIG%"
-
 echo =^> Building Next.js frontend (standalone)...
+cd /d "%MIRABILIS%\frontend"
 call npm run build
-set BUILD_EXIT=%ERRORLEVEL%
-
-echo =^> Restoring next.config.js...
-if exist "%NEXT_CONFIG_BAK%" (
-    copy "%NEXT_CONFIG_BAK%" "%NEXT_CONFIG%" >nul
-    del "%NEXT_CONFIG_BAK%" >nul
-) else (
-    echo WARNING: Could not restore next.config.js from backup.
-)
-
-if %BUILD_EXIT% neq 0 goto error
+if errorlevel 1 goto error
 
 set BUILD_DIR=%TEMP%\mirabilis-build-%RANDOM%
 mkdir "%BUILD_DIR%"
