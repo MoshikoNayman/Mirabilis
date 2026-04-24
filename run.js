@@ -52,7 +52,7 @@ function statusLine(level, message) {
     OK: color('OK  ', '32'),
     WARN: color('WARN', '33'),
     FAIL: color('FAIL', '31'),
-    INFO: color('INFO', '36')
+    INFO: color('INFO', '97')
   };
   process.stdout.write(`  [${map[level] || level}] ${message}\n`);
 }
