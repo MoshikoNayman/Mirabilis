@@ -97,6 +97,21 @@ function fallbackTitleFromContent(content) {
   return candidate.length > 60 ? `${candidate.slice(0, 57)}...` : candidate;
 }
 
+function redactSensitiveContent(content) {
+  const source = String(content || '');
+  return source
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[REDACTED_EMAIL]')
+    .replace(/\b(?:\+?\d{1,3}[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]?\d{3}[\s.-]?\d{4}\b/g, '[REDACTED_PHONE]')
+    .replace(/\b(?:\d[ -]*?){13,19}\b/g, '[REDACTED_CARD]');
+}
+
+function applyPiiPolicy(content, piiMode) {
+  if (String(piiMode || '').trim().toLowerCase() !== 'strict') {
+    return String(content || '');
+  }
+  return redactSensitiveContent(content);
+}
+
 async function generateSessionTitle({ content, provider, model, config, streamWithProvider }) {
   const snippet = String(content || '').trim().slice(0, 500);
   if (!snippet) return null;
@@ -842,6 +857,8 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
   const runMediaJob = async (jobPayload) => {
     const { jobId, sessionId, interactionId, sourcePath, originalName, fileSizeBytes } = jobPayload;
     const audioPath = `${sourcePath}.wav`;
+    const session = await storage.getSession(sessionId);
+    const piiMode = String(session?.pii_mode || 'standard').toLowerCase();
 
     try {
       await updateJob(jobId, { status: 'running', phase: 'preflight', progress: 8, event: 'Media job started.' });
@@ -909,7 +926,8 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
       let segments = normalizeTranscriptSegments(transcription.segments || []);
       segments = applyHeuristicSpeakers(segments);
-      const transcriptText = (String(transcription.text || '').trim() || transcriptFromSegments(segments)).slice(0, 160000);
+      const transcriptTextRaw = (String(transcription.text || '').trim() || transcriptFromSegments(segments)).slice(0, 160000);
+      const transcriptText = applyPiiPolicy(transcriptTextRaw, piiMode);
 
       await updateJob(jobId, {
         phase: 'extract_signals',
@@ -1351,20 +1369,22 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         return res.status(400).json({ error: 'content is required' });
       }
       const existingSession = await storage.getSession(sessionId);
-      const interaction = await storage.ingestInteraction(sessionId, 'text', content, sourceName || 'manual');
+      const piiMode = String(existingSession?.pii_mode || 'standard').toLowerCase();
+      const normalizedContent = applyPiiPolicy(content, piiMode).trim();
+      const interaction = await storage.ingestInteraction(sessionId, 'text', normalizedContent, sourceName || 'manual');
       const provider = config.aiProvider || 'ollama';
       const model = await getEffectiveModel({ provider, model: null, config });
       const extractionPrompt = await resolvePromptProfile('signal_extraction');
       let rawSignals;
       try {
         rawSignals = extractSignalsWithFallback(
-          content,
-          await extractSignalsWithAI(content, provider, model, extractionPrompt)
+          normalizedContent,
+          await extractSignalsWithAI(normalizedContent, provider, model, extractionPrompt)
         );
       } catch {
-        rawSignals = extractStructuredSignals(content);
+        rawSignals = extractStructuredSignals(normalizedContent);
       }
-      const qualitySignals = calibrateAndDeduplicateSignals(rawSignals, { sourceText: content });
+      const qualitySignals = calibrateAndDeduplicateSignals(rawSignals, { sourceText: normalizedContent });
       const signals = await storage.storeSignals(sessionId, interaction.id, qualitySignals, {
         extractorVersion: INTELLEDGER_SIGNAL_EXTRACTOR_VERSION,
         promptProfile: extractionPrompt?.profile_id || 'signal_extraction',
@@ -1385,11 +1405,11 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         const model = await getEffectiveModel({ provider, model: null, config });
         let title = null;
         try {
-          title = await generateSessionTitle({ content, provider, model, config, streamWithProvider });
+          title = await generateSessionTitle({ content: normalizedContent, provider, model, config, streamWithProvider });
         } catch {
           title = null;
         }
-        session = await storage.updateSessionTitle(sessionId, title || fallbackTitleFromContent(content));
+        session = await storage.updateSessionTitle(sessionId, title || fallbackTitleFromContent(normalizedContent));
       }
 
       res.json({
@@ -1410,20 +1430,22 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       if (!req.file) return res.status(400).json({ error: 'No file' });
       const content = req.file.buffer.toString('utf-8');
       const existingSession = await storage.getSession(sessionId);
-      const interaction = await storage.ingestInteraction(sessionId, 'file', content, req.file.originalname);
+      const piiMode = String(existingSession?.pii_mode || 'standard').toLowerCase();
+      const normalizedContent = applyPiiPolicy(content, piiMode);
+      const interaction = await storage.ingestInteraction(sessionId, 'file', normalizedContent, req.file.originalname);
       const provider = config.aiProvider || 'ollama';
       const model = await getEffectiveModel({ provider, model: null, config });
       const extractionPrompt = await resolvePromptProfile('signal_extraction');
       let rawSignals;
       try {
         rawSignals = extractSignalsWithFallback(
-          content,
-          await extractSignalsWithAI(content, provider, model, extractionPrompt)
+          normalizedContent,
+          await extractSignalsWithAI(normalizedContent, provider, model, extractionPrompt)
         );
       } catch {
-        rawSignals = extractStructuredSignals(content);
+        rawSignals = extractStructuredSignals(normalizedContent);
       }
-      const qualitySignals = calibrateAndDeduplicateSignals(rawSignals, { sourceText: content });
+      const qualitySignals = calibrateAndDeduplicateSignals(rawSignals, { sourceText: normalizedContent });
       const signals = await storage.storeSignals(sessionId, interaction.id, qualitySignals, {
         extractorVersion: INTELLEDGER_SIGNAL_EXTRACTOR_VERSION,
         promptProfile: extractionPrompt?.profile_id || 'signal_extraction',
@@ -1444,11 +1466,11 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         const model = await getEffectiveModel({ provider, model: null, config });
         let title = null;
         try {
-          title = await generateSessionTitle({ content, provider, model, config, streamWithProvider });
+          title = await generateSessionTitle({ content: normalizedContent, provider, model, config, streamWithProvider });
         } catch {
           title = null;
         }
-        session = await storage.updateSessionTitle(sessionId, title || fallbackTitleFromContent(content));
+        session = await storage.updateSessionTitle(sessionId, title || fallbackTitleFromContent(normalizedContent));
       }
 
       res.json({
