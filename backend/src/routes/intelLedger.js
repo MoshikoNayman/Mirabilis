@@ -687,6 +687,31 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
   const queuedMediaJobs = [];
   const runningMediaJobs = new Set();
   const requireAuthContext = String(process.env.INTELLEDGER_REQUIRE_AUTH_CONTEXT || '0') === '1';
+  const maxTextIngestChars = Math.max(1, Number(process.env.INTELLEDGER_MAX_TEXT_INGEST_CHARS || 50000));
+  const maxSynthesisQueryChars = Math.max(1, Number(process.env.INTELLEDGER_MAX_SYNTHESIS_QUERY_CHARS || 2000));
+  const maxCrossSessionCount = Math.max(1, Number(process.env.INTELLEDGER_MAX_CROSS_SYNTH_SESSIONS || 20));
+  const routeRateState = new Map();
+
+  const enforceRateLimit = (req, res, key, { limit, windowMs }) => {
+    const actor = String(req.headers['x-auth-user-id'] || req.headers['x-user-id'] || req.ip || 'anon');
+    const bucketKey = `${key}:${actor}`;
+    const now = Date.now();
+    const bucket = routeRateState.get(bucketKey) || { count: 0, resetAt: now + windowMs };
+
+    if (now > bucket.resetAt) {
+      bucket.count = 0;
+      bucket.resetAt = now + windowMs;
+    }
+
+    bucket.count += 1;
+    routeRateState.set(bucketKey, bucket);
+
+    if (bucket.count > limit) {
+      res.status(429).json({ error: 'Rate limit exceeded for this operation.' });
+      return true;
+    }
+    return false;
+  };
 
   const resolveIdentity = (req) => resolveIntelLedgerIdentity(req, { requireAuthContext });
 
@@ -722,6 +747,17 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       user_template: fallback.user_template,
       is_fallback: true
     };
+  };
+
+  const appendAuditEvent = async (req, event) => {
+    if (typeof storage.appendAuditEvent !== 'function') return null;
+    const identity = resolveIdentity(req);
+    return storage.appendAuditEvent({
+      ...event,
+      actor_user_id: identity.userId || identity.trustedUserId || null,
+      actor_tenant_id: identity.tenantId || identity.trustedTenantId || null,
+      source_ip: req.ip || null
+    });
   };
 
   const getSessionTenantId = (session) => String(session?.tenant_id || session?.user_id || 'default').trim();
@@ -809,12 +845,25 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/prompts/profiles/:profileId/versions', async (req, res) => {
     try {
+      if (enforceRateLimit(req, res, 'prompt-version-create', { limit: 20, windowMs: 60_000 })) return;
       if (typeof storage.createPromptVersion !== 'function') {
         return res.status(501).json({ error: 'Prompt registry is not supported by this storage backend.' });
       }
 
       const profileId = String(req.params.profileId || '').trim().toLowerCase();
+      const systemPromptLength = String(req.body?.system_prompt || req.body?.systemPrompt || '').length;
+      const userTemplateLength = String(req.body?.user_template || req.body?.userTemplate || '').length;
+      if (systemPromptLength > 12000 || userTemplateLength > 20000) {
+        return res.status(400).json({ error: 'Prompt payload exceeds allowed size.' });
+      }
       const created = await storage.createPromptVersion(profileId, req.body || {});
+      await appendAuditEvent(req, {
+        event_type: 'prompt_profile.version_created',
+        metadata: {
+          profile_id: profileId,
+          version_id: created?.version?.id || null
+        }
+      });
       return res.status(201).json({ profile: created });
     } catch (err) {
       return res.status(400).json({ error: err.message });
@@ -823,6 +872,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/prompts/profiles/:profileId/select', async (req, res) => {
     try {
+      if (enforceRateLimit(req, res, 'prompt-version-select', { limit: 60, windowMs: 60_000 })) return;
       if (typeof storage.selectPromptVersion !== 'function') {
         return res.status(501).json({ error: 'Prompt registry is not supported by this storage backend.' });
       }
@@ -833,6 +883,13 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       if (!selected) {
         return res.status(404).json({ error: 'Prompt version not found.' });
       }
+      await appendAuditEvent(req, {
+        event_type: 'prompt_profile.version_selected',
+        metadata: {
+          profile_id: profileId,
+          version_id: selected?.active_version_id || versionId || null
+        }
+      });
       return res.json({ profile: selected });
     } catch (err) {
       return res.status(400).json({ error: err.message });
@@ -1202,6 +1259,12 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       if (!Array.isArray(sessionIds) || sessionIds.length === 0) {
         return res.status(400).json({ error: 'sessionIds array required' });
       }
+      if (sessionIds.length > maxCrossSessionCount) {
+        return res.status(400).json({ error: `sessionIds exceeds maximum (${maxCrossSessionCount}).` });
+      }
+      if (String(query || '').length > maxSynthesisQueryChars) {
+        return res.status(413).json({ error: `query exceeds max length (${maxSynthesisQueryChars} chars).` });
+      }
 
       // Gather interactions + signals for every selected session
       const sessionData = await Promise.all(
@@ -1343,6 +1406,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.patch('/sessions/:sessionId/retention', async (req, res) => {
     try {
+      if (enforceRateLimit(req, res, 'retention-policy-update', { limit: 30, windowMs: 60_000 })) return;
       if (typeof storage.updateSessionRetentionPolicy !== 'function') {
         return res.status(501).json({ error: 'Retention policy updates are not supported by this storage backend.' });
       }
@@ -1353,6 +1417,15 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         pii_retention_action
       });
       if (!session) return res.status(404).json({ error: 'Not found' });
+      await appendAuditEvent(req, {
+        event_type: 'session.retention_policy_updated',
+        session_id: req.params.sessionId,
+        metadata: {
+          retention_days: session.retention_days,
+          pii_mode: session.pii_mode,
+          pii_retention_action: session.pii_retention_action || 'purge'
+        }
+      });
       return res.json({ session });
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -1361,12 +1434,23 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/sessions/:sessionId/retention/run', async (req, res) => {
     try {
+      if (enforceRateLimit(req, res, 'retention-run', { limit: 12, windowMs: 60_000 })) return;
       if (typeof storage.runRetentionSweep !== 'function') {
         return res.status(501).json({ error: 'Retention sweep is not supported by this storage backend.' });
       }
       const { retention_days } = req.body || {};
       const result = await storage.runRetentionSweep(req.params.sessionId, { retention_days });
       if (!result) return res.status(404).json({ error: 'Not found' });
+      await appendAuditEvent(req, {
+        event_type: 'session.retention_run_executed',
+        session_id: req.params.sessionId,
+        metadata: {
+          retention_days: result.retention_days,
+          pii_retention_action: result.pii_retention_action || 'purge',
+          purged: result.purged,
+          hashed: result.hashed || null
+        }
+      });
       return res.json({ retention: result });
     } catch (err) {
       return res.status(500).json({ error: err.message });
@@ -1376,12 +1460,16 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
   // Ingest text
   router.post('/sessions/:sessionId/ingest/text', async (req, res) => {
     try {
+      if (enforceRateLimit(req, res, 'ingest-text', { limit: 80, windowMs: 60_000 })) return;
       const { sessionId } = req.params;
       const rawContent = req.body?.content ?? req.body?.raw_content ?? '';
       const content = String(rawContent || '').trim();
       const sourceName = req.body?.sourceName ?? req.body?.source_name ?? 'manual';
       if (!content) {
         return res.status(400).json({ error: 'content is required' });
+      }
+      if (content.length > maxTextIngestChars) {
+        return res.status(413).json({ error: `content exceeds max length (${maxTextIngestChars} chars).` });
       }
       const existingSession = await storage.getSession(sessionId);
       const piiMode = String(existingSession?.pii_mode || 'standard').toLowerCase();
@@ -1585,6 +1673,19 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  router.get('/sessions/:sessionId/audit', async (req, res) => {
+    try {
+      if (typeof storage.getAuditEvents !== 'function') {
+        return res.status(501).json({ error: 'Audit events are not supported by this storage backend.' });
+      }
+      const limit = Number(req.query?.limit || 100);
+      const events = await storage.getAuditEvents({ sessionId: req.params.sessionId, limit });
+      return res.json({ events });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/sessions/:sessionId/export', async (req, res) => {
     try {
       const { sessionId } = req.params;
@@ -1723,6 +1824,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/sessions/:sessionId/evals/run', async (req, res) => {
     try {
+      if (enforceRateLimit(req, res, 'eval-run', { limit: 30, windowMs: 60_000 })) return;
       if (typeof storage.runSessionEvaluation !== 'function') {
         return res.status(501).json({ error: 'Eval orchestration is not supported by this storage backend.' });
       }
@@ -1778,6 +1880,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/evals/run-batch', async (req, res) => {
     try {
+      if (enforceRateLimit(req, res, 'eval-run-batch', { limit: 10, windowMs: 60_000 })) return;
       if (typeof storage.runBatchEvaluation !== 'function') {
         return res.status(501).json({ error: 'Eval orchestration is not supported by this storage backend.' });
       }
@@ -1802,6 +1905,15 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         trigger: req.body?.trigger || 'batch',
         note: req.body?.note,
         tags: req.body?.tags
+      });
+
+      await appendAuditEvent(req, {
+        event_type: 'eval.batch_run_executed',
+        metadata: {
+          requested_count: requestedSessionIds ? requestedSessionIds.length : sessions.length,
+          executed_count: sessionIds.length,
+          summary: result.summary
+        }
       });
 
       return res.json({
@@ -1884,6 +1996,9 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
     try {
       const { sessionId } = req.params;
       const { query, synthesisType = 'pattern', provider: requestedProvider, model: requestedModel } = req.body;
+      if (String(query || '').length > maxSynthesisQueryChars) {
+        return res.status(413).json({ error: `query exceeds max length (${maxSynthesisQueryChars} chars).` });
+      }
       const [signals, interactions] = await Promise.all([
         storage.getSignalsBySession(sessionId),
         storage.getInteractions(sessionId)

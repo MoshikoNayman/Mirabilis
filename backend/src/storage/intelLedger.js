@@ -16,7 +16,8 @@ const empty = () => ({
   entity_links: [],
   signal_feedback: [],
   prompt_profiles: [],
-  eval_runs: []
+  eval_runs: [],
+  audit_events: []
 });
 const DEFAULT_SIGNAL_EXTRACTOR_VERSION = 'intelledger-signals-v2.4';
 
@@ -175,7 +176,8 @@ function normalizeStoreShape(store) {
     entity_links: Array.isArray(candidate.entity_links) ? candidate.entity_links : [],
     signal_feedback: Array.isArray(candidate.signal_feedback) ? candidate.signal_feedback : [],
     prompt_profiles: Array.isArray(candidate.prompt_profiles) ? candidate.prompt_profiles : [],
-    eval_runs: Array.isArray(candidate.eval_runs) ? candidate.eval_runs : []
+    eval_runs: Array.isArray(candidate.eval_runs) ? candidate.eval_runs : [],
+    audit_events: Array.isArray(candidate.audit_events) ? candidate.audit_events : []
   };
 }
 
@@ -1297,6 +1299,44 @@ export function createIntelLedgerStorage(filePath) {
     async getEvalRunById(runId) {
       const store = await get();
       return store.eval_runs.find((item) => item.id === runId) || null;
+    },
+
+    async appendAuditEvent(event = {}) {
+      return withLock(async () => {
+        const store = await get();
+        const now = new Date().toISOString();
+        const entry = {
+          id: randomUUID(),
+          event_type: String(event.event_type || event.eventType || 'unknown').slice(0, 80),
+          session_id: event.session_id ? String(event.session_id).slice(0, 120) : null,
+          actor_user_id: event.actor_user_id ? String(event.actor_user_id).slice(0, 120) : null,
+          actor_tenant_id: event.actor_tenant_id ? String(event.actor_tenant_id).slice(0, 120) : null,
+          source_ip: event.source_ip ? String(event.source_ip).slice(0, 120) : null,
+          metadata: event.metadata && typeof event.metadata === 'object' ? event.metadata : null,
+          created_at: now
+        };
+
+        store.audit_events.push(entry);
+        store.audit_events = store.audit_events.slice(-5000);
+        await set(store);
+        return entry;
+      });
+    },
+
+    async getAuditEvents(options = {}) {
+      const store = await get();
+      const limit = Math.max(1, Math.min(Number(options.limit || 100) || 100, 500));
+      const sessionId = options.sessionId ? String(options.sessionId) : null;
+      const eventType = options.eventType ? String(options.eventType) : null;
+
+      return store.audit_events
+        .filter((item) => {
+          if (sessionId && item.session_id !== sessionId) return false;
+          if (eventType && item.event_type !== eventType) return false;
+          return true;
+        })
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+        .slice(0, limit);
     },
 
     async runBatchEvaluation(sessionIds = [], options = {}) {
