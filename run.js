@@ -94,18 +94,21 @@ function printStartupSummary(provider, verbose) {
 }
 
 function usage() {
-  process.stdout.write(`Usage: node run.js [provider|command] [args] [--log] [--verbose]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  node run.js\n  node run.js ollama\n  node run.js openai-compatible --log --verbose\n  node run.js doctor\n  node run.js logs\n  node run.js restart koboldcpp --log\n  node run.js install\n  node run.js uninstall\n  node run.js stop\n\n`);
+  process.stdout.write(`Usage: node run.js [provider|command] [args] [--log] [--verbose] [--dev-ui]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n  --dev-ui           - Run frontend with next dev (enables Next.js dev overlay)\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  node run.js\n  node run.js --dev-ui\n  node run.js ollama\n  node run.js openai-compatible --log --verbose\n  node run.js doctor\n  node run.js logs\n  node run.js restart koboldcpp --log\n  node run.js install\n  node run.js uninstall\n  node run.js stop\n\n`);
 }
 
 function parseArgs(argv) {
   let logEnabled = false;
   let verbose = false;
+  let devUi = false;
   const filtered = [];
   for (const arg of argv) {
     if (arg === '--log') {
       logEnabled = true;
     } else if (arg === '--verbose') {
       verbose = true;
+    } else if (arg === '--dev-ui') {
+      devUi = true;
     } else {
       filtered.push(arg);
     }
@@ -113,7 +116,11 @@ function parseArgs(argv) {
   const mode = filtered[0] || 'ui';
   const arg = filtered[1] || '';
   const extraArgs = filtered.slice(1);
-  return { mode, arg, extraArgs, logEnabled, verbose };
+  return { mode, arg, extraArgs, logEnabled, verbose, devUi };
+}
+
+function hasFrontendBuild() {
+  return fs.existsSync(path.join(FRONTEND_DIR, '.next', 'BUILD_ID'));
 }
 
 function normalizeProvider(raw) {
@@ -335,6 +342,23 @@ async function getPidCommandLine(pid) {
   return stdout.trim();
 }
 
+async function getPidWorkingDirectory(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return '';
+
+  if (process.platform === 'win32') {
+    return '';
+  }
+
+  const { code, stdout } = await runCaptured('lsof', ['-a', '-p', String(pid), '-d', 'cwd'], ROOT_DIR);
+  if (code !== 0) return '';
+  const lines = stdout.split('\n');
+  const row = lines.find((line) => /\bcwd\b/.test(line));
+  if (!row) return '';
+  const idx = row.indexOf(' /');
+  if (idx === -1) return '';
+  return row.slice(idx + 1).trim();
+}
+
 async function terminateStaleMirabilisFrontendOnPort(port) {
   const pids = await getListeningPidsOnPort(port);
   if (pids.length === 0) return 0;
@@ -344,11 +368,14 @@ async function terminateStaleMirabilisFrontendOnPort(port) {
 
   for (const pid of pids) {
     const cmdLine = await getPidCommandLine(pid);
+    const cwd = await getPidWorkingDirectory(pid);
     if (!cmdLine) continue;
     const cmdNorm = cmdLine.toLowerCase().replace(/\//g, '\\');
+    const cwdNorm = String(cwd || '').toLowerCase().replace(/\//g, '\\');
     const isMirabilisFrontend =
-      cmdNorm.includes(frontendDirNorm) &&
-      (cmdNorm.includes('next\\dist\\server\\lib\\start-server.js') || cmdNorm.includes('next dev'));
+      (cmdNorm.includes('next\\dist\\server\\lib\\start-server.js') || cmdNorm.includes('next dev') || cmdNorm.includes('next-server')) &&
+      ((cwdNorm.includes('mirabilis') && cwdNorm.includes('frontend')) || cmdNorm.includes('mirabilis')) &&
+      (cwdNorm ? cwdNorm !== frontendDirNorm : !cmdNorm.includes(frontendDirNorm));
 
     if (!isMirabilisFrontend) continue;
     const stopped = await terminatePid(pid);
@@ -356,6 +383,89 @@ async function terminateStaleMirabilisFrontendOnPort(port) {
   }
 
   return terminated;
+}
+
+async function endpointLooksLikeMirabilisFrontend(url) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(2500) });
+    if (!res.ok) return false;
+    const html = (await res.text()).toLowerCase();
+    return html.includes('mirabilis') || html.includes('intelledger');
+  } catch {
+    return false;
+  }
+}
+
+async function classifyFrontendPortOwner(port) {
+  const pids = await getListeningPidsOnPort(port);
+  if (pids.length === 0) {
+    return { kind: 'none', pids: [], sample: '' };
+  }
+
+  const currentFrontendNorm = FRONTEND_DIR.toLowerCase().replace(/\//g, '\\');
+  const owners = [];
+
+  for (const pid of pids) {
+    const cmdLine = await getPidCommandLine(pid);
+    const cwd = await getPidWorkingDirectory(pid);
+    if (!cmdLine) continue;
+
+    const cmdNorm = cmdLine.toLowerCase().replace(/\//g, '\\');
+    const cwdNorm = String(cwd || '').toLowerCase().replace(/\//g, '\\');
+    const isNextFrontend =
+      cmdNorm.includes('next\\dist\\server\\lib\\start-server.js') ||
+      cmdNorm.includes('next dev') ||
+      cmdNorm.includes('next-server');
+
+    if (!isNextFrontend) {
+      owners.push({ pid, type: 'foreign', cmdLine });
+      continue;
+    }
+
+    if (cwdNorm === currentFrontendNorm || cmdNorm.includes(currentFrontendNorm)) {
+      owners.push({ pid, type: 'current', cmdLine });
+      continue;
+    }
+
+    if (cwdNorm && cwdNorm.includes('mirabilis') && cwdNorm.includes('frontend')) {
+      owners.push({ pid, type: 'other-mirabilis', cmdLine });
+      continue;
+    }
+
+    if (cmdNorm.includes('mirabilis') && cmdNorm.includes('frontend')) {
+      owners.push({ pid, type: 'other-mirabilis', cmdLine });
+      continue;
+    }
+
+    if (cmdNorm.includes('next-server')) {
+      owners.push({ pid, type: 'ambiguous-next', cmdLine });
+      continue;
+    }
+
+    owners.push({ pid, type: 'foreign', cmdLine });
+  }
+
+  if (owners.length > 0 && owners.every((o) => o.type === 'ambiguous-next')) {
+    const looksLikeMirabilis = await endpointLooksLikeMirabilisFrontend(`http://127.0.0.1:${port}`);
+    if (looksLikeMirabilis) {
+      return { kind: 'current', pids, sample: owners[0]?.cmdLine || '' };
+    }
+  }
+
+  if (owners.some((o) => o.type === 'foreign')) {
+    const sample = owners.find((o) => o.type === 'foreign')?.cmdLine || '';
+    return { kind: 'foreign', pids, sample };
+  }
+
+  if (owners.some((o) => o.type === 'other-mirabilis')) {
+    return { kind: 'other-mirabilis', pids, sample: owners[0]?.cmdLine || '' };
+  }
+
+  if (owners.some((o) => o.type === 'current')) {
+    return { kind: 'current', pids, sample: owners[0]?.cmdLine || '' };
+  }
+
+  return { kind: 'foreign', pids, sample: owners[0]?.cmdLine || '' };
 }
 
 function ensureDeps() {
@@ -1227,9 +1337,10 @@ function cleanup() {
 }
 
 async function main() {
-  const { mode, arg, extraArgs, logEnabled, verbose } = parseArgs(process.argv.slice(2));
+  const { mode, arg, extraArgs, logEnabled, verbose, devUi } = parseArgs(process.argv.slice(2));
   process.env.MIRABILIS_LOG = logEnabled ? '1' : '0';
   process.env.MIRABILIS_VERBOSE = verbose ? '1' : '0';
+  process.env.MIRABILIS_DEV_UI = devUi ? '1' : '0';
 
   if (mode === '-h' || mode === '--help') {
     usage();
@@ -1291,11 +1402,19 @@ async function main() {
 
   await withPhase('Preflight', async () => {
     ensureDeps();
+    if (!devUi && !hasFrontendBuild()) {
+      statusLine('INFO', 'Frontend production build missing. Running npm run build...');
+      const buildCode = await runForeground(npmCommand(), npmArgs(['run', 'build']), FRONTEND_DIR);
+      if (buildCode !== 0) {
+        throw new Error('Frontend build failed. Run: cd frontend && npm run build');
+      }
+    }
     await ensureImageServicePythonDeps();
     if (verbose) {
       statusLine('INFO', `Node: ${process.version}`);
       statusLine('INFO', `Threads: ${detectThreadCount()}`);
       statusLine('INFO', `Mode: ${provider}`);
+      statusLine('INFO', `Frontend mode: ${devUi ? 'dev' : 'production'}`);
     }
   });
 
@@ -1385,13 +1504,28 @@ async function main() {
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
     const frontendLogFile = path.join(os.tmpdir(), 'frontend.log');
+    const frontendScript = devUi ? 'dev' : 'start';
+    const frontendEnv = devUi
+      ? { ...process.env, PORT: '3000' }
+      : { ...process.env, PORT: '3000', NODE_ENV: 'production' };
+    const frontendOwner = await classifyFrontendPortOwner(3000);
+    if (frontendOwner.kind === 'other-mirabilis') {
+      const terminated = await terminateStaleMirabilisFrontendOnPort(3000);
+      if (terminated > 0) {
+        statusLine('WARN', `Port 3000 had stale Mirabilis frontend from another workspace; terminated ${terminated} process(es)`);
+      }
+    } else if (frontendOwner.kind === 'foreign') {
+      const sample = frontendOwner.sample ? `\n  Occupant: ${frontendOwner.sample}` : '';
+      throw new Error(`Port 3000 is occupied by a non-Mirabilis process. Stop that process or free port 3000.${sample}`);
+    }
+
     try {
       managed.frontend = await ensureServiceRunning({
         label: 'Frontend',
         url: 'http://127.0.0.1:3000',
         timeoutMs: 60000,
         logFile: frontendLogFile,
-        spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', 'dev']), FRONTEND_DIR, { ...process.env, PORT: '3000' }, frontendLogFile, false)
+        spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', frontendScript]), FRONTEND_DIR, frontendEnv, frontendLogFile, false)
       });
     } catch (error) {
       const message = String(error?.message || '');
@@ -1410,7 +1544,7 @@ async function main() {
             url: 'http://127.0.0.1:3000',
             timeoutMs: 60000,
             logFile: frontendLogFile,
-            spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', 'dev']), FRONTEND_DIR, { ...process.env, PORT: '3000' }, frontendLogFile, false)
+            spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', frontendScript]), FRONTEND_DIR, frontendEnv, frontendLogFile, false)
           });
         } else {
           throw error;
