@@ -93,6 +93,9 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
   const [signalConfidenceFilter, setSignalConfidenceFilter] = useState('all');
   const [signalOwnerFilter, setSignalOwnerFilter] = useState('all');
   const [error, setError] = useState('');
+  const [auditSummary, setAuditSummary] = useState(null);
+  const [auditTrends, setAuditTrends] = useState(null);
+  const [auditLoading, setAuditLoading] = useState(false);
   const [usingLocalMode, setUsingLocalMode] = useState(localMode);
 
   const actionStatusCounts = actions.reduce((acc, action) => {
@@ -229,6 +232,31 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
       clearInterval(timer);
     };
   }, [sessionId, localMode, usingLocalMode, activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'audit' || localMode || usingLocalMode || !userId) return undefined;
+    let mounted = true;
+    const load = async () => {
+      setAuditLoading(true);
+      try {
+        const [sumRes, trendRes] = await Promise.all([
+          fetch(`${API_BASE}/api/intelledger/audit/summary?userId=${encodeURIComponent(userId)}&since_hours=168&limit=2000`),
+          fetch(`${API_BASE}/api/intelledger/audit/trends?userId=${encodeURIComponent(userId)}`)
+        ]);
+        const [sumPayload, trendPayload] = await Promise.all([sumRes.json(), trendRes.json()]);
+        if (mounted) {
+          setAuditSummary(sumPayload?.summary || null);
+          setAuditTrends(trendPayload?.trends || null);
+        }
+      } catch {
+        if (mounted) { setAuditSummary(null); setAuditTrends(null); }
+      } finally {
+        if (mounted) setAuditLoading(false);
+      }
+    };
+    load();
+    return () => { mounted = false; };
+  }, [activeTab, userId, localMode, usingLocalMode]);
 
   const formatMs = (value) => {
     const ms = Math.max(0, Number(value || 0));
@@ -595,7 +623,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {['interactions', 'signals', 'actions', 'synthesis'].map((tab) => (
+            {['interactions', 'signals', 'actions', 'synthesis', 'audit'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -1029,6 +1057,113 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {activeTab === 'audit' && (
+            <div className="space-y-6">
+              {auditLoading && (
+                <div className="text-sm text-slate-500 dark:text-slate-400">Loading audit data…</div>
+              )}
+              {!auditLoading && !auditSummary && !auditTrends && (
+                <div className="rounded-xl border border-black/10 bg-white/60 px-5 py-8 text-center text-sm text-slate-500 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-400">
+                  No audit data available. Activity is recorded as you use IntelLedger.
+                </div>
+              )}
+
+              {auditSummary && (
+                <div className="rounded-xl border border-black/10 bg-white/60 p-4 dark:border-white/10 dark:bg-slate-900/40">
+                  <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">7-Day Activity Summary</div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {[
+                      { label: 'Events', value: auditSummary.event_count },
+                      { label: 'Sessions', value: auditSummary.unique_sessions },
+                      { label: 'Sampled', value: auditSummary.sampled_events },
+                      { label: 'Window (h)', value: auditSummary.since_hours }
+                    ].map(({ label, value }) => (
+                      <div key={label} className="rounded-lg border border-black/8 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-800/50">
+                        <div className="text-[18px] font-bold text-slate-800 dark:text-slate-100">{value ?? '—'}</div>
+                        <div className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {Array.isArray(auditSummary.event_types) && auditSummary.event_types.length > 0 && (
+                    <div className="mt-4">
+                      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Top Event Types</div>
+                      <div className="space-y-1.5">
+                        {auditSummary.event_types.slice(0, 8).map((item) => {
+                          const maxCount = auditSummary.event_types[0]?.count || 1;
+                          const pct = Math.round((item.count / maxCount) * 100);
+                          return (
+                            <div key={item.event_type} className="flex items-center gap-2">
+                              <div className="w-44 shrink-0 truncate text-[11px] text-slate-600 dark:text-slate-300">{item.event_type}</div>
+                              <div className="relative flex-1 overflow-hidden rounded-full bg-black/5 dark:bg-white/8" style={{ height: 6 }}>
+                                <div className="absolute inset-y-0 left-0 rounded-full bg-accent/60" style={{ width: `${pct}%` }} />
+                              </div>
+                              <div className="w-8 shrink-0 text-right text-[11px] font-medium text-slate-600 dark:text-slate-400">{item.count}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {auditTrends && (
+                <div className="space-y-4">
+                  {/* 30-day daily bar chart */}
+                  {Array.isArray(auditTrends.daily_30) && auditTrends.daily_30.length > 0 && (() => {
+                    const maxCount = Math.max(...auditTrends.daily_30.map((b) => b.count), 1);
+                    return (
+                      <div className="rounded-xl border border-black/10 bg-white/60 p-4 dark:border-white/10 dark:bg-slate-900/40">
+                        <div className="mb-3 flex items-center justify-between">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">30-Day Daily Events</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">{auditTrends.event_count_30d} total</div>
+                        </div>
+                        <div className="flex h-16 items-end gap-px">
+                          {auditTrends.daily_30.map((bucket) => {
+                            const h = maxCount > 0 ? Math.max(2, Math.round((bucket.count / maxCount) * 100)) : 2;
+                            const isToday = bucket.date === new Date().toISOString().slice(0, 10);
+                            return (
+                              <div key={bucket.date} title={`${bucket.date}: ${bucket.count}`} className="flex-1 rounded-sm transition-opacity hover:opacity-80" style={{ height: `${h}%`, background: isToday ? 'var(--color-accent, #1aa86f)' : 'rgb(148 163 184 / 0.5)' }} />
+                            );
+                          })}
+                        </div>
+                        <div className="mt-1 flex justify-between text-[10px] text-slate-400">
+                          <span>{auditTrends.daily_30[0]?.date?.slice(5)}</span>
+                          <span>today</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Top types per window */}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {[['24h', auditTrends.top_types_24h, auditTrends.event_count_24h], ['7d', auditTrends.top_types_7d, auditTrends.event_count_7d], ['30d', auditTrends.top_types_30d, auditTrends.event_count_30d]].map(([label, types, total]) => (
+                      <div key={label} className="rounded-xl border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-slate-900/40">
+                        <div className="mb-2 flex items-center justify-between">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Top types — {label}</div>
+                          <div className="text-[11px] font-medium text-slate-600 dark:text-slate-400">{total}</div>
+                        </div>
+                        {Array.isArray(types) && types.length > 0 ? (
+                          <ul className="space-y-1">
+                            {types.slice(0, 5).map((item) => (
+                              <li key={item.event_type} className="flex items-center justify-between gap-2">
+                                <span className="truncate text-[11px] text-slate-600 dark:text-slate-300">{item.event_type.replace(/\./g, ' › ')}</span>
+                                <span className="shrink-0 text-[11px] font-semibold text-slate-700 dark:text-slate-200">{item.count}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="text-[11px] text-slate-400">No events</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
