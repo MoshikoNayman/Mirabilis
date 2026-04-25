@@ -3,6 +3,8 @@ backend/node_modules/
 frontend/.next/
 frontend/out/
 backend/data/chats.json
+backend/data/intelledger.json
+backend/data/intelledger-media/
 backend/data/chats/
 backend/data/memory/
 backend/data/training/
@@ -37,6 +39,7 @@ models/
 .idea/
 *.swp
 image-service/models/
+image-service/.cache/
 image-service/__pycache__/
 __pycache__/
 *.pyc
