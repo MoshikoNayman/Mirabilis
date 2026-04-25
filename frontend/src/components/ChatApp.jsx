@@ -4,8 +4,38 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+
+function safeStorageGet(key, fallback = null) {
+  try {
+    if (typeof window === 'undefined') return fallback;
+    const value = window.localStorage.getItem(key);
+    return value ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore storage write failures to keep the UI usable.
+  }
+}
+
+function safeStorageRemove(key) {
+  try {
+    if (typeof window === 'undefined') return;
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore storage removal failures to keep the UI usable.
+  }
+}
+
 function buildDefaultSystemPrompt(providerId) {
   const runtimeLine = providerId === 'ollama' || providerId === 'koboldcpp'
     ? 'You are running entirely on the user\'s own device.'
@@ -1025,16 +1055,16 @@ export default function ChatApp() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingLabel, setStreamingLabel] = useState('');
   const [themeMode, setThemeMode] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('local-ai-theme-mode') || 'auto';
+    if (typeof window !== 'undefined') return safeStorageGet('local-ai-theme-mode', 'auto');
     return 'auto';
   });
   const [uiFont, setUiFont] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-font') || 'jakarta';
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-font', 'jakarta');
     return 'jakarta';
   });
   const [colorScheme, setColorScheme] = useState(() => {
     if (typeof window !== 'undefined') {
-      const v = window.localStorage.getItem('mirabilis-color-scheme') || 'mirabilis';
+      const v = safeStorageGet('mirabilis-color-scheme', 'mirabilis');
       return ['mirabilis','ember','summit'].includes(v) ? v : 'mirabilis';
     }
     return 'mirabilis';
@@ -1042,12 +1072,12 @@ export default function ChatApp() {
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
   const [models, setModels] = useState([]);
   const [provider, setProvider] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-provider') || 'ollama';
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-provider', 'ollama');
     return 'ollama';
   });
   const [providerConfigs, setProviderConfigs] = useState(() => {
     if (typeof window !== 'undefined') {
-      const stored = window.localStorage.getItem('mirabilis-provider-configs');
+      const stored = safeStorageGet('mirabilis-provider-configs');
       if (stored) try { return JSON.parse(stored); } catch {}
     }
     return {
@@ -1068,19 +1098,19 @@ export default function ChatApp() {
   const [customPromptProfiles, setCustomPromptProfiles] = useState(() => {
     if (typeof window !== 'undefined') {
       try {
-        return sanitizeCustomPromptProfiles(JSON.parse(window.localStorage.getItem('mirabilis-custom-prompt-profiles') || '[]'));
+        return sanitizeCustomPromptProfiles(JSON.parse(safeStorageGet('mirabilis-custom-prompt-profiles', '[]') || '[]'));
       } catch {}
     }
     return [];
   });
   const [selectedPromptProfileId, setSelectedPromptProfileId] = useState(() => {
     if (typeof window !== 'undefined') {
-      return window.localStorage.getItem('mirabilis-prompt-profile-id') || 'mirabilis-default';
+      return safeStorageGet('mirabilis-prompt-profile-id', 'mirabilis-default');
     }
     return 'mirabilis-default';
   });
   const [model, setModel] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('local-ai-model') || 'auto';
+    if (typeof window !== 'undefined') return safeStorageGet('local-ai-model', 'auto');
     return 'auto';
   });
   const [systemPrompt, setSystemPrompt] = useState(buildDefaultSystemPrompt(provider));
@@ -1100,11 +1130,11 @@ export default function ChatApp() {
   const [isEngineMenuOpen, setIsEngineMenuOpen] = useState(false);
   const [isSystemPromptVisible, setIsSystemPromptVisible] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-sidebar-open') !== 'false';
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-sidebar-open', 'true') !== 'false';
     return true;
   });
   const [selectedEngine, setSelectedEngine] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-engine-option') || '';
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-engine-option', '');
     return '';
   });
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
@@ -1119,7 +1149,7 @@ export default function ChatApp() {
   const [trainingMode, setTrainingMode] = useState('off');
   const [usePersonalMemory, setUsePersonalMemory] = useState(true);
   const [openClawMode, setOpenClawMode] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-openclaw') === 'true';
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-openclaw', 'false') === 'true';
     return false;
   });
 
@@ -1133,29 +1163,29 @@ export default function ChatApp() {
   const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
   const [availableVoices, setAvailableVoices] = useState([]);
   const [selectedVoiceUri, setSelectedVoiceUri] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-voice-uri') || '';
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-voice-uri', '');
     return '';
   });
   const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-auto-speak') === 'true';
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-auto-speak', 'false') === 'true';
     return false;
   });
   const [voiceRate, setVoiceRate] = useState(() => {
-    if (typeof window !== 'undefined') return Number(window.localStorage.getItem('mirabilis-voice-rate') || '1');
+    if (typeof window !== 'undefined') return Number(safeStorageGet('mirabilis-voice-rate', '1') || '1');
     return 1;
   });
   const [voicePitch, setVoicePitch] = useState(() => {
-    if (typeof window !== 'undefined') return Number(window.localStorage.getItem('mirabilis-voice-pitch') || '1');
+    if (typeof window !== 'undefined') return Number(safeStorageGet('mirabilis-voice-pitch', '1') || '1');
     return 1;
   });
   const [voiceTools, setVoiceTools] = useState(null);
   const [isSettingUpVoiceTools, setIsSettingUpVoiceTools] = useState(false);
   const [voiceEngine, setVoiceEngine] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-voice-engine') || 'browser';
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-voice-engine', 'browser');
     return 'browser';
   });
   const [selectedPiperModelId, setSelectedPiperModelId] = useState(() => {
-    if (typeof window !== 'undefined') return window.localStorage.getItem('mirabilis-piper-model') || '';
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-piper-model', '');
     return '';
   });
   const [piperModels, setPiperModels] = useState([]);
@@ -1163,7 +1193,7 @@ export default function ChatApp() {
   const [isDragOverChat, setIsDragOverChat] = useState(false);
   const [deepWebEnabled, setDeepWebEnabled] = useState(() => {
     if (typeof window !== 'undefined') {
-      const saved = window.localStorage.getItem('local-ai-deep-web-enabled');
+      const saved = safeStorageGet('local-ai-deep-web-enabled');
       return saved === null ? true : saved === 'true'; // default ON
     }
     return true;
@@ -1198,27 +1228,27 @@ export default function ChatApp() {
   const [chatSearch, setChatSearch] = useState('');
   const [pinnedChatIds, setPinnedChatIds] = useState(() => {
     if (typeof window !== 'undefined') {
-      try { return new Set(JSON.parse(window.localStorage.getItem('mirabilis-pinned-chats') || '[]')); } catch { return new Set(); }
+      try { return new Set(JSON.parse(safeStorageGet('mirabilis-pinned-chats', '[]') || '[]')); } catch { return new Set(); }
     }
     return new Set();
   });
   const [temperature, setTemperature] = useState(() => {
     if (typeof window !== 'undefined') {
-      const v = window.localStorage.getItem('mirabilis-temperature');
+      const v = safeStorageGet('mirabilis-temperature');
       return v === null ? null : Number(v);
     }
     return null;
   });
   const [maxTokens, setMaxTokens] = useState(() => {
     if (typeof window !== 'undefined') {
-      const v = window.localStorage.getItem('mirabilis-max-tokens');
+      const v = safeStorageGet('mirabilis-max-tokens');
       return v === null ? null : Number(v);
     }
     return null;
   });
   const [remoteBudgetUsd, setRemoteBudgetUsd] = useState(() => {
     if (typeof window !== 'undefined') {
-      const v = Number(window.localStorage.getItem('mirabilis-remote-budget-usd') || '20');
+      const v = Number(safeStorageGet('mirabilis-remote-budget-usd', '20') || '20');
       return Number.isFinite(v) && v > 0 ? v : 20;
     }
     return 20;
@@ -1274,17 +1304,17 @@ export default function ChatApp() {
   );
 
   useEffect(() => {
-    const savedThemeMode = window.localStorage.getItem('local-ai-theme-mode');
-    const savedModel = window.localStorage.getItem('local-ai-model');
-    const savedPrompt = window.localStorage.getItem('local-ai-system-prompt');
-    const savedPromptProfileId = window.localStorage.getItem('mirabilis-prompt-profile-id') || 'mirabilis-default';
-    const savedDeepWeb = window.localStorage.getItem('local-ai-deep-web-enabled');
-    const savedCanvasEnabled = window.localStorage.getItem('local-ai-canvas-enabled');
-    const savedCanvasText = window.localStorage.getItem('local-ai-canvas-text');
-    const savedGuided = window.localStorage.getItem('local-ai-guided-learning-enabled');
-    const savedDeepThinking = window.localStorage.getItem('local-ai-deep-thinking-enabled');
-    const savedTrainingMode = window.localStorage.getItem('local-ai-training-mode');
-    const savedPersonalMemory = window.localStorage.getItem('local-ai-use-personal-memory');
+    const savedThemeMode = safeStorageGet('local-ai-theme-mode');
+    const savedModel = safeStorageGet('local-ai-model');
+    const savedPrompt = safeStorageGet('local-ai-system-prompt');
+    const savedPromptProfileId = safeStorageGet('mirabilis-prompt-profile-id', 'mirabilis-default');
+    const savedDeepWeb = safeStorageGet('local-ai-deep-web-enabled');
+    const savedCanvasEnabled = safeStorageGet('local-ai-canvas-enabled');
+    const savedCanvasText = safeStorageGet('local-ai-canvas-text');
+    const savedGuided = safeStorageGet('local-ai-guided-learning-enabled');
+    const savedDeepThinking = safeStorageGet('local-ai-deep-thinking-enabled');
+    const savedTrainingMode = safeStorageGet('local-ai-training-mode');
+    const savedPersonalMemory = safeStorageGet('local-ai-use-personal-memory');
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
 
     setSystemPrefersDark(prefersDark);
@@ -1390,15 +1420,15 @@ export default function ChatApp() {
   }, [selectedVoiceUri]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-voice-uri', selectedVoiceUri || '');
+    safeStorageSet('mirabilis-voice-uri', selectedVoiceUri || '');
   }, [selectedVoiceUri]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-auto-speak', autoSpeakEnabled ? 'true' : 'false');
+    safeStorageSet('mirabilis-auto-speak', autoSpeakEnabled ? 'true' : 'false');
   }, [autoSpeakEnabled]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-provider', provider);
+    safeStorageSet('mirabilis-provider', provider);
   }, [provider]);
 
   useEffect(() => {
@@ -1485,46 +1515,46 @@ export default function ChatApp() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-provider-configs', JSON.stringify(providerConfigs));
+    safeStorageSet('mirabilis-provider-configs', JSON.stringify(providerConfigs));
   }, [providerConfigs]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-openclaw', openClawMode ? 'true' : 'false');
+    safeStorageSet('mirabilis-openclaw', openClawMode ? 'true' : 'false');
   }, [openClawMode]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-voice-rate', String(voiceRate));
+    safeStorageSet('mirabilis-voice-rate', String(voiceRate));
   }, [voiceRate]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-voice-pitch', String(voicePitch));
+    safeStorageSet('mirabilis-voice-pitch', String(voicePitch));
   }, [voicePitch]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-voice-engine', voiceEngine);
+    safeStorageSet('mirabilis-voice-engine', voiceEngine);
   }, [voiceEngine]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-piper-model', selectedPiperModelId || '');
+    safeStorageSet('mirabilis-piper-model', selectedPiperModelId || '');
   }, [selectedPiperModelId]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-pinned-chats', JSON.stringify(Array.from(pinnedChatIds)));
+    safeStorageSet('mirabilis-pinned-chats', JSON.stringify(Array.from(pinnedChatIds)));
   }, [pinnedChatIds]);
 
   useEffect(() => {
-    if (temperature === null) window.localStorage.removeItem('mirabilis-temperature');
-    else window.localStorage.setItem('mirabilis-temperature', String(temperature));
+    if (temperature === null) safeStorageRemove('mirabilis-temperature');
+    else safeStorageSet('mirabilis-temperature', String(temperature));
   }, [temperature]);
 
   useEffect(() => {
-    if (maxTokens === null) window.localStorage.removeItem('mirabilis-max-tokens');
-    else window.localStorage.setItem('mirabilis-max-tokens', String(maxTokens));
+    if (maxTokens === null) safeStorageRemove('mirabilis-max-tokens');
+    else safeStorageSet('mirabilis-max-tokens', String(maxTokens));
   }, [maxTokens]);
 
   useEffect(() => {
     if (Number.isFinite(remoteBudgetUsd) && remoteBudgetUsd > 0) {
-      window.localStorage.setItem('mirabilis-remote-budget-usd', String(remoteBudgetUsd));
+      safeStorageSet('mirabilis-remote-budget-usd', String(remoteBudgetUsd));
     }
   }, [remoteBudgetUsd]);
 
@@ -1704,7 +1734,7 @@ export default function ChatApp() {
   useEffect(() => {
     const applyDark = themeMode === 'dark' || (themeMode === 'auto' && systemPrefersDark);
     document.documentElement.classList.toggle('dark', applyDark);
-    window.localStorage.setItem('local-ai-theme-mode', themeMode);
+    safeStorageSet('local-ai-theme-mode', themeMode);
   }, [themeMode, systemPrefersDark]);
 
   useEffect(() => {
@@ -1713,7 +1743,7 @@ export default function ChatApp() {
     } else {
       document.documentElement.setAttribute('data-font', uiFont);
     }
-    window.localStorage.setItem('mirabilis-font', uiFont);
+    safeStorageSet('mirabilis-font', uiFont);
   }, [uiFont]);
 
   useEffect(() => {
@@ -1722,7 +1752,7 @@ export default function ChatApp() {
     } else {
       document.documentElement.setAttribute('data-color-scheme', colorScheme);
     }
-    window.localStorage.setItem('mirabilis-color-scheme', colorScheme);
+    safeStorageSet('mirabilis-color-scheme', colorScheme);
   }, [colorScheme]);
 
   useEffect(() => {
@@ -1739,19 +1769,19 @@ export default function ChatApp() {
   }, [isStreaming]);
 
   useEffect(() => {
-    window.localStorage.setItem('local-ai-model', model);
+    safeStorageSet('local-ai-model', model);
   }, [model]);
 
   useEffect(() => {
-    window.localStorage.setItem('local-ai-system-prompt', systemPrompt);
+    safeStorageSet('local-ai-system-prompt', systemPrompt);
   }, [systemPrompt]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-prompt-profile-id', selectedPromptProfileId || UNSAVED_PROMPT_PROFILE_ID);
+    safeStorageSet('mirabilis-prompt-profile-id', selectedPromptProfileId || UNSAVED_PROMPT_PROFILE_ID);
   }, [selectedPromptProfileId]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-custom-prompt-profiles', JSON.stringify(customPromptProfiles));
+    safeStorageSet('mirabilis-custom-prompt-profiles', JSON.stringify(customPromptProfiles));
   }, [customPromptProfiles]);
 
   useEffect(() => {
@@ -1777,32 +1807,32 @@ export default function ChatApp() {
   }, [activeChatId, systemPrompt, selectedPromptProfileId]);
 
   useEffect(() => {
-    window.localStorage.setItem('local-ai-deep-web-enabled', String(deepWebEnabled));
+    safeStorageSet('local-ai-deep-web-enabled', String(deepWebEnabled));
     if (!deepWebEnabled) setWebSearchStatus('idle');
   }, [deepWebEnabled]);
 
   useEffect(() => {
-    window.localStorage.setItem('local-ai-canvas-enabled', String(canvasEnabled));
+    safeStorageSet('local-ai-canvas-enabled', String(canvasEnabled));
   }, [canvasEnabled]);
 
   useEffect(() => {
-    window.localStorage.setItem('local-ai-canvas-text', canvasText);
+    safeStorageSet('local-ai-canvas-text', canvasText);
   }, [canvasText]);
 
   useEffect(() => {
-    window.localStorage.setItem('local-ai-guided-learning-enabled', String(guidedLearningEnabled));
+    safeStorageSet('local-ai-guided-learning-enabled', String(guidedLearningEnabled));
   }, [guidedLearningEnabled]);
 
   useEffect(() => {
-    window.localStorage.setItem('local-ai-deep-thinking-enabled', String(deepThinkingEnabled));
+    safeStorageSet('local-ai-deep-thinking-enabled', String(deepThinkingEnabled));
   }, [deepThinkingEnabled]);
 
   useEffect(() => {
-    window.localStorage.setItem('local-ai-training-mode', trainingMode);
+    safeStorageSet('local-ai-training-mode', trainingMode);
   }, [trainingMode]);
 
   useEffect(() => {
-    window.localStorage.setItem('local-ai-use-personal-memory', String(usePersonalMemory));
+    safeStorageSet('local-ai-use-personal-memory', String(usePersonalMemory));
   }, [usePersonalMemory]);
 
   async function refreshTrainingStats() {
@@ -3120,7 +3150,7 @@ export default function ChatApp() {
   }, [selectedMcpServer]);
 
   useEffect(() => {
-    window.localStorage.setItem('mirabilis-engine-option', selectedEngine);
+    safeStorageSet('mirabilis-engine-option', selectedEngine);
   }, [selectedEngine]);
 
   // Auto-scroll to bottom while streaming new tokens — throttled to one rAF per frame.
@@ -3963,7 +3993,7 @@ export default function ChatApp() {
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setSidebarOpen((v) => { const next = !v; window.localStorage.setItem('mirabilis-sidebar-open', String(next)); return next; })}
+                  onClick={() => setSidebarOpen((v) => { const next = !v; safeStorageSet('mirabilis-sidebar-open', String(next)); return next; })}
                   title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
                   className="rounded p-1 text-slate-400 transition hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
                 >
@@ -5771,9 +5801,9 @@ export default function ChatApp() {
         </section>
       </div>
       <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-slate-700/90 dark:text-slate-300/90">
-        Mirabilis AI by Moshiko Nayman
+        {APP_FOOTER_TEXT}
         <span className="mx-1.5 opacity-40">·</span>
-          <span className="opacity-55">v26.3R1-S25</span>
+          <span className="opacity-55">v{APP_VERSION}</span>
       </footer>
     </main>
   );

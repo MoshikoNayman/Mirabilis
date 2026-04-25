@@ -94,13 +94,14 @@ function printStartupSummary(provider, verbose) {
 }
 
 function usage() {
-  process.stdout.write(`Usage: node run.js [provider|command] [args] [--log] [--verbose] [--dev-ui]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n  --dev-ui           - Run frontend with next dev (enables Next.js dev overlay)\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  node run.js\n  node run.js --dev-ui\n  node run.js ollama\n  node run.js openai-compatible --log --verbose\n  node run.js doctor\n  node run.js logs\n  node run.js restart koboldcpp --log\n  node run.js install\n  node run.js uninstall\n  node run.js stop\n\n`);
+  process.stdout.write(`Usage: node run.js [provider|command] [args] [--log] [--verbose] [--prod-ui]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n  --dev-ui           - Force frontend dev mode (next dev, hot reload)\n  --prod-ui          - Force frontend production mode (next start, requires build)\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  node run.js\n  node run.js restart ui\n  node run.js --prod-ui\n  node run.js ollama\n  node run.js openai-compatible --log --verbose\n  node run.js doctor\n  node run.js logs\n  node run.js restart koboldcpp --log\n  node run.js install\n  node run.js uninstall\n  node run.js stop\n\n`);
 }
 
 function parseArgs(argv) {
   let logEnabled = false;
   let verbose = false;
-  let devUi = false;
+  let devUi = true;
+  let prodUi = false;
   const filtered = [];
   for (const arg of argv) {
     if (arg === '--log') {
@@ -109,6 +110,10 @@ function parseArgs(argv) {
       verbose = true;
     } else if (arg === '--dev-ui') {
       devUi = true;
+      prodUi = false;
+    } else if (arg === '--prod-ui') {
+      prodUi = true;
+      devUi = false;
     } else {
       filtered.push(arg);
     }
@@ -116,7 +121,7 @@ function parseArgs(argv) {
   const mode = filtered[0] || 'ui';
   const arg = filtered[1] || '';
   const extraArgs = filtered.slice(1);
-  return { mode, arg, extraArgs, logEnabled, verbose, devUi };
+  return { mode, arg, extraArgs, logEnabled, verbose, devUi, prodUi };
 }
 
 function hasFrontendBuild() {
@@ -1337,10 +1342,11 @@ function cleanup() {
 }
 
 async function main() {
-  const { mode, arg, extraArgs, logEnabled, verbose, devUi } = parseArgs(process.argv.slice(2));
+  const { mode, arg, extraArgs, logEnabled, verbose, devUi, prodUi } = parseArgs(process.argv.slice(2));
+  const uiDevMode = devUi && !prodUi;
   process.env.MIRABILIS_LOG = logEnabled ? '1' : '0';
   process.env.MIRABILIS_VERBOSE = verbose ? '1' : '0';
-  process.env.MIRABILIS_DEV_UI = devUi ? '1' : '0';
+  process.env.MIRABILIS_DEV_UI = uiDevMode ? '1' : '0';
 
   if (mode === '-h' || mode === '--help') {
     usage();
@@ -1402,7 +1408,7 @@ async function main() {
 
   await withPhase('Preflight', async () => {
     ensureDeps();
-    if (!devUi && !hasFrontendBuild()) {
+    if (!uiDevMode && !hasFrontendBuild()) {
       statusLine('INFO', 'Frontend production build missing. Running npm run build...');
       const buildCode = await runForeground(npmCommand(), npmArgs(['run', 'build']), FRONTEND_DIR);
       if (buildCode !== 0) {
@@ -1414,7 +1420,7 @@ async function main() {
       statusLine('INFO', `Node: ${process.version}`);
       statusLine('INFO', `Threads: ${detectThreadCount()}`);
       statusLine('INFO', `Mode: ${provider}`);
-      statusLine('INFO', `Frontend mode: ${devUi ? 'dev' : 'production'}`);
+      statusLine('INFO', `Frontend mode: ${uiDevMode ? 'dev' : 'production'}`);
     }
   });
 
@@ -1504,8 +1510,8 @@ async function main() {
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
     const frontendLogFile = path.join(os.tmpdir(), 'frontend.log');
-    const frontendScript = devUi ? 'dev' : 'start';
-    const frontendEnv = devUi
+    const frontendScript = uiDevMode ? 'dev' : 'start';
+    const frontendEnv = uiDevMode
       ? { ...process.env, PORT: '3000' }
       : { ...process.env, PORT: '3000', NODE_ENV: 'production' };
     const frontendOwner = await classifyFrontendPortOwner(3000);

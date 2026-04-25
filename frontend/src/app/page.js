@@ -1,11 +1,5 @@
-'use client';
-
-import dynamic from 'next/dynamic';
-
-const MirabilisApp = dynamic(() => import('../components/MirabilisApp'), {
-  ssr: false
-});
+import MirabilisAppLoader from '../components/MirabilisAppLoader';
 
 export default function HomePage() {
-  return <MirabilisApp />;
+  return <MirabilisAppLoader />;
 }
