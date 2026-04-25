@@ -10,6 +10,79 @@ import { spawn } from 'node:child_process';
 import { resolveIntelLedgerIdentity } from '../intelLedgerIdentity.js';
 
 const INTELLEDGER_SIGNAL_EXTRACTOR_VERSION = 'intelledger-signals-v2.4';
+const DEFAULT_PROMPT_PROFILES = {
+  signal_extraction: {
+    id: 'signal-extraction-v1',
+    label: 'Signal Extraction v1',
+    system_prompt: 'You are a precise signal extractor. Return only valid JSON.',
+    user_template: [
+      'Extract structured signals from this note. Return ONLY valid JSON and no extra text.',
+      '',
+      'For each signal include:',
+      '- type: one of commitment | risk | decision | ask | opportunity',
+      '- value: the full sentence or clause (string)',
+      '- owner: person responsible (string or null)',
+      '- due_date: deadline if mentioned (string or null)',
+      '- confidence: 0.0–1.0 (number)',
+      '',
+      'Return shape:',
+      '{ "signals": [ { "type": "...", "value": "...", "owner": null, "due_date": null, "confidence": 0.85 } ] }',
+      '',
+      'Note:',
+      '{{content}}'
+    ].join('\n')
+  },
+  session_synthesis: {
+    id: 'session-synthesis-v1',
+    label: 'Session Synthesis v1',
+    system_prompt: 'You are an analyst. Return only valid JSON. Be concise and practical.',
+    user_template: [
+      'Goal: {{query}}',
+      '',
+      'Interactions:',
+      '{{interactions}}',
+      '',
+      'Extracted signals:',
+      '{{signals}}',
+      '',
+      'Return valid JSON with this exact shape:',
+      '{',
+      '  "summary": "short paragraph",',
+      '  "key_decisions": ["..."],',
+      '  "risks": ["..."],',
+      '  "commitments": ["..."],',
+      '  "opportunities": ["..."],',
+      '  "next_actions": ["..."],',
+      '  "open_questions": ["..."]',
+      '}'
+    ].join('\n')
+  },
+  cross_session_synthesis: {
+    id: 'cross-session-synthesis-v1',
+    label: 'Cross Session Synthesis v1',
+    system_prompt: 'You are a strategic analyst. Return only valid JSON.',
+    user_template: [
+      'Analyse these {{sessionCount}} sessions and return a cross-session synthesis.',
+      'Focus: {{query}}',
+      '',
+      '{{sessionBlocks}}',
+      '',
+      'Return valid JSON with this exact shape:',
+      '{',
+      '  "summary": "overall paragraph covering what these sessions share",',
+      '  "cross_session_patterns": ["pattern 1", "pattern 2"],',
+      '  "aggregated_risks": ["risk 1", "risk 2"],',
+      '  "combined_next_actions": ["action 1", "action 2"],',
+      '  "key_decisions": ["decision 1"],',
+      '  "open_questions": ["question 1"]',
+      '}'
+    ].join('\n')
+  }
+};
+
+function renderPromptTemplate(template, variables = {}) {
+  return String(template || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => String(variables[key] ?? ''));
+}
 
 function isGenericSessionTitle(title) {
   const normalized = String(title || '').trim().toLowerCase();
@@ -59,7 +132,7 @@ function extractDueDate(sentence) {
 
 function extractSignalsWithFallback(rawText, aiSignals) {
   const parsed = Array.isArray(aiSignals) ? aiSignals.filter(Boolean) : [];
-  if (parsed.length > 0) return parsed;
+  if (parsed.length > 0) return parsed; 
   return extractStructuredSignals(rawText);
 }
 
@@ -161,7 +234,7 @@ function buildActionQueue(signals) {
     .slice(0, 12);
 }
 
-function buildSynthesisPrompt({ query, interactions, signals }) {
+function buildSynthesisPrompt({ query, interactions, signals, template = null }) {
   const interactionLines = interactions
     .slice(0, 25)
     .map((item, index) => `${index + 1}. [${item.type}] ${String(item.raw_content || '').slice(0, 240)}`)
@@ -172,26 +245,12 @@ function buildSynthesisPrompt({ query, interactions, signals }) {
     .map((item, index) => `${index + 1}. [${item.signal_type}] ${item.value}`)
     .join('\n');
 
-  return [
-    `Goal: ${query || 'Summarize this session and suggest next actions.'}`,
-    '',
-    'Interactions:',
-    interactionLines || 'None',
-    '',
-    'Extracted signals:',
-    signalLines || 'None',
-    '',
-    'Return valid JSON with this exact shape:',
-    '{',
-    '  "summary": "short paragraph",',
-    '  "key_decisions": ["..."],',
-    '  "risks": ["..."],',
-    '  "commitments": ["..."],',
-    '  "opportunities": ["..."],',
-    '  "next_actions": ["..."],',
-    '  "open_questions": ["..."]',
-    '}'
-  ].join('\n');
+  const selectedTemplate = template || DEFAULT_PROMPT_PROFILES.session_synthesis.user_template;
+  return renderPromptTemplate(selectedTemplate, {
+    query: query || 'Summarize this session and suggest next actions.',
+    interactions: interactionLines || 'None',
+    signals: signalLines || 'None'
+  });
 }
 
 function parseDueDateValue(value) {
@@ -614,6 +673,28 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
     return false;
   };
 
+  const resolvePromptProfile = async (profileId) => {
+    const fallback = DEFAULT_PROMPT_PROFILES[profileId];
+    if (typeof storage.resolvePromptVersion === 'function') {
+      return storage.resolvePromptVersion(profileId, fallback ? {
+        id: fallback.id,
+        label: fallback.label,
+        system_prompt: fallback.system_prompt,
+        user_template: fallback.user_template
+      } : null);
+    }
+
+    if (!fallback) return null;
+    return {
+      profile_id: profileId,
+      id: fallback.id,
+      label: fallback.label,
+      system_prompt: fallback.system_prompt,
+      user_template: fallback.user_template,
+      is_fallback: true
+    };
+  };
+
   const getSessionTenantId = (session) => String(session?.tenant_id || session?.user_id || 'default').trim();
 
   router.use('/sessions/:sessionId', async (req, res, next) => {
@@ -638,6 +719,94 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       return next();
     } catch (err) {
       return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/prompts/profiles', async (req, res) => {
+    try {
+      const registryRows = typeof storage.listPromptProfiles === 'function'
+        ? await storage.listPromptProfiles()
+        : [];
+
+      const knownProfileIds = new Set([
+        ...Object.keys(DEFAULT_PROMPT_PROFILES),
+        ...registryRows.map((item) => item.profile_id)
+      ]);
+
+      const profiles = await Promise.all(
+        Array.from(knownProfileIds).sort().map(async (profileId) => {
+          const resolved = await resolvePromptProfile(profileId);
+          const registry = registryRows.find((item) => item.profile_id === profileId) || null;
+          return {
+            profile_id: profileId,
+            active_version_id: resolved?.id || registry?.active_version_id || null,
+            active_label: resolved?.label || null,
+            is_fallback: Boolean(resolved?.is_fallback),
+            version_count: Number(registry?.version_count || 0),
+            updated_at: registry?.updated_at || null
+          };
+        })
+      );
+
+      res.json({ profiles });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/prompts/profiles/:profileId', async (req, res) => {
+    try {
+      const profileId = String(req.params.profileId || '').trim().toLowerCase();
+      const profile = typeof storage.getPromptProfile === 'function'
+        ? await storage.getPromptProfile(profileId)
+        : null;
+      const resolved = await resolvePromptProfile(profileId);
+      if (!resolved && !profile) {
+        return res.status(404).json({ error: 'Prompt profile not found.' });
+      }
+
+      return res.json({
+        profile: {
+          profile_id: profileId,
+          active_version_id: resolved?.id || profile?.active_version_id || null,
+          active: resolved || null,
+          versions: profile?.versions || []
+        }
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/prompts/profiles/:profileId/versions', async (req, res) => {
+    try {
+      if (typeof storage.createPromptVersion !== 'function') {
+        return res.status(501).json({ error: 'Prompt registry is not supported by this storage backend.' });
+      }
+
+      const profileId = String(req.params.profileId || '').trim().toLowerCase();
+      const created = await storage.createPromptVersion(profileId, req.body || {});
+      return res.status(201).json({ profile: created });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.post('/prompts/profiles/:profileId/select', async (req, res) => {
+    try {
+      if (typeof storage.selectPromptVersion !== 'function') {
+        return res.status(501).json({ error: 'Prompt registry is not supported by this storage backend.' });
+      }
+
+      const profileId = String(req.params.profileId || '').trim().toLowerCase();
+      const versionId = req.body?.version_id || req.body?.versionId;
+      const selected = await storage.selectPromptVersion(profileId, versionId);
+      if (!selected) {
+        return res.status(404).json({ error: 'Prompt version not found.' });
+      }
+      return res.json({ profile: selected });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
     }
   });
 
@@ -766,9 +935,13 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
       const provider = config.aiProvider || 'ollama';
       const model = await getEffectiveModel({ provider, model: null, config });
+      const extractionPrompt = await resolvePromptProfile('signal_extraction');
       let rawSignals;
       try {
-        rawSignals = extractSignalsWithFallback(transcriptText, await extractSignalsWithAI(transcriptText, provider, model));
+        rawSignals = extractSignalsWithFallback(
+          transcriptText,
+          await extractSignalsWithAI(transcriptText, provider, model, extractionPrompt)
+        );
       } catch {
         rawSignals = extractStructuredSignals(transcriptText);
       }
@@ -778,7 +951,9 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         segments
       });
       const storedSignals = await storage.storeSignals(sessionId, interactionId, qualitySignals, {
-        extractorVersion: INTELLEDGER_SIGNAL_EXTRACTOR_VERSION
+        extractorVersion: INTELLEDGER_SIGNAL_EXTRACTOR_VERSION,
+        promptProfile: extractionPrompt?.profile_id || 'signal_extraction',
+        promptVersion: extractionPrompt?.id || DEFAULT_PROMPT_PROFILES.signal_extraction.id
       });
       const entityGraph = await storage.upsertEntitiesForInteraction(sessionId, interactionId, storedSignals);
       const allSignals = await storage.getSignalsBySession(sessionId);
@@ -813,30 +988,19 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
     }
   };
 
-  async function extractSignalsWithAI(content, provider, model) {
+  async function extractSignalsWithAI(content, provider, model, promptRuntime = null) {
     const snippet = String(content || '').trim().slice(0, 3000);
-    const prompt = [
-      'Extract structured signals from this note. Return ONLY valid JSON — no markdown, no explanation.',
-      '',
-      'For each signal you find, include:',
-      '- type: one of commitment | risk | decision | ask | opportunity',
-      '- value: the full sentence or clause (string)',
-      '- owner: person responsible (string or null)',
-      '- due_date: deadline if mentioned (string or null)',
-      '- confidence: 0.0–1.0 (number)',
-      '',
-      'Return: { "signals": [ { "type": "...", "value": "...", "owner": null, "due_date": null, "confidence": 0.85 }, ... ] }',
-      '',
-      'Note:',
-      snippet
-    ].join('\n');
+    const resolvedPrompt = promptRuntime || await resolvePromptProfile('signal_extraction');
+    const systemPrompt = resolvedPrompt?.system_prompt || DEFAULT_PROMPT_PROFILES.signal_extraction.system_prompt;
+    const promptTemplate = resolvedPrompt?.user_template || DEFAULT_PROMPT_PROFILES.signal_extraction.user_template;
+    const prompt = renderPromptTemplate(promptTemplate, { content: snippet });
 
     let aiText = '';
     await streamWithProvider({
       provider,
       model,
       messages: [
-        { role: 'system', content: 'You are a precise signal extractor. Return only valid JSON.' },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
       ],
       config,
@@ -1041,22 +1205,15 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         ].join('\n');
       });
 
-      const prompt = [
-        `Analyse these ${sessionIds.length} sessions and return a cross-session synthesis.`,
-        `Focus: ${query || 'Find recurring patterns, shared risks, and a unified action plan.'}`,
-        '',
-        ...sessionBlocks,
-        '',
-        'Return valid JSON with this exact shape:',
-        '{',
-        '  "summary": "overall paragraph covering what these sessions share",',
-        '  "cross_session_patterns": ["pattern 1", "pattern 2"],',
-        '  "aggregated_risks": ["risk 1", "risk 2"],',
-        '  "combined_next_actions": ["action 1", "action 2"],',
-        '  "key_decisions": ["decision 1"],',
-        '  "open_questions": ["question 1"]',
-        '}'
-      ].join('\n');
+      const crossSessionPrompt = await resolvePromptProfile('cross_session_synthesis');
+      const prompt = renderPromptTemplate(
+        crossSessionPrompt?.user_template || DEFAULT_PROMPT_PROFILES.cross_session_synthesis.user_template,
+        {
+          sessionCount: sessionIds.length,
+          query: query || 'Find recurring patterns, shared risks, and a unified action plan.',
+          sessionBlocks: sessionBlocks.join('\n\n')
+        }
+      );
 
       const provider = requestedProvider || config.aiProvider || 'ollama';
       const model = await getEffectiveModel({ provider, model: requestedModel, config });
@@ -1066,7 +1223,10 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         provider,
         model,
         messages: [
-          { role: 'system', content: 'You are a strategic analyst. Return only valid JSON. Be concise and practical.' },
+          {
+            role: 'system',
+            content: crossSessionPrompt?.system_prompt || DEFAULT_PROMPT_PROFILES.cross_session_synthesis.system_prompt
+          },
           { role: 'user', content: prompt }
         ],
         config,
@@ -1076,7 +1236,12 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       let parsed = {};
       try { parsed = JSON.parse(aiText.match(/\{[\s\S]*\}/)?.[0] || aiText); } catch { parsed = { summary: aiText }; }
 
-      res.json({ synthesis: parsed, session_count: sessionIds.length });
+      res.json({
+        synthesis: parsed,
+        session_count: sessionIds.length,
+        prompt_profile: crossSessionPrompt?.profile_id || 'cross_session_synthesis',
+        prompt_version: crossSessionPrompt?.id || DEFAULT_PROMPT_PROFILES.cross_session_synthesis.id
+      });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -1189,15 +1354,21 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       const interaction = await storage.ingestInteraction(sessionId, 'text', content, sourceName || 'manual');
       const provider = config.aiProvider || 'ollama';
       const model = await getEffectiveModel({ provider, model: null, config });
+      const extractionPrompt = await resolvePromptProfile('signal_extraction');
       let rawSignals;
       try {
-        rawSignals = extractSignalsWithFallback(content, await extractSignalsWithAI(content, provider, model));
+        rawSignals = extractSignalsWithFallback(
+          content,
+          await extractSignalsWithAI(content, provider, model, extractionPrompt)
+        );
       } catch {
         rawSignals = extractStructuredSignals(content);
       }
       const qualitySignals = calibrateAndDeduplicateSignals(rawSignals, { sourceText: content });
       const signals = await storage.storeSignals(sessionId, interaction.id, qualitySignals, {
-        extractorVersion: INTELLEDGER_SIGNAL_EXTRACTOR_VERSION
+        extractorVersion: INTELLEDGER_SIGNAL_EXTRACTOR_VERSION,
+        promptProfile: extractionPrompt?.profile_id || 'signal_extraction',
+        promptVersion: extractionPrompt?.id || DEFAULT_PROMPT_PROFILES.signal_extraction.id
       });
       const entityGraph = await storage.upsertEntitiesForInteraction(sessionId, interaction.id, signals);
       const allSignals = await storage.getSignalsBySession(sessionId);
@@ -1242,15 +1413,21 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       const interaction = await storage.ingestInteraction(sessionId, 'file', content, req.file.originalname);
       const provider = config.aiProvider || 'ollama';
       const model = await getEffectiveModel({ provider, model: null, config });
+      const extractionPrompt = await resolvePromptProfile('signal_extraction');
       let rawSignals;
       try {
-        rawSignals = extractSignalsWithFallback(content, await extractSignalsWithAI(content, provider, model));
+        rawSignals = extractSignalsWithFallback(
+          content,
+          await extractSignalsWithAI(content, provider, model, extractionPrompt)
+        );
       } catch {
         rawSignals = extractStructuredSignals(content);
       }
       const qualitySignals = calibrateAndDeduplicateSignals(rawSignals, { sourceText: content });
       const signals = await storage.storeSignals(sessionId, interaction.id, qualitySignals, {
-        extractorVersion: INTELLEDGER_SIGNAL_EXTRACTOR_VERSION
+        extractorVersion: INTELLEDGER_SIGNAL_EXTRACTOR_VERSION,
+        promptProfile: extractionPrompt?.profile_id || 'signal_extraction',
+        promptVersion: extractionPrompt?.id || DEFAULT_PROMPT_PROFILES.signal_extraction.id
       });
       const entityGraph = await storage.upsertEntitiesForInteraction(sessionId, interaction.id, signals);
       const allSignals = await storage.getSignalsBySession(sessionId);
@@ -1504,7 +1681,13 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
       const provider = requestedProvider || config.aiProvider || 'ollama';
       const model = await getEffectiveModel({ provider, model: requestedModel, config });
-      const userPrompt = buildSynthesisPrompt({ query, interactions, signals });
+      const synthesisPrompt = await resolvePromptProfile('session_synthesis');
+      const userPrompt = buildSynthesisPrompt({
+        query,
+        interactions,
+        signals,
+        template: synthesisPrompt?.user_template
+      });
 
       let aiText = '';
       await streamWithProvider({
@@ -1513,7 +1696,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         messages: [
           {
             role: 'system',
-            content: 'You are an analyst. Return only valid JSON. Be concise and practical.'
+            content: synthesisPrompt?.system_prompt || DEFAULT_PROMPT_PROFILES.session_synthesis.system_prompt
           },
           { role: 'user', content: userPrompt }
         ],
@@ -1526,7 +1709,11 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         synthesisType,
         aiText,
         model,
-        Math.ceil(aiText.length / 4)
+        Math.ceil(aiText.length / 4),
+        {
+          promptProfile: synthesisPrompt?.profile_id || 'session_synthesis',
+          promptVersion: synthesisPrompt?.id || DEFAULT_PROMPT_PROFILES.session_synthesis.id
+        }
       );
       res.json({ synthesis: stored });
     } catch (err) { res.status(500).json({ error: err.message }); }

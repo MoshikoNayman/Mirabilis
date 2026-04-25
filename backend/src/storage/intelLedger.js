@@ -5,7 +5,18 @@ import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'node:crypto';
 
-const empty = () => ({ sessions: [], interactions: [], signals: [], syntheses: [], actions: [], jobs: [], entities: [], entity_links: [], signal_feedback: [] });
+const empty = () => ({
+  sessions: [],
+  interactions: [],
+  signals: [],
+  syntheses: [],
+  actions: [],
+  jobs: [],
+  entities: [],
+  entity_links: [],
+  signal_feedback: [],
+  prompt_profiles: []
+});
 const DEFAULT_SIGNAL_EXTRACTOR_VERSION = 'intelledger-signals-v2.4';
 
 let _cache = null;
@@ -161,7 +172,8 @@ function normalizeStoreShape(store) {
     jobs: Array.isArray(candidate.jobs) ? candidate.jobs : [],
     entities: Array.isArray(candidate.entities) ? candidate.entities : [],
     entity_links: Array.isArray(candidate.entity_links) ? candidate.entity_links : [],
-    signal_feedback: Array.isArray(candidate.signal_feedback) ? candidate.signal_feedback : []
+    signal_feedback: Array.isArray(candidate.signal_feedback) ? candidate.signal_feedback : [],
+    prompt_profiles: Array.isArray(candidate.prompt_profiles) ? candidate.prompt_profiles : []
   };
 }
 
@@ -174,6 +186,16 @@ function normalizeTenantId(value, fallback = '') {
   if (trimmed) return trimmed.slice(0, 120);
   const fallbackTrimmed = String(fallback || '').trim();
   return fallbackTrimmed ? fallbackTrimmed.slice(0, 120) : 'default';
+}
+
+function normalizePromptProfileId(value) {
+  const cleaned = String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/_+/g, '_');
+  return cleaned.slice(0, 80) || null;
+}
+
+function normalizePromptVersionId(value) {
+  const cleaned = String(value || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '_').replace(/_+/g, '_');
+  return cleaned.slice(0, 80) || null;
 }
 
 function normalizeEntityKey(value) {
@@ -346,6 +368,173 @@ export function createIntelLedgerStorage(filePath) {
 
   return {
     async ensureStore() { return ensureStore(filePath); },
+
+    async listPromptProfiles() {
+      const store = await get();
+      return store.prompt_profiles
+        .map((profile) => ({
+          profile_id: profile.profile_id,
+          active_version_id: profile.active_version_id || null,
+          version_count: Array.isArray(profile.versions) ? profile.versions.length : 0,
+          created_at: profile.created_at || null,
+          updated_at: profile.updated_at || null
+        }))
+        .sort((a, b) => String(a.profile_id).localeCompare(String(b.profile_id)));
+    },
+
+    async getPromptProfile(profileId) {
+      const normalizedProfile = normalizePromptProfileId(profileId);
+      if (!normalizedProfile) return null;
+
+      const store = await get();
+      const profile = store.prompt_profiles.find((item) => item.profile_id === normalizedProfile);
+      if (!profile) return null;
+
+      const versions = Array.isArray(profile.versions)
+        ? [...profile.versions].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+        : [];
+
+      return {
+        profile_id: profile.profile_id,
+        active_version_id: profile.active_version_id || null,
+        created_at: profile.created_at || null,
+        updated_at: profile.updated_at || null,
+        versions
+      };
+    },
+
+    async createPromptVersion(profileId, payload = {}) {
+      return withLock(async () => {
+        const normalizedProfile = normalizePromptProfileId(profileId);
+        if (!normalizedProfile) {
+          throw new Error('profileId is required');
+        }
+
+        const systemPrompt = String(payload.system_prompt || payload.systemPrompt || '').trim();
+        const userTemplate = String(payload.user_template || payload.userTemplate || '').trim();
+        if (!systemPrompt || !userTemplate) {
+          throw new Error('system_prompt and user_template are required');
+        }
+
+        const store = await get();
+        const now = new Date().toISOString();
+
+        let profile = store.prompt_profiles.find((item) => item.profile_id === normalizedProfile);
+        if (!profile) {
+          profile = {
+            profile_id: normalizedProfile,
+            active_version_id: null,
+            versions: [],
+            created_at: now,
+            updated_at: now
+          };
+          store.prompt_profiles.push(profile);
+        }
+
+        const requestedVersionId = normalizePromptVersionId(payload.version_id || payload.versionId || payload.version_key || payload.versionKey);
+        const versionId = requestedVersionId || `${normalizedProfile}-${Date.now()}`;
+        if ((profile.versions || []).some((item) => item.id === versionId)) {
+          throw new Error(`prompt version already exists: ${versionId}`);
+        }
+
+        const version = {
+          id: versionId,
+          label: String(payload.label || payload.name || versionId).trim().slice(0, 140) || versionId,
+          system_prompt: systemPrompt.slice(0, 12000),
+          user_template: userTemplate.slice(0, 20000),
+          created_at: now,
+          created_by: String(payload.created_by || payload.createdBy || 'system').trim().slice(0, 80) || 'system'
+        };
+
+        profile.versions = Array.isArray(profile.versions) ? profile.versions : [];
+        profile.versions.push(version);
+
+        const setActive = payload.set_active !== false;
+        if (setActive || !profile.active_version_id) {
+          profile.active_version_id = version.id;
+        }
+        profile.updated_at = now;
+
+        await set(store);
+        return {
+          profile_id: profile.profile_id,
+          active_version_id: profile.active_version_id,
+          version
+        };
+      });
+    },
+
+    async selectPromptVersion(profileId, versionId) {
+      return withLock(async () => {
+        const normalizedProfile = normalizePromptProfileId(profileId);
+        const normalizedVersionId = normalizePromptVersionId(versionId);
+        if (!normalizedProfile || !normalizedVersionId) return null;
+
+        const store = await get();
+        const profile = store.prompt_profiles.find((item) => item.profile_id === normalizedProfile);
+        if (!profile) return null;
+        const hasVersion = (profile.versions || []).some((item) => item.id === normalizedVersionId);
+        if (!hasVersion) return null;
+
+        profile.active_version_id = normalizedVersionId;
+        profile.updated_at = new Date().toISOString();
+        await set(store);
+
+        const selected = (profile.versions || []).find((item) => item.id === normalizedVersionId) || null;
+        return {
+          profile_id: profile.profile_id,
+          active_version_id: normalizedVersionId,
+          version: selected
+        };
+      });
+    },
+
+    async resolvePromptVersion(profileId, fallback = null) {
+      const normalizedProfile = normalizePromptProfileId(profileId);
+      if (!normalizedProfile) return null;
+
+      const profile = await this.getPromptProfile(normalizedProfile);
+      if (!profile) {
+        if (!fallback) return null;
+        return {
+          profile_id: normalizedProfile,
+          id: normalizePromptVersionId(fallback.id || fallback.version_id) || 'default-v1',
+          label: String(fallback.label || 'Default').trim(),
+          system_prompt: String(fallback.system_prompt || '').trim(),
+          user_template: String(fallback.user_template || '').trim(),
+          created_at: null,
+          created_by: 'builtin',
+          is_fallback: true
+        };
+      }
+
+      const activeId = normalizePromptVersionId(profile.active_version_id);
+      const selected = (profile.versions || []).find((item) => item.id === activeId) || profile.versions?.[0] || null;
+      if (!selected) {
+        if (!fallback) return null;
+        return {
+          profile_id: normalizedProfile,
+          id: normalizePromptVersionId(fallback.id || fallback.version_id) || 'default-v1',
+          label: String(fallback.label || 'Default').trim(),
+          system_prompt: String(fallback.system_prompt || '').trim(),
+          user_template: String(fallback.user_template || '').trim(),
+          created_at: null,
+          created_by: 'builtin',
+          is_fallback: true
+        };
+      }
+
+      return {
+        profile_id: normalizedProfile,
+        id: selected.id,
+        label: selected.label,
+        system_prompt: selected.system_prompt,
+        user_template: selected.user_template,
+        created_at: selected.created_at || null,
+        created_by: selected.created_by || 'system',
+        is_fallback: false
+      };
+    },
 
     async createSession(userId, title, description, options = {}) {
       return withLock(async () => {
@@ -805,6 +994,8 @@ export function createIntelLedgerStorage(filePath) {
             quote,
             source_id: sourceId,
             extractor_version: resolvedExtractorVersion,
+            prompt_profile: options.promptProfile ? String(options.promptProfile).trim().slice(0, 80) : null,
+            prompt_version: options.promptVersion ? String(options.promptVersion).trim().slice(0, 80) : null,
             owner: sig.owner || null,
             due_date: sig.due_date || null,
             ask: sig.ask || null,
@@ -1066,7 +1257,7 @@ export function createIntelLedgerStorage(filePath) {
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
     },
 
-    async storeSynthesis(sessionId, synthesisType, content, modelUsed, tokensUsed) {
+    async storeSynthesis(sessionId, synthesisType, content, modelUsed, tokensUsed, options = {}) {
       return withLock(async () => {
         const store = await get();
         const entry = {
@@ -1076,6 +1267,8 @@ export function createIntelLedgerStorage(filePath) {
           content,
           model_used: modelUsed || '',
           tokens_used: tokensUsed || 0,
+          prompt_profile: options.promptProfile ? String(options.promptProfile).trim().slice(0, 80) : null,
+          prompt_version: options.promptVersion ? String(options.promptVersion).trim().slice(0, 80) : null,
           created_at: new Date().toISOString()
         };
         store.syntheses.push(entry);
