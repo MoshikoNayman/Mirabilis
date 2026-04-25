@@ -691,11 +691,79 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
   const maxSynthesisQueryChars = Math.max(1, Number(process.env.INTELLEDGER_MAX_SYNTHESIS_QUERY_CHARS || 2000));
   const maxCrossSessionCount = Math.max(1, Number(process.env.INTELLEDGER_MAX_CROSS_SYNTH_SESSIONS || 20));
   const routeRateState = new Map();
+  const configuredRateLimitStore = String(process.env.INTELLEDGER_RATE_LIMIT_STORE || 'memory').trim().toLowerCase();
+  const configuredRateLimitRedisUrl = String(process.env.INTELLEDGER_RATE_LIMIT_REDIS_URL || '').trim();
+  let redisRateClient = null;
+  let redisRateInitPromise = null;
+  let rateLimitWarned = false;
 
-  const enforceRateLimit = (req, res, key, { limit, windowMs }) => {
+  const initRedisRateLimiter = async () => {
+    if (redisRateClient) return redisRateClient;
+    if (redisRateInitPromise) return redisRateInitPromise;
+
+    redisRateInitPromise = (async () => {
+      try {
+        if (!configuredRateLimitRedisUrl) {
+          throw new Error('INTELLEDGER_RATE_LIMIT_REDIS_URL is required when INTELLEDGER_RATE_LIMIT_STORE=redis');
+        }
+
+        const redisModule = await import('redis');
+        const createClient = redisModule?.createClient;
+        if (typeof createClient !== 'function') {
+          throw new Error('redis client module is unavailable');
+        }
+
+        const client = createClient({ url: configuredRateLimitRedisUrl });
+        client.on('error', (err) => {
+          if (!rateLimitWarned) {
+            rateLimitWarned = true;
+            console.warn(`[InteLedger] Redis rate limiter error, using in-memory fallback: ${err?.message || err}`);
+          }
+        });
+
+        await client.connect();
+        redisRateClient = client;
+        return redisRateClient;
+      } catch (err) {
+        if (!rateLimitWarned) {
+          rateLimitWarned = true;
+          console.warn(`[InteLedger] Redis rate limiter unavailable, using in-memory fallback: ${err?.message || err}`);
+        }
+        return null;
+      }
+    })();
+
+    return redisRateInitPromise;
+  };
+
+  const enforceRateLimit = async (req, res, key, { limit, windowMs }) => {
     const actor = String(req.headers['x-auth-user-id'] || req.headers['x-user-id'] || req.ip || 'anon');
-    const bucketKey = `${key}:${actor}`;
+    const bucketKey = `intelledger:ratelimit:${key}:${actor}`;
     const now = Date.now();
+
+    if (configuredRateLimitStore === 'redis') {
+      const redisClient = await initRedisRateLimiter();
+      if (redisClient) {
+        try {
+          const current = await redisClient.incr(bucketKey);
+          if (current === 1) {
+            await redisClient.pExpire(bucketKey, windowMs);
+          }
+
+          if (current > limit) {
+            res.status(429).json({ error: 'Rate limit exceeded for this operation.' });
+            return true;
+          }
+          return false;
+        } catch (err) {
+          if (!rateLimitWarned) {
+            rateLimitWarned = true;
+            console.warn(`[InteLedger] Redis rate limit operation failed, using in-memory fallback: ${err?.message || err}`);
+          }
+        }
+      }
+    }
+
     const bucket = routeRateState.get(bucketKey) || { count: 0, resetAt: now + windowMs };
 
     if (now > bucket.resetAt) {
@@ -898,7 +966,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/prompts/profiles/:profileId/versions', async (req, res) => {
     try {
-      if (enforceRateLimit(req, res, 'prompt-version-create', { limit: 20, windowMs: 60_000 })) return;
+      if (await enforceRateLimit(req, res, 'prompt-version-create', { limit: 20, windowMs: 60_000 })) return;
       if (typeof storage.createPromptVersion !== 'function') {
         return res.status(501).json({ error: 'Prompt registry is not supported by this storage backend.' });
       }
@@ -925,7 +993,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/prompts/profiles/:profileId/select', async (req, res) => {
     try {
-      if (enforceRateLimit(req, res, 'prompt-version-select', { limit: 60, windowMs: 60_000 })) return;
+      if (await enforceRateLimit(req, res, 'prompt-version-select', { limit: 60, windowMs: 60_000 })) return;
       if (typeof storage.selectPromptVersion !== 'function') {
         return res.status(501).json({ error: 'Prompt registry is not supported by this storage backend.' });
       }
@@ -1459,7 +1527,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.patch('/sessions/:sessionId/retention', async (req, res) => {
     try {
-      if (enforceRateLimit(req, res, 'retention-policy-update', { limit: 30, windowMs: 60_000 })) return;
+      if (await enforceRateLimit(req, res, 'retention-policy-update', { limit: 30, windowMs: 60_000 })) return;
       if (typeof storage.updateSessionRetentionPolicy !== 'function') {
         return res.status(501).json({ error: 'Retention policy updates are not supported by this storage backend.' });
       }
@@ -1487,7 +1555,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/sessions/:sessionId/retention/run', async (req, res) => {
     try {
-      if (enforceRateLimit(req, res, 'retention-run', { limit: 12, windowMs: 60_000 })) return;
+      if (await enforceRateLimit(req, res, 'retention-run', { limit: 12, windowMs: 60_000 })) return;
       if (typeof storage.runRetentionSweep !== 'function') {
         return res.status(501).json({ error: 'Retention sweep is not supported by this storage backend.' });
       }
@@ -1513,7 +1581,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
   // Ingest text
   router.post('/sessions/:sessionId/ingest/text', async (req, res) => {
     try {
-      if (enforceRateLimit(req, res, 'ingest-text', { limit: 80, windowMs: 60_000 })) return;
+      if (await enforceRateLimit(req, res, 'ingest-text', { limit: 80, windowMs: 60_000 })) return;
       const { sessionId } = req.params;
       const rawContent = req.body?.content ?? req.body?.raw_content ?? '';
       const content = String(rawContent || '').trim();
@@ -1888,7 +1956,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/sessions/:sessionId/evals/run', async (req, res) => {
     try {
-      if (enforceRateLimit(req, res, 'eval-run', { limit: 30, windowMs: 60_000 })) return;
+      if (await enforceRateLimit(req, res, 'eval-run', { limit: 30, windowMs: 60_000 })) return;
       if (typeof storage.runSessionEvaluation !== 'function') {
         return res.status(501).json({ error: 'Eval orchestration is not supported by this storage backend.' });
       }
@@ -1944,7 +2012,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
 
   router.post('/evals/run-batch', async (req, res) => {
     try {
-      if (enforceRateLimit(req, res, 'eval-run-batch', { limit: 10, windowMs: 60_000 })) return;
+      if (await enforceRateLimit(req, res, 'eval-run-batch', { limit: 10, windowMs: 60_000 })) return;
       if (typeof storage.runBatchEvaluation !== 'function') {
         return res.status(501).json({ error: 'Eval orchestration is not supported by this storage backend.' });
       }

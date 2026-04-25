@@ -212,3 +212,65 @@ test('rate limit guard returns 429 after configured retention-run threshold', as
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test('redis-configured rate limiter gracefully falls back to in-memory enforcement', async () => {
+  const tempDir = await mkdtemp(join(os.tmpdir(), 'mirabilis-hardening-ratelimit-redis-fallback-'));
+  const storePath = join(tempDir, 'intelledger.json');
+  const storage = createIntelLedgerStorage(storePath);
+  await storage.ensureStore();
+
+  const previousEnv = {
+    INTELLEDGER_RATE_LIMIT_STORE: process.env.INTELLEDGER_RATE_LIMIT_STORE,
+    INTELLEDGER_RATE_LIMIT_REDIS_URL: process.env.INTELLEDGER_RATE_LIMIT_REDIS_URL
+  };
+
+  process.env.INTELLEDGER_RATE_LIMIT_STORE = 'redis';
+  process.env.INTELLEDGER_RATE_LIMIT_REDIS_URL = 'redis://127.0.0.1:6399';
+
+  const app = createApp(storage, storePath);
+
+  try {
+    await withServer(app, async (baseUrl) => {
+      const createSession = await fetch(`${baseUrl}/api/intelledger/sessions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: 'ratelimit-redis-user', title: 'Rate Limit Redis Fallback Session' })
+      });
+      assert.equal(createSession.status, 200);
+      const session = (await createSession.json())?.session;
+      assert.ok(session?.id);
+
+      for (let i = 0; i < 12; i += 1) {
+        const run = await fetch(`${baseUrl}/api/intelledger/sessions/${session.id}/retention/run`, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-user-id': 'ratelimit-redis-user'
+          },
+          body: JSON.stringify({ retention_days: 7 })
+        });
+        assert.equal(run.status, 200);
+      }
+
+      const throttled = await fetch(`${baseUrl}/api/intelledger/sessions/${session.id}/retention/run`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-user-id': 'ratelimit-redis-user'
+        },
+        body: JSON.stringify({ retention_days: 7 })
+      });
+      assert.equal(throttled.status, 429);
+      const payload = await throttled.json();
+      assert.match(String(payload?.error || ''), /rate limit exceeded/i);
+    });
+  } finally {
+    if (previousEnv.INTELLEDGER_RATE_LIMIT_STORE === undefined) delete process.env.INTELLEDGER_RATE_LIMIT_STORE;
+    else process.env.INTELLEDGER_RATE_LIMIT_STORE = previousEnv.INTELLEDGER_RATE_LIMIT_STORE;
+
+    if (previousEnv.INTELLEDGER_RATE_LIMIT_REDIS_URL === undefined) delete process.env.INTELLEDGER_RATE_LIMIT_REDIS_URL;
+    else process.env.INTELLEDGER_RATE_LIMIT_REDIS_URL = previousEnv.INTELLEDGER_RATE_LIMIT_REDIS_URL;
+
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
