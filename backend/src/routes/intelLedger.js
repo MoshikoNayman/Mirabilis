@@ -1651,6 +1651,124 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
     }
   });
 
+  router.post('/sessions/:sessionId/evals/run', async (req, res) => {
+    try {
+      if (typeof storage.runSessionEvaluation !== 'function') {
+        return res.status(501).json({ error: 'Eval orchestration is not supported by this storage backend.' });
+      }
+
+      const { sessionId } = req.params;
+      const windowDays = Number(req.body?.window_days || req.body?.windowDays || req.query?.window_days || req.query?.windowDays || 30);
+      const run = await storage.runSessionEvaluation(sessionId, {
+        windowDays,
+        trigger: req.body?.trigger || 'manual',
+        note: req.body?.note,
+        tags: req.body?.tags
+      });
+
+      if (!run) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+
+      return res.status(201).json({ eval_run: run });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/sessions/:sessionId/evals', async (req, res) => {
+    try {
+      if (typeof storage.getEvalRunsBySession !== 'function') {
+        return res.status(501).json({ error: 'Eval orchestration is not supported by this storage backend.' });
+      }
+
+      const { sessionId } = req.params;
+      const limit = Number(req.query?.limit || 20);
+      const runs = await storage.getEvalRunsBySession(sessionId, { limit });
+      return res.json({ eval_runs: runs });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/sessions/:sessionId/scorecard', async (req, res) => {
+    try {
+      if (typeof storage.getEvalRunsBySession !== 'function') {
+        return res.status(501).json({ error: 'Eval orchestration is not supported by this storage backend.' });
+      }
+
+      const { sessionId } = req.params;
+      const runs = await storage.getEvalRunsBySession(sessionId, { limit: 1 });
+      const latest = runs[0] || null;
+      return res.json({ scorecard: latest });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/evals/run-batch', async (req, res) => {
+    try {
+      if (typeof storage.runBatchEvaluation !== 'function') {
+        return res.status(501).json({ error: 'Eval orchestration is not supported by this storage backend.' });
+      }
+
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+      if (!identity.userId) {
+        return res.status(400).json({ error: 'userId is required to run batch evaluations.' });
+      }
+
+      const requestedSessionIds = Array.isArray(req.body?.session_ids || req.body?.sessionIds)
+        ? (req.body?.session_ids || req.body?.sessionIds)
+        : null;
+      const sessions = await storage.listSessions(identity.userId, { tenantId: identity.tenantId });
+      const allowedSessionIds = new Set(sessions.map((item) => item.id));
+      const sessionIds = requestedSessionIds
+        ? requestedSessionIds.map((item) => String(item || '').trim()).filter((item) => allowedSessionIds.has(item))
+        : sessions.map((item) => item.id);
+
+      const result = await storage.runBatchEvaluation(sessionIds, {
+        windowDays: Number(req.body?.window_days || req.body?.windowDays || 30),
+        trigger: req.body?.trigger || 'batch',
+        note: req.body?.note,
+        tags: req.body?.tags
+      });
+
+      return res.json({
+        requested_count: requestedSessionIds ? requestedSessionIds.length : sessions.length,
+        executed_count: sessionIds.length,
+        ...result
+      });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/evals/:runId', async (req, res) => {
+    try {
+      if (typeof storage.getEvalRunById !== 'function') {
+        return res.status(501).json({ error: 'Eval orchestration is not supported by this storage backend.' });
+      }
+
+      const identity = resolveIdentity(req);
+      if (rejectInvalidIdentity(res, identity)) return;
+
+      const run = await storage.getEvalRunById(req.params.runId);
+      if (!run) return res.status(404).json({ error: 'Not found' });
+
+      if (identity.tenantId && String(run.tenant_id || '') !== identity.tenantId) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+      if (identity.trustedUserId && String(run.user_id || '') !== identity.trustedUserId) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+
+      return res.json({ eval_run: run });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/sessions/:sessionId/actions', async (req, res) => {
     try {
       const { status } = req.query;

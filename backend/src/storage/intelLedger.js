@@ -15,7 +15,8 @@ const empty = () => ({
   entities: [],
   entity_links: [],
   signal_feedback: [],
-  prompt_profiles: []
+  prompt_profiles: [],
+  eval_runs: []
 });
 const DEFAULT_SIGNAL_EXTRACTOR_VERSION = 'intelledger-signals-v2.4';
 
@@ -173,7 +174,8 @@ function normalizeStoreShape(store) {
     entities: Array.isArray(candidate.entities) ? candidate.entities : [],
     entity_links: Array.isArray(candidate.entity_links) ? candidate.entity_links : [],
     signal_feedback: Array.isArray(candidate.signal_feedback) ? candidate.signal_feedback : [],
-    prompt_profiles: Array.isArray(candidate.prompt_profiles) ? candidate.prompt_profiles : []
+    prompt_profiles: Array.isArray(candidate.prompt_profiles) ? candidate.prompt_profiles : [],
+    eval_runs: Array.isArray(candidate.eval_runs) ? candidate.eval_runs : []
   };
 }
 
@@ -1147,6 +1149,113 @@ export function createIntelLedgerStorage(filePath) {
         citation_wrong_count: citationWrong,
         evidence_coverage_rate: ratio(evidenceCompleteCount, signals.length)
       };
+    },
+
+    async runSessionEvaluation(sessionId, options = {}) {
+      return withLock(async () => {
+        const store = await get();
+        const session = store.sessions.find((item) => item.id === sessionId);
+        if (!session) return null;
+
+        const windowDays = Math.max(1, Math.min(Number(options.windowDays || options.window_days || 30) || 30, 365));
+        const metrics = await this.getSignalQualityMetrics(sessionId, { windowDays });
+
+        const interactions = store.interactions.filter((item) => item.session_id === sessionId);
+        const signals = store.signals.filter((item) => item.session_id === sessionId);
+        const actions = store.actions.filter((item) => item.session_id === sessionId);
+        const syntheses = store.syntheses.filter((item) => item.session_id === sessionId);
+
+        const openActionCount = actions.filter((item) => String(item.status || '').toLowerCase() !== 'done').length;
+        const signalCount = signals.length;
+        const actionCoverage = signalCount > 0 ? Math.min(1, openActionCount / signalCount) : (openActionCount > 0 ? 1 : 0);
+
+        const toRatio = (value) => {
+          const num = Number(value);
+          return Number.isFinite(num) && num >= 0 ? Math.min(1, num) : 0;
+        };
+
+        const dimensions = {
+          evidence_coverage: toRatio(metrics.evidence_coverage_rate),
+          extraction_precision: toRatio(metrics.extraction_precision_proxy),
+          useful_insight_rate: toRatio(metrics.useful_insight_rate),
+          citation_correctness: toRatio(metrics.citation_correctness_rate),
+          action_coverage: toRatio(actionCoverage)
+        };
+
+        const weighted = (
+          dimensions.evidence_coverage * 0.26 +
+          dimensions.extraction_precision * 0.28 +
+          dimensions.useful_insight_rate * 0.2 +
+          dimensions.citation_correctness * 0.16 +
+          dimensions.action_coverage * 0.1
+        );
+        const overallScore = Number((weighted * 100).toFixed(2));
+        const status = overallScore >= 80 ? 'pass' : (overallScore >= 60 ? 'watch' : 'fail');
+
+        const now = new Date().toISOString();
+        const run = {
+          id: randomUUID(),
+          session_id: sessionId,
+          session_title: session.title || 'Untitled',
+          user_id: session.user_id,
+          tenant_id: session.tenant_id || null,
+          trigger: String(options.trigger || 'manual').slice(0, 40),
+          note: options.note ? String(options.note).slice(0, 300) : null,
+          tags: Array.isArray(options.tags) ? options.tags.map((item) => String(item).trim()).filter(Boolean).slice(0, 12) : [],
+          window_days: windowDays,
+          counts: {
+            interactions: interactions.length,
+            signals: signalCount,
+            syntheses: syntheses.length,
+            actions: actions.length,
+            open_actions: openActionCount
+          },
+          metrics,
+          dimensions,
+          overall_score: overallScore,
+          status,
+          created_at: now
+        };
+
+        store.eval_runs.push(run);
+        await set(store);
+        return run;
+      });
+    },
+
+    async getEvalRunsBySession(sessionId, options = {}) {
+      const store = await get();
+      const limit = Math.max(1, Math.min(Number(options.limit || 50) || 50, 200));
+      return store.eval_runs
+        .filter((item) => item.session_id === sessionId)
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+        .slice(0, limit);
+    },
+
+    async getEvalRunById(runId) {
+      const store = await get();
+      return store.eval_runs.find((item) => item.id === runId) || null;
+    },
+
+    async runBatchEvaluation(sessionIds = [], options = {}) {
+      const uniqueIds = [...new Set((Array.isArray(sessionIds) ? sessionIds : []).map((item) => String(item || '').trim()).filter(Boolean))];
+      const runs = [];
+      for (const sessionId of uniqueIds) {
+        const run = await this.runSessionEvaluation(sessionId, options);
+        if (run) runs.push(run);
+      }
+
+      const summary = {
+        total: runs.length,
+        pass: runs.filter((item) => item.status === 'pass').length,
+        watch: runs.filter((item) => item.status === 'watch').length,
+        fail: runs.filter((item) => item.status === 'fail').length,
+        avg_score: runs.length > 0
+          ? Number((runs.reduce((acc, item) => acc + Number(item.overall_score || 0), 0) / runs.length).toFixed(2))
+          : null
+      };
+
+      return { runs, summary };
     },
 
     async upsertEntitiesForInteraction(sessionId, interactionId, signals = []) {
