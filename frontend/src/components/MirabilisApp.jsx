@@ -1304,6 +1304,20 @@ function IntelLedgerApp({ userId }) {
                         {insightText}
                       </div>
                     )}
+                    {(session.latest_synthesis_prompt_version || session.latest_signal_prompt_version) && (
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                        {session.latest_synthesis_prompt_version && (
+                          <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
+                            Synth {session.latest_synthesis_prompt_version}
+                          </span>
+                        )}
+                        {session.latest_signal_prompt_version && (
+                          <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
+                            Signal {session.latest_signal_prompt_version}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </button>
                   <div className={`flex items-center justify-end ${cardDensity === 'dense' ? 'mt-2' : 'mt-3'}`}>
                     <button

@@ -810,6 +810,10 @@ export function createIntelLedgerStorage(filePath) {
       const actionCountBySession = new Map();
       const latestPreviewBySession = new Map();
       const latestPreviewTimeBySession = new Map();
+      const latestSignalPromptBySession = new Map();
+      const latestSignalPromptTimeBySession = new Map();
+      const latestSynthesisPromptBySession = new Map();
+      const latestSynthesisPromptTimeBySession = new Map();
 
       for (const interaction of store.interactions) {
         if (!interaction?.session_id) continue;
@@ -828,12 +832,32 @@ export function createIntelLedgerStorage(filePath) {
         if (!signal?.session_id) continue;
         const currentCount = signalCountBySession.get(signal.session_id) || 0;
         signalCountBySession.set(signal.session_id, currentCount + 1);
+
+        const currentTime = latestSignalPromptTimeBySession.get(signal.session_id) || '';
+        const nextTime = String(signal.extracted_at || signal.created_at || '');
+        if (nextTime >= currentTime) {
+          latestSignalPromptTimeBySession.set(signal.session_id, nextTime);
+          latestSignalPromptBySession.set(signal.session_id, {
+            prompt_profile: signal.prompt_profile || null,
+            prompt_version: signal.prompt_version || null
+          });
+        }
       }
 
       for (const synthesis of store.syntheses) {
         if (!synthesis?.session_id) continue;
         const currentCount = synthesisCountBySession.get(synthesis.session_id) || 0;
         synthesisCountBySession.set(synthesis.session_id, currentCount + 1);
+
+        const currentTime = latestSynthesisPromptTimeBySession.get(synthesis.session_id) || '';
+        const nextTime = String(synthesis.created_at || '');
+        if (nextTime >= currentTime) {
+          latestSynthesisPromptTimeBySession.set(synthesis.session_id, nextTime);
+          latestSynthesisPromptBySession.set(synthesis.session_id, {
+            prompt_profile: synthesis.prompt_profile || null,
+            prompt_version: synthesis.prompt_version || null
+          });
+        }
       }
 
       for (const action of store.actions) {
@@ -855,6 +879,8 @@ export function createIntelLedgerStorage(filePath) {
           const signalCount = signalCountBySession.get(session.id) || 0;
           const synthesisCount = synthesisCountBySession.get(session.id) || 0;
           const actionCount = actionCountBySession.get(session.id) || 0;
+          const signalPrompt = latestSignalPromptBySession.get(session.id) || {};
+          const synthesisPrompt = latestSynthesisPromptBySession.get(session.id) || {};
           return {
             ...session,
             description: stripLegacyCreatedLabel(session.description),
@@ -863,7 +889,11 @@ export function createIntelLedgerStorage(filePath) {
             signal_count: signalCount,
             synthesis_count: synthesisCount,
             action_count: actionCount,
-            activity_count: interactionCount + signalCount + synthesisCount + actionCount
+            activity_count: interactionCount + signalCount + synthesisCount + actionCount,
+            latest_signal_prompt_profile: signalPrompt.prompt_profile || null,
+            latest_signal_prompt_version: signalPrompt.prompt_version || null,
+            latest_synthesis_prompt_profile: synthesisPrompt.prompt_profile || null,
+            latest_synthesis_prompt_version: synthesisPrompt.prompt_version || null
           };
         });
     },
