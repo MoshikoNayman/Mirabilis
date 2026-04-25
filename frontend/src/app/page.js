@@ -2,10 +2,10 @@
 
 import dynamic from 'next/dynamic';
 
-const ChatApp = dynamic(() => import('../components/ChatApp'), {
+const MirabilisApp = dynamic(() => import('../components/MirabilisApp'), {
   ssr: false
 });
 
 export default function HomePage() {
-  return <ChatApp />;
+  return <MirabilisApp />;
 }
