@@ -83,6 +83,10 @@ echo =^> Copying output to dist\...
 if exist "%SCRIPT_DIR%dist" rmdir /s /q "%SCRIPT_DIR%dist"
 xcopy "%BUILD_DIR%\dist" "%SCRIPT_DIR%dist" /E /I /Q /Y >nul
 
+echo =^> Verifying release artifacts...
+node "%SCRIPT_DIR%verify-release.js" win
+if errorlevel 1 goto cleanup_error
+
 echo =^> Cleaning up temp files...
 rmdir /s /q "%BUILD_DIR%"
 

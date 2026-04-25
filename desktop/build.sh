@@ -59,6 +59,9 @@ echo "==> Copying output to dist/..."
 rm -rf "$SCRIPT_DIR/dist"
 cp -r "$BUILD_DIR/dist" "$SCRIPT_DIR/dist"
 
+echo "==> Verifying release artifacts..."
+node "$SCRIPT_DIR/verify-release.js" mac
+
 echo ""
 echo "Build complete!"
 find "$SCRIPT_DIR/dist" -name "*.app" -maxdepth 3 | head -1
