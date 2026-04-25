@@ -41,7 +41,7 @@ const ICON_PATH = path.join(__dirname, 'icons',
 if (process.platform === 'darwin') {
   app.setAboutPanelOptions({
     applicationName: 'Mirabilis AI',
-    applicationVersion: '26.3R1-S25',
+    applicationVersion: app.getVersion(),
     version: '',
     copyright: '\u00a9 2025 Moshiko Nayman',
     credits: 'Privacy-first local AI assistant',
@@ -117,7 +117,7 @@ function startBackend() {
   return new Promise((resolve, reject) => {
     const out = makeLog('backend');
     // Use process.execPath (Electron binary, which also runs Node) to execute server.js
-    // When packaged, backend is asarUnpacked so cwd is a real directory
+    // When packaged, backend is copied under process.resourcesPath (extraResources)
     backendProc = spawn(process.execPath, ['src/server.js'], {
       cwd: BACKEND_DIR,
       stdio: ['ignore', 'pipe', 'pipe'],
