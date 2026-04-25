@@ -726,10 +726,10 @@ function IntelLedgerApp({ userId }) {
 
   return (
     <>
-    <main className="relative h-full w-full p-3 sm:p-6">
-      <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
-        <div className="grid gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-4 dark:border-white/10 dark:bg-slate-900/45 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
-          <div className="space-y-3">
+    <main className="relative h-full w-full p-3 sm:p-4">
+      <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-4 sm:p-4">
+        <div className="grid gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
+          <div className="space-y-2">
             <div className="space-y-1">
               <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
                 Mirabilis Workspace Memory
@@ -740,20 +740,20 @@ function IntelLedgerApp({ userId }) {
                   embedded mode
                 </span>
               </div>
-              <p className="max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-400">
-                Turn notes, video, audio, meeting fragments, emails, or quick observations into usable signals and a clear next-step summary.
+              <p className="text-xs leading-5 text-slate-600 dark:text-slate-400">
+                Capture context, extract signals, and move to next actions quickly.
               </p>
             </div>
 
-            <div className="flex flex-wrap items-start gap-2">
-              <span className="rounded-full border border-black/10 bg-white/75 px-2.5 py-1 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Session</span>
-              <span className="rounded-full border border-black/10 bg-white/75 px-2.5 py-1 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Ingest</span>
-              <span className="rounded-full border border-black/10 bg-white/75 px-2.5 py-1 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Extract</span>
-              <span className="rounded-full border border-black/10 bg-white/75 px-2.5 py-1 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Synthesis</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded-full border border-black/10 bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Session</span>
+              <span className="rounded-full border border-black/10 bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Ingest</span>
+              <span className="rounded-full border border-black/10 bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Extract</span>
+              <span className="rounded-full border border-black/10 bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Synthesis</span>
               <InfoHint
                 title="InteLedger Quick Guide"
                 description="Short definitions. Keep each session focused on one topic."
-                triggerClassName="bg-white/75 px-2.5 py-1 text-[10px] font-medium text-slate-600 hover:border-black/10 hover:text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300 dark:hover:border-white/10 dark:hover:text-slate-300"
+                triggerClassName="bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-black/10 hover:text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300 dark:hover:border-white/10 dark:hover:text-slate-300"
                 points={[
                   'Session',
                   'Ingest',
