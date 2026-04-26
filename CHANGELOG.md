@@ -2,7 +2,7 @@
 
 Versioning follows Junos-style tags.
 
-## [26.3R1-S28] - 2026-04-25
+## [26.2R1-S28] - 2026-04-25
 
 ### Security Hardening + Local Desktop Deployment
 
@@ -13,7 +13,7 @@ Versioning follows Junos-style tags.
 - **Release verification**: Backend tests and frontend production build passed after hardening changes.
 - **Deployment complete**: Packaged and validated `Mirabilis AI.app` and deployed to the user-local Applications folder.
 
-## [26.3R1-S27] - 2026-04-25
+## [26.2R1-S27] - 2026-04-25
 
 ### IntelLedger UX Completion + Stability Pass
 
@@ -24,7 +24,7 @@ Versioning follows Junos-style tags.
 - **Bug scrub passed**: Frontend production build and backend test suite passed after the changes.
 - **Docs refresh**: README now includes a concise, human-friendly IntelLedger section and capability summary.
 
-## [26.3R1-S26] - 2026-04-24
+## [26.2R1-S26] - 2026-04-24
 
 ### Desktop App (Electron)
 
@@ -35,7 +35,7 @@ Versioning follows Junos-style tags.
 - **Self-contained app**: The packaged app bundles the backend, frontend standalone build, and all dependencies. No Node.js or separate install step required to run the app on another machine.
 - **App icon**: Custom Mirabilis flower icon with proper macOS squircle proportions.
 
-## [26.3R1-S25] - 2026-04-23
+## [26.2R1-S25] - 2026-04-23
 
 ### Chat Control, Provider Management + UI Polish
 
@@ -51,7 +51,7 @@ Versioning follows Junos-style tags.
 - **Sidebar button alignment**: New Chat / Delete / Clear All buttons stretch to full sidebar width.
 - **Security**: Upgraded `uuid` dependency to clear a moderate audit advisory.
 
-## [26.3R1-S24] - 2026-04-13
+## [26.2R1-S24] - 2026-04-13
 
 ### Multi-Provider Expansion: OpenRouter, Groq, GPUaaS + Build Reliability
 
@@ -90,7 +90,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S23] - 2026-04-13
+## [26.2R1-S23] - 2026-04-13
 
 ### Provider Config Truthfulness & Platform Context
 
@@ -99,7 +99,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S22] - 2026-04-13
+## [26.2R1-S22] - 2026-04-13
 
 ### Hydration, CORS & Nested-Button Fixes
 
@@ -110,7 +110,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S21] - 2026-04-12
+## [26.2R1-S21] - 2026-04-12
 
 ### Auto-Install on Startup
 
@@ -121,7 +121,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S20] - 2026-04-12
+## [26.2R1-S20] - 2026-04-12
 
 ### Auto-Create Missing Backend Provider Adapters
 
@@ -132,7 +132,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S19] - 2026-04-12
+## [26.2R1-S19] - 2026-04-12
 
 ### Cutover Complete: Pure JavaScript Autonomy
 
@@ -148,7 +148,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S18] - 2026-04-12
+## [26.2R1-S18] - 2026-04-12
 
 
 ### Logs Command for Real-Time Diagnostics
@@ -161,7 +161,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S17] - 2026-04-12
+## [26.2R1-S17] - 2026-04-12
 
 
 ### JS Launcher Full Autonomy (Install/Uninstall Migrated)
@@ -179,7 +179,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S16] - 2026-04-12
+## [26.2R1-S16] - 2026-04-12
 
 
 ### Backend Error Visibility & Installer Hardening
@@ -191,7 +191,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S15] - 2026-04-12
+## [26.2R1-S15] - 2026-04-12
 
 
 ### Installer Prerequisite Guard
@@ -202,7 +202,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S14] - 2026-04-12
+## [26.2R1-S14] - 2026-04-12
 
 
 ### Chat Performance Optimization
@@ -215,7 +215,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S13] - 2026-04-12
+## [26.2R1-S13] - 2026-04-12
 
 ### JS Command Surface Expansion (Pre-Cutover)
 
@@ -226,7 +226,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S12] - 2026-04-12
+## [26.2R1-S12] - 2026-04-12
 
 ### Pre-Cutover Governance (Docs)
 
@@ -237,7 +237,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S11] - 2026-04-12
+## [26.2R1-S11] - 2026-04-12
 
 ### Model Install Job System
 
@@ -252,7 +252,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S10] - 2026-04-12
+## [26.2R1-S10] - 2026-04-12
 
 ### MCQ GUI Install Fixes
 
@@ -264,7 +264,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S9] - 2026-04-12
+## [26.2R1-S9] - 2026-04-12
 
 ### MCQ Model Setup Reliability
 
@@ -276,7 +276,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S8] - 2026-04-12
+## [26.2R1-S8] - 2026-04-12
 
 ### JS Launcher Enhancements
 
@@ -289,7 +289,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S7] - 2026-04-12
+## [26.2R1-S7] - 2026-04-12
 
 ### Launcher Bug Fixes
 
@@ -301,7 +301,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S6] - 2026-04-12
+## [26.2R1-S6] - 2026-04-12
 
 ### Launcher Architecture
 
@@ -312,7 +312,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S5] - 2026-04-12
+## [26.2R1-S5] - 2026-04-12
 
 ### System Control Tools (MCP)
 
@@ -326,11 +326,11 @@ Versioning follows Junos-style tags.
 - Command safety blocklist rejects catastrophic patterns: `rm -rf /`, `mkfs`, `dd if=`, `format C:`, fork bombs, `shutdown`/`reboot`.
 - `run_command` returns stdout + stderr + exit code even on non-zero exit, so errors are readable.
 - Cross-platform path resolution using `node:path.resolve` - works on macOS, Linux, and Windows.
-- Bumped server version to `26.3R1-S5`.
+- Bumped server version to `26.2R1-S5`.
 
 ---
 
-## [26.3R1-S4] - 2026-04-12
+## [26.2R1-S4] - 2026-04-12
 
 ### MCP Server
 
@@ -364,7 +364,7 @@ Versioning follows Junos-style tags.
 
 ---
 
-## [26.3R1-S3] - 2026-04-10
+## [26.2R1-S3] - 2026-04-10
 
 ### MCQ Model Family
 
@@ -416,7 +416,7 @@ Versioning follows Junos-style tags.
 - **Bug fix** - duplicate stray `</button>` JSX in palette picker (caused by a prior edit) removed.
 - **Bug fix** - `layout.js` pre-hydration scheme script now validates against whitelist before setting attribute, preventing flash if an obsolete scheme name is in localStorage.
 
-## [26.3R1] - 2026-04-08
+## [26.2R1] - 2026-04-08
 
 ### Chat Sidebar Enhancements
 

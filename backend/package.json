@@ -1,6 +1,6 @@
 {
   "name": "local-ai-chat-backend",
-  "version": "26.3R1-S3",
+  "version": "26.2R1-S3",
   "private": true,
   "type": "module",
   "engines": {

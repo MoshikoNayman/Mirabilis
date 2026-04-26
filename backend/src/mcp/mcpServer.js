@@ -23,7 +23,7 @@ import os from 'node:os';
 const execAsync = promisify(exec);
 
 const PROTOCOL_VERSION = '2024-11-05';
-const SERVER_INFO = { name: 'mirabilis', version: '26.3R1-S5' };
+const SERVER_INFO = { name: 'mirabilis', version: '26.2R1-S5' };
 
 const TOOLS = [
   {

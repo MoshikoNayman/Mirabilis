@@ -203,7 +203,7 @@ export class McpConnectorService {
     this.filePath = options.filePath;
     this.clientInfo = {
       name: options.clientName || 'mirabilis',
-      version: options.clientVersion || '26.3R1-S3'
+      version: options.clientVersion || '26.2R1-S3'
     };
     this.state = {
       servers: []
