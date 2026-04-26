@@ -2,6 +2,7 @@
   "name": "mirabilis-desktop",
   "version": "26.3.25",
   "description": "Mirabilis AI – Desktop App",
+  "author": "Moshiko Nayman",
   "main": "main.js",
   "scripts": {
     "dev": "npx electron .",
@@ -35,7 +36,13 @@
       }
     ],
     "mac": {
-      "icon": "icons/icon.icns"
+      "icon": "icons/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64"]
+        }
+      ]
     },
     "win": {
       "icon": "icons/Mirabilis.ico",

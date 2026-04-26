@@ -1,0 +1,84 @@
+name: Desktop Release Assets
+
+on:
+  push:
+    tags:
+      - '26.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and upload
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-14
+    env:
+      RELEASE_REF: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Build macOS DMG
+        run: |
+          chmod +x desktop/build.sh
+          cd desktop
+          ./build.sh dmg
+
+      - name: Upload macOS assets to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_REF }}
+          files: |
+            desktop/dist/*.dmg
+            desktop/dist/*.blockmap
+
+  windows:
+    runs-on: windows-2022
+    env:
+      RELEASE_REF: ${{ github.event.inputs.tag || github.ref_name }}
+      CI: true
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Build Windows installer
+        shell: cmd
+        run: |
+          cd desktop
+          call build.bat
+
+      - name: Upload Windows assets to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_REF }}
+          files: |
+            desktop/dist/*.exe
+            desktop/dist/*.yml
+            desktop/dist/*.blockmap

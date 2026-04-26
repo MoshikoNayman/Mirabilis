@@ -183,6 +183,22 @@ cd desktop
 Output: `desktop/dist/mac-arm64/Mirabilis AI.app`  
 Copy to `/Applications` or double-click to run.
 
+To create a desktop-friendly installer image instead of the unpacked app bundle:
+
+```bash
+cd desktop
+./build.sh dmg
+```
+
+Output: `desktop/dist/Mirabilis AI-26.3.25-arm64.dmg` (filename may vary slightly by electron-builder version).
+
+For full Gatekeeper-friendly distribution, macOS signing/notarization still requires:
+
+- a valid `Developer ID Application` certificate in Keychain
+- notarization credentials configured for `xcrun notarytool`
+
+Without those, Mirabilis can still be packaged locally, but macOS will treat it as an unsigned app.
+
 ### Windows
 
 ```bat

@@ -16,12 +16,20 @@ if not exist "%MIRABILIS%\frontend" (
 
 echo =^> Installing backend dependencies...
 cd /d "%MIRABILIS%\backend"
-call npm install --silent
+if exist package-lock.json (
+    call npm ci --silent || call npm install --silent
+) else (
+    call npm install --silent
+)
 if errorlevel 1 goto error
 
 echo =^> Installing frontend dependencies...
 cd /d "%MIRABILIS%\frontend"
-call npm install --silent
+if exist package-lock.json (
+    call npm ci --silent || call npm install --silent
+) else (
+    call npm install --silent
+)
 if errorlevel 1 goto error
 
 echo =^> Building Next.js frontend (standalone)...
@@ -59,7 +67,11 @@ if exist "%MIRABILIS%\frontend\public" (
 
 echo =^> Installing Electron build tools...
 cd /d "%BUILD_DIR%"
-call npm install --silent
+if exist package-lock.json (
+    call npm ci --silent || call npm install --silent
+) else (
+    call npm install --silent
+)
 if errorlevel 1 goto cleanup_error
 
 echo =^> Pre-extracting winCodeSign (avoids symlink error on Windows)...
@@ -92,7 +104,7 @@ rmdir /s /q "%BUILD_DIR%"
 
 echo.
 echo Build complete! Installer is in the dist\ folder.
-explorer "%SCRIPT_DIR%dist"
+if not defined CI explorer "%SCRIPT_DIR%dist"
 goto end
 
 :cleanup_error
@@ -101,7 +113,7 @@ rmdir /s /q "%BUILD_DIR%" 2>nul
 :error
 echo.
 echo BUILD FAILED. See error above.
-pause
+if not defined CI pause
 exit /b 1
 
 :end

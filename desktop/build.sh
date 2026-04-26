@@ -7,6 +7,23 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MIRABILIS="$SCRIPT_DIR/.."
+BUILD_TARGET="${1:-dir}"
+
+case "$BUILD_TARGET" in
+  dir)
+    ELECTRON_BUILDER_ARGS=(--dir)
+    VERIFY_TARGET="mac"
+    ;;
+  dmg)
+    ELECTRON_BUILDER_ARGS=(--mac dmg --arm64)
+    VERIFY_TARGET="mac"
+    ;;
+  *)
+    echo "Unsupported build target: $BUILD_TARGET"
+    echo "Usage: ./build.sh [dir|dmg]"
+    exit 1
+    ;;
+esac
 
 # Temp staging dir — auto-cleaned on exit (success, failure, or Ctrl+C)
 BUILD_DIR="$(mktemp -d)"
@@ -68,14 +85,14 @@ else
 fi
 
 echo "==> Running electron-builder..."
-npx electron-builder --dir --projectDir "$BUILD_DIR"
+npx electron-builder "${ELECTRON_BUILDER_ARGS[@]}" --projectDir "$BUILD_DIR"
 
 echo "==> Copying output to dist/..."
 rm -rf "$SCRIPT_DIR/dist"
 cp -r "$BUILD_DIR/dist" "$SCRIPT_DIR/dist"
 
 echo "==> Verifying release artifacts..."
-node "$SCRIPT_DIR/verify-release.js" mac
+node "$SCRIPT_DIR/verify-release.js" "$VERIFY_TARGET"
 
 echo ""
 echo "Build complete!"
