@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-**Version:** 26.3R1-S27  
+**Version:** 26.3R1-S28  
 **Author:** Moshiko Nayman
 
 Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API-your choice, per conversation.

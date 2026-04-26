@@ -2,6 +2,17 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S28] - 2026-04-25
+
+### Security Hardening + Local Desktop Deployment
+
+- **Backend hardening**: Added Helmet, compression, production API rate limiting, stricter CORS handling, and disabled Express fingerprint headers.
+- **Runtime stability**: Added centralized API error handling plus graceful shutdown paths for SIGINT/SIGTERM and fatal runtime exceptions.
+- **Config controls**: Added explicit environment knobs for proxy trust, API rate limits, localhost CORS allowance, and reminder worker policy defaults.
+- **Desktop build reliability**: Hardened `desktop/build.sh` with strict shell mode and deterministic dependency install behavior (`npm ci` with install fallback).
+- **Release verification**: Backend tests and frontend production build passed after hardening changes.
+- **Deployment complete**: Packaged and validated `Mirabilis AI.app` and deployed to the user-local Applications folder.
+
 ## [26.3R1-S27] - 2026-04-25
 
 ### IntelLedger UX Completion + Stability Pass
