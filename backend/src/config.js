@@ -6,6 +6,10 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const defaultExternalDataDir = path.resolve(__dirname, '../../../mirabilis-data');
+const resolvedDataDir = process.env.MIRABILIS_DATA_DIR
+  || process.env.DATA_DIR
+  || defaultExternalDataDir;
 
 export const config = {
   port: Number(process.env.PORT || 4000),
@@ -24,10 +28,7 @@ export const config = {
   openAIModel: process.env.OPENAI_MODEL || 'model.gguf',
   tavilyApiKey: process.env.TAVILY_API_KEY || '',
   tavilySearchDepth: process.env.TAVILY_SEARCH_DEPTH || 'advanced',
-  chatStorePath: process.env.DATA_DIR
-    ? path.join(process.env.DATA_DIR, 'chats.json')
-    : path.resolve(__dirname, '../data/chats.json'),
-  intelLedgerStorePath: process.env.DATA_DIR
-    ? path.join(process.env.DATA_DIR, 'intelledger.json')
-    : path.resolve(__dirname, '../data/intelledger.json')
+  dataDir: resolvedDataDir,
+  chatStorePath: path.join(resolvedDataDir, 'chats.json'),
+  intelLedgerStorePath: path.join(resolvedDataDir, 'intelledger.json')
 };

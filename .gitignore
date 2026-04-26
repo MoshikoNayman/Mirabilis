@@ -13,6 +13,9 @@ backend/data/mcp-servers.json
 backend/data/mcp-audit.jsonl
 backend/data/images/
 backend/data/uploads/
+mirabilis-data/
+mirabilis-models/
+mirabilis-build/
 backend/.env
 frontend/.env.local
 .env
