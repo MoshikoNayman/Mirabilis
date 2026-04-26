@@ -26,6 +26,25 @@ if (process.platform === 'win32') {
 
 const ROOT_DIR = path.join(__dirname, '..');
 
+function resolveNodeRunner() {
+  // On packaged macOS, launching process.execPath with ELECTRON_RUN_AS_NODE can
+  // surface as an extra bouncing Dock app. Use the hidden Helper binary instead.
+  if (process.platform === 'darwin' && app.isPackaged) {
+    const appName = app.getName();
+    const helperBin = path.join(
+      path.dirname(process.execPath),
+      '..',
+      'Frameworks',
+      `${appName} Helper.app`,
+      'Contents',
+      'MacOS',
+      `${appName} Helper`
+    );
+    if (fs.existsSync(helperBin)) return helperBin;
+  }
+  return process.execPath;
+}
+
 // When packaged, backend/frontend standalone are copied via extraResources
 // and live directly under process.resourcesPath.
 const SPAWN_ROOT = app.isPackaged
@@ -116,9 +135,10 @@ function buildStartupDiagnostics(err) {
 function startBackend() {
   return new Promise((resolve, reject) => {
     const out = makeLog('backend');
-    // Use process.execPath (Electron binary, which also runs Node) to execute server.js
+    const runner = resolveNodeRunner();
+    // Use the resolved Electron runner (or helper on macOS) in Node mode to execute server.js.
     // When packaged, backend is copied under process.resourcesPath (extraResources)
-    backendProc = spawn(process.execPath, ['src/server.js'], {
+    backendProc = spawn(runner, ['src/server.js'], {
       cwd: BACKEND_DIR,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1', DATA_DIR: app.getPath('userData') }
@@ -161,11 +181,12 @@ function startFrontend() {
   return new Promise((resolve, reject) => {
     const out = makeLog('frontend');
     const isWin = process.platform === 'win32';
+    const runner = resolveNodeRunner();
 
     if (app.isPackaged) {
       // Packaged: use the standalone server.js (no npm/node_modules needed)
       const standaloneServer = resolveStandaloneServer();
-      frontendProc = spawn(process.execPath, [standaloneServer], {
+      frontendProc = spawn(runner, [standaloneServer], {
         cwd: path.dirname(standaloneServer),
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, PORT: '3000', HOSTNAME: '127.0.0.1', NEXT_TELEMETRY_DISABLED: '1', ELECTRON_RUN_AS_NODE: '1' }
