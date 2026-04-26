@@ -1898,8 +1898,8 @@ export function createIntelLedgerStorage(filePath) {
       const recursionStack = new Set();
       
       const hasCycle = (id) => {
-        if (visited.has(id)) return false;
         if (recursionStack.has(id)) return true;
+        if (visited.has(id)) return false;
         
         visited.add(id);
         recursionStack.add(id);
@@ -1960,16 +1960,17 @@ export function createIntelLedgerStorage(filePath) {
           if (newDeps.includes(actionId)) {
             throw new Error('Action cannot depend on itself');
           }
-          // Check for circular dependencies
-          const testAction = { ...action, depends_on: newDeps };
-          const allActionsForCheck = [...store.actions];
-          const sessionActions = allActionsForCheck.map((a, i) => 
-            a.id === actionId ? testAction : a
-          );
-          // Simple cycle detection: verify all deps exist and check one level
+          // Verify all dep IDs exist in this session
           const validDeps = newDeps.filter(depId => 
             store.actions.some(a => a.id === depId && a.session_id === sessionId)
           );
+          // Build a test snapshot with the proposed deps to run full cycle detection
+          const snapshotActions = store.actions.map(a => 
+            a.id === actionId ? { ...a, depends_on: validDeps } : a
+          );
+          if (this.detectCircularDependencies(snapshotActions, actionId, validDeps)) {
+            throw new Error('Circular dependency detected');
+          }
           action.depends_on = validDeps;
         }
 
