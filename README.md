@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-**Version:** 26.3R1-S26  
+**Version:** 26.3R1-S27  
 **Author:** Moshiko Nayman
 
 Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API-your choice, per conversation.
@@ -31,6 +31,20 @@ Open: **http://localhost:3000**
 `node run.js` starts the backend, frontend, image service, and any configured local providers. **Dependencies are installed automatically on first run** - no separate install step needed. No shell scripts required.
 
 > To install or reinstall dependencies explicitly: `node run.js install`
+
+---
+
+## IntelLedger in 60 Seconds
+
+IntelLedger is the built-in memory workspace for turning messy conversations into clear decisions and next steps.
+
+- Create a session for a topic (incident, project, customer thread, etc.)
+- Ingest text or media notes
+- Auto-extract signals such as risks, asks, commitments, and decisions
+- Generate session synthesis and action-focused summaries
+- Track prompt provenance and audit trails with human-readable labels
+
+If you want structured follow-through instead of raw chat history, use the InteLedger tab.
 
 ---
 
@@ -131,6 +145,10 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **Chat** | Chat branching and restore snapshots for safe experimentation |
 | **Chat** | File attachments and image messages per conversation |
 | **Chat** | Canvas mode, Deep Thinking mode, Guided Learning mode |
+| **IntelLedger** | Session-based memory workspace for context capture and structured follow-through |
+| **IntelLedger** | Signal extraction for risks, asks, commitments, opportunities, and decisions |
+| **IntelLedger** | Session synthesis, cross-session synthesis, and action-oriented next-step tracking |
+| **IntelLedger** | Prompt registry with version activation plus provenance and audit visibility |
 | **Providers** | 10 providers: Ollama, OpenAI, Grok, Groq, OpenRouter, Gemini, Claude, GPUaaS, Custom Endpoint, KoboldCpp |
 | **Providers** | Live provider health check; switch provider per session from the UI |
 | **Providers** | Pull, delete, and monitor Ollama models from the UI |

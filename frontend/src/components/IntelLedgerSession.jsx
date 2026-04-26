@@ -3,7 +3,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import InfoHint from './ui/InfoHint';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -108,11 +108,11 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
   const [auditLoading, setAuditLoading] = useState(false);
   const [usingLocalMode, setUsingLocalMode] = useState(localMode);
 
-  const actionStatusCounts = actions.reduce((acc, action) => {
+  const actionStatusCounts = useMemo(() => actions.reduce((acc, action) => {
     const status = action?.status || 'open';
     acc[status] = (acc[status] || 0) + 1;
     return acc;
-  }, { open: 0, in_progress: 0, done: 0, blocked: 0 });
+  }, { open: 0, in_progress: 0, done: 0, blocked: 0 }), [actions]);
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const actionInsights = actions.reduce((acc, action) => {
@@ -534,9 +534,12 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
   if (!session && loadingSession) return <div className="p-6 text-center text-slate-500">Loading...</div>;
   if (!session) return <div className="p-6 text-center text-slate-500">Loading...</div>;
 
-  const ownerOptions = [...new Set(signals.map((sig) => String(sig.owner || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const ownerOptions = useMemo(
+    () => [...new Set(signals.map((sig) => String(sig.owner || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [signals]
+  );
 
-  const filteredSignals = signals.filter((sig) => {
+  const filteredSignals = useMemo(() => signals.filter((sig) => {
     if (signalTypeFilter !== 'all' && sig.signal_type !== signalTypeFilter) return false;
     if (signalOwnerFilter !== 'all' && String(sig.owner || '').trim() !== signalOwnerFilter) return false;
 
@@ -547,19 +550,22 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
     }
 
     return true;
-  });
+  }), [signals, signalTypeFilter, signalOwnerFilter, signalConfidenceFilter]);
 
-  const allSignalTypes = [...new Set(signals.map((sig) => sig.signal_type).filter(Boolean))];
+  const allSignalTypes = useMemo(
+    () => [...new Set(signals.map((sig) => sig.signal_type).filter(Boolean))],
+    [signals]
+  );
 
-  const signalsByTypeRaw = filteredSignals.reduce((acc, sig) => {
+  const signalsByTypeRaw = useMemo(() => filteredSignals.reduce((acc, sig) => {
     (acc[sig.signal_type] = acc[sig.signal_type] || []).push(sig);
     return acc;
-  }, {});
-  const orderedSignalTypes = [...Object.keys(signalsByTypeRaw)].sort((a, b) => {
+  }, {}), [filteredSignals]);
+  const orderedSignalTypes = useMemo(() => [...Object.keys(signalsByTypeRaw)].sort((a, b) => {
     const aIdx = SIGNAL_TYPE_ORDER.indexOf(a);
     const bIdx = SIGNAL_TYPE_ORDER.indexOf(b);
     return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
-  });
+  }), [signalsByTypeRaw]);
 
   return (
     <main className="relative h-screen w-screen overflow-hidden p-3 pb-8 sm:p-6 sm:pb-10">

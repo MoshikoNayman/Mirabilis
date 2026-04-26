@@ -2,6 +2,17 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S27] - 2026-04-25
+
+### IntelLedger UX Completion + Stability Pass
+
+- **Removed technical version clutter from UI**: IntelLedger and Chat no longer show raw `v*`-style identifiers in user-facing chips or footer labels.
+- **Human-readable provenance labels**: Prompt/version badges are now easier to understand (for example, "Revision 2" instead of internal IDs).
+- **V3.1 polish completed**: Layout containment and footer-safe behavior were finalized so IntelLedger behaves consistently inside the Mirabilis shell.
+- **Safe efficiency improvements**: Added memoization for expensive derived collections in IntelLedger session rendering to reduce avoidable recomputation.
+- **Bug scrub passed**: Frontend production build and backend test suite passed after the changes.
+- **Docs refresh**: README now includes a concise, human-friendly IntelLedger section and capability summary.
+
 ## [26.3R1-S26] - 2026-04-24
 
 ### Desktop App (Electron)
