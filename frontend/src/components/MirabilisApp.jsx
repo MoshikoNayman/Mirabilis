@@ -269,6 +269,7 @@ function IntelLedgerApp({ userId }) {
   const [promptProfilesLoading, setPromptProfilesLoading] = useState(false);
   const [activePromptProfileId, setActivePromptProfileId] = useState('');
   const [promptProfileDetail, setPromptProfileDetail] = useState(null);
+  const [promptRegistryOpen, setPromptRegistryOpen] = useState(false);
   const [promptDetailLoading, setPromptDetailLoading] = useState(false);
   const [promptMutationLoading, setPromptMutationLoading] = useState(false);
   const [promptRegistryError, setPromptRegistryError] = useState('');
@@ -1128,29 +1129,37 @@ function IntelLedgerApp({ userId }) {
         {!localMode && (promptProfilesLoading || promptProfiles.length > 0 || promptRegistryError) && (
           <div className="rounded-2xl border border-black/10 bg-white/75 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
-                Prompt Registry
-              </div>
               <button
                 type="button"
-                onClick={() => {
-                  loadPromptProfiles();
-                  if (activePromptProfileId) loadPromptProfileDetail(activePromptProfileId);
-                }}
-                disabled={promptProfilesLoading || promptDetailLoading || promptMutationLoading}
-                className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                onClick={() => setPromptRegistryOpen((prev) => !prev)}
+                className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
               >
-                Refresh prompts
+                {promptRegistryOpen ? 'Hide Prompt Registry' : 'Show Prompt Registry (Advanced)'}
               </button>
+              {promptRegistryOpen && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    loadPromptProfiles();
+                    if (activePromptProfileId) loadPromptProfileDetail(activePromptProfileId);
+                  }}
+                  disabled={promptProfilesLoading || promptDetailLoading || promptMutationLoading}
+                  className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                >
+                  Refresh prompts
+                </button>
+              )}
             </div>
 
-            {promptRegistryError && (
+            {promptRegistryOpen && promptRegistryError && (
               <div className="mb-3 rounded-xl border border-red-300/70 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-300">
                 {promptRegistryError}
               </div>
             )}
 
-            {promptProfilesLoading ? (
+            {!promptRegistryOpen ? (
+              <div className="text-xs text-slate-500 dark:text-slate-400">Hidden by default for day-to-day use. Open only when managing prompt versions.</div>
+            ) : promptProfilesLoading ? (
               <div className="text-xs text-slate-500 dark:text-slate-400">Loading prompt profiles...</div>
             ) : promptProfiles.length === 0 ? (
               <div className="text-xs text-slate-500 dark:text-slate-400">No prompt profiles available.</div>
