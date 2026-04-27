@@ -135,6 +135,25 @@ node run.js logs                               # Watch all service logs
 node run.js doctor                             # Check environment health
 ```
 
+### Quick Cleanup (Safe)
+
+Use the built-in cleanup helper to remove generated artifacts without touching session/chat data.
+
+```bash
+# Preview only (no deletion)
+./scripts/cleanup-safe.sh
+
+# Apply safe cleanup
+./scripts/cleanup-safe.sh --apply
+```
+
+Optional deep cleanup flags:
+
+- `--with-heavy-cache` (image-service cache)
+- `--with-venv` (Python virtualenvs)
+- `--with-node-modules` (forces reinstall on next run)
+- `--with-runtime-data` (deletes runtime uploads/media data)
+
 ---
 
 ## Verification
