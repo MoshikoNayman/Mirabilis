@@ -3,6 +3,10 @@
 **Version:** 26.2R1-S28  
 **Author:** Moshiko Nayman
 
+[![Download Latest Release](https://img.shields.io/badge/Download-Latest%20Release-1aa86f?style=for-the-badge)](https://github.com/MoshikoNayman/Mirabilis/releases/latest)
+
+Default recommendation: use the desktop installer from Releases (macOS DMG / Windows EXE). Source/web mode is available for advanced users.
+
 Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API-your choice, per conversation.
 
 ---
