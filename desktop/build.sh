@@ -18,9 +18,13 @@ case "$BUILD_TARGET" in
     ELECTRON_BUILDER_ARGS=(--mac dmg --arm64)
     VERIFY_TARGET="mac"
     ;;
+  appimage)
+    ELECTRON_BUILDER_ARGS=(--linux AppImage --x64)
+    VERIFY_TARGET="linux"
+    ;;
   *)
     echo "Unsupported build target: $BUILD_TARGET"
-    echo "Usage: ./build.sh [dir|dmg]"
+    echo "Usage: ./build.sh [dir|dmg|appimage]"
     exit 1
     ;;
 esac
