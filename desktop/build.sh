@@ -57,6 +57,9 @@ else
   npm install --silent
 fi
 
+echo "==> Cleaning previous Next.js build output..."
+rm -rf "$MIRABILIS/frontend/.next"
+
 echo "==> Building Next.js frontend (standalone)..."
 npm run build
 
@@ -92,8 +95,8 @@ echo "==> Running electron-builder..."
 npx electron-builder "${ELECTRON_BUILDER_ARGS[@]}" --projectDir "$BUILD_DIR"
 
 echo "==> Copying output to dist/..."
-rm -rf "$SCRIPT_DIR/dist"
-cp -r "$BUILD_DIR/dist" "$SCRIPT_DIR/dist"
+mkdir -p "$SCRIPT_DIR/dist"
+rsync -a --delete "$BUILD_DIR/dist/" "$SCRIPT_DIR/dist/"
 
 echo "==> Verifying release artifacts..."
 node "$SCRIPT_DIR/verify-release.js" "$VERIFY_TARGET"

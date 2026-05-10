@@ -131,6 +131,22 @@ function buildStartupDiagnostics(err) {
   return lines.join('\n');
 }
 
+// ── Port cleanup ───────────────────────────────────────────────────────────
+// Kill any process occupying a port before we try to bind it.
+function freePort(port) {
+  const { exec } = require('node:child_process');
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      exec(
+        `for /f "tokens=5" %p in ('netstat -ano ^| findstr LISTENING ^| findstr :${port}') do taskkill /F /PID %p`,
+        () => resolve()
+      );
+    } else {
+      exec(`lsof -ti tcp:${port} | xargs kill -9 2>/dev/null; true`, () => resolve());
+    }
+  });
+}
+
 // ── Start backend (Express) ────────────────────────────────────────────────
 function startBackend() {
   return new Promise((resolve, reject) => {
@@ -217,6 +233,21 @@ function startFrontend() {
     }, 1000);
 
     frontendProc.on('error', (err) => { clearInterval(check); reject(err); });
+    frontendProc.on('exit', (code) => {
+      if (code !== 0 && code !== null) {
+        clearInterval(check);
+        reject(new Error(`Frontend exited with code ${code} — check ${path.join(LOG_DIR, 'frontend.log')}`));
+      }
+    });
+  }).then(() => {
+    // Runtime crash handler — fires if frontend dies after successful startup
+    frontendProc.once('exit', (code) => {
+      if (code !== 0 && code !== null && !app.isQuiting) {
+        dialog.showErrorBox('Mirabilis — frontend crashed',
+          `Frontend exited unexpectedly (code ${code}).\nCheck ${path.join(LOG_DIR, 'frontend.log')}`);
+        app.quit();
+      }
+    });
   });
 }
 
@@ -234,6 +265,16 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+
+  // Grant microphone (and camera) so webkitSpeechRecognition works on macOS
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
+    const allowed = ['media', 'mediaKeySystem', 'notifications', 'fullscreen'];
+    callback(allowed.includes(permission));
+  });
+  mainWindow.webContents.session.setPermissionCheckHandler((_wc, permission) => {
+    const allowed = ['media', 'mediaKeySystem', 'notifications', 'fullscreen'];
+    return allowed.includes(permission);
   });
 
   mainWindow.loadURL('http://localhost:3000');
@@ -325,6 +366,7 @@ app.whenReady().then(async () => {
   }
 
   try {
+    await Promise.all([freePort(4000), freePort(3000)]);
     await Promise.all([startBackend(), startFrontend()]);
     servicesStarted = true;
   } catch (err) {

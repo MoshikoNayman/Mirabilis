@@ -379,8 +379,8 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
       });
 
       const { interaction, signals: extracted, actions: extractedActions, session: updatedSession } = await readJsonOrThrow(res, 'Failed to ingest interaction text.');
-      setInteractions([interaction, ...interactions]);
-      setSignals([...extracted, ...signals]);
+      setInteractions((prev) => [interaction, ...prev]);
+      setSignals((prev) => [...extracted, ...prev]);
       if (Array.isArray(extractedActions)) {
         setActions(extractedActions);
       }
@@ -508,11 +508,16 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
   };
 
   const updateAction = async (actionId, patch) => {
-    const previous = actions;
-    const optimistic = actions.map((item) => (
-      item.id === actionId ? { ...item, ...patch, updated_at: new Date().toISOString() } : item
-    ));
-    setActions(optimistic);
+    let previous;
+    const optimistic = [];
+    setActions((current) => {
+      previous = current;
+      const next = current.map((item) => (
+        item.id === actionId ? { ...item, ...patch, updated_at: new Date().toISOString() } : item
+      ));
+      optimistic.push(...next);
+      return next;
+    });
 
     try {
       const res = await fetch(`${API_BASE}/api/intelledger/sessions/${sessionId}/actions/${actionId}`, {

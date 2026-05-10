@@ -11,6 +11,7 @@
   },
   "build": {
     "productName": "Mirabilis AI",
+    "artifactName": "Mirabilis AI-26.2R1-S25-${arch}.${ext}",
     "appId": "com.mirabilis.ai",
     "asar": true,
     "files": [

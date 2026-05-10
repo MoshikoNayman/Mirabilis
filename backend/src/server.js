@@ -309,6 +309,130 @@ async function commandExists(command) {
   }
 }
 
+async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 60 * 10 } = {}) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(command, args, {
+      cwd,
+      env: env ? { ...process.env, ...env } : process.env,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const timeout = timeoutMs > 0 ? setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch {}
+      reject(new Error(`${command} timed out after ${timeoutMs}ms`));
+    }, timeoutMs) : null;
+
+    proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    proc.on('error', (error) => {
+      if (timeout) clearTimeout(timeout);
+      reject(error);
+    });
+    proc.on('close', (code) => {
+      if (timeout) clearTimeout(timeout);
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`${command} exited with code ${code}${stderr ? `: ${stderr.trim()}` : ''}`));
+    });
+  });
+}
+
+async function extractAudioTrack(inputPath, outputPath) {
+  await runCommand('ffmpeg', [
+    '-y',
+    '-i', inputPath,
+    '-vn',
+    '-acodec', 'pcm_s16le',
+    '-ar', '16000',
+    '-ac', '1',
+    outputPath
+  ]);
+}
+
+async function transcribeWithOpenAI({ audioPath, apiKey, baseUrl, model }) {
+  const fileBuffer = await readFile(audioPath);
+  const form = new FormData();
+  form.append('model', model || 'whisper-1');
+  form.append('response_format', 'verbose_json');
+  form.append('timestamp_granularities[]', 'segment');
+  form.append('file', new Blob([fileBuffer], { type: 'audio/wav' }), 'dictation.wav');
+
+  const response = await fetch(`${String(baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '')}/audio/transcriptions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: form
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`OpenAI transcription failed (${response.status}): ${text.slice(0, 300)}`);
+  }
+
+  let payload = {};
+  try { payload = JSON.parse(text); } catch {
+    payload = { text };
+  }
+
+  return String(payload.text || '').trim();
+}
+
+async function transcribeWithWhisperCli({ audioPath, outputStem, model = 'base' }) {
+  const outputDir = dirname(outputStem);
+  await runCommand('whisper', [
+    audioPath,
+    '--model', model,
+    '--output_format', 'json',
+    '--output_dir', outputDir,
+    '--word_timestamps', 'False'
+  ]);
+
+  const jsonPath = `${outputStem}.json`;
+  const raw = await readFile(jsonPath, 'utf8');
+  const parsed = JSON.parse(raw || '{}');
+  return String(parsed.text || '').trim();
+}
+
+async function transcribeDictationAudio({ sourceStem }) {
+  const providerPref = String(process.env.INTELLEDGER_TRANSCRIBE_PROVIDER || 'auto').toLowerCase();
+  const transcribeModel = process.env.INTELLEDGER_TRANSCRIBE_MODEL || 'whisper-1';
+  const whisperCliModel = process.env.INTELLEDGER_WHISPER_CLI_MODEL || 'base';
+  const hasOpenAI = Boolean(config.openAIApiKey);
+
+  const sourcePath = `${sourceStem}.webm`;
+  const wavPath = `${sourceStem}.wav`;
+  await extractAudioTrack(sourcePath, wavPath);
+
+  try {
+    if (providerPref === 'openai' || (providerPref === 'auto' && hasOpenAI)) {
+      return await transcribeWithOpenAI({
+        audioPath: wavPath,
+        apiKey: config.openAIApiKey,
+        baseUrl: config.openAIBaseUrl,
+        model: transcribeModel
+      });
+    }
+
+    if (!(await commandExists('whisper'))) {
+      throw new Error('Whisper CLI is not installed and no OpenAI transcription key is configured.');
+    }
+
+    return await transcribeWithWhisperCli({
+      audioPath: wavPath,
+      outputStem: sourceStem,
+      model: whisperCliModel
+    });
+  } finally {
+    unlink(sourcePath).catch(() => {});
+    unlink(wavPath).catch(() => {});
+  }
+}
+
 // ── Piper TTS voice catalog ────────────────────────────────────────────────
 const PIPER_VOICE_CATALOG = [
   {
@@ -754,6 +878,29 @@ app.post('/api/voice/tts', async (req, res) => {
     }
   } finally {
     unlink(tmpFile).catch(() => {});
+  }
+});
+
+app.post('/api/voice/transcribe', upload.single('audio'), async (req, res) => {
+  const file = req.file;
+  if (!file?.buffer?.length) {
+    return res.status(400).json({ error: 'audio file required' });
+  }
+
+  const tempId = uuidv4();
+  const sourceStem = join(os.tmpdir(), `mirabilis-dictation-${tempId}`);
+  const sourcePath = `${sourceStem}.webm`;
+  try {
+    await writeFile(sourcePath, file.buffer);
+    const text = await transcribeDictationAudio({ sourceStem });
+    res.json({ ok: true, text });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Transcription failed' });
+  } finally {
+    unlink(sourcePath).catch(() => {});
+    unlink(`${sourcePath}.wav`).catch(() => {});
+    unlink(`${sourceStem}.wav`).catch(() => {});
+    unlink(`${sourceStem}.json`).catch(() => {});
   }
 });
 

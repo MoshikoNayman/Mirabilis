@@ -1026,9 +1026,11 @@ const MessageRow = memo(function MessageRow({
 
 export default function ChatApp() {
   const fileInputRef = useRef(null);
-  const speechRecognitionRef = useRef(null);
+  const dictationRecorderRef = useRef(null);
+  const dictationStreamRef = useRef(null);
+  const dictationChunksRef = useRef([]);
+  const dictationPhaseRef = useRef('idle');
   const dictationBaseRef = useRef('');
-  const dictationFinalRef = useRef('');
   const dragCounterRef = useRef(0);
   const messagesScrollRef = useRef(null);
   const lastScrollTopRef = useRef(0);
@@ -1718,16 +1720,28 @@ export default function ChatApp() {
   }, []);
 
   useEffect(() => {
-    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-    setDictationSupported(Boolean(SpeechRecognitionCtor));
+    setDictationSupported(Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder));
 
     return () => {
-      if (speechRecognitionRef.current) {
-        speechRecognitionRef.current.onend = null;
-        speechRecognitionRef.current.onerror = null;
-        speechRecognitionRef.current.onresult = null;
-        speechRecognitionRef.current.stop();
+      if (dictationRecorderRef.current) {
+        try {
+          dictationRecorderRef.current.ondataavailable = null;
+          dictationRecorderRef.current.onstop = null;
+          dictationRecorderRef.current.onerror = null;
+          if (dictationPhaseRef.current === 'recording') {
+            dictationRecorderRef.current.stop();
+          }
+        } catch {}
       }
+
+      if (dictationStreamRef.current) {
+        dictationStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+
+      dictationRecorderRef.current = null;
+      dictationStreamRef.current = null;
+      dictationChunksRef.current = [];
+      dictationPhaseRef.current = 'idle';
     };
   }, []);
 
@@ -2189,68 +2203,143 @@ export default function ChatApp() {
     }
   }
 
-  function toggleDictation() {
+  function getDictationMimeType() {
+    const candidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus'
+    ];
+    return candidates.find((mimeType) => window.MediaRecorder.isTypeSupported?.(mimeType)) || '';
+  }
+
+  async function transcribeDictationBlob(blob) {
+    const formData = new FormData();
+    const extension = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
+    formData.append('audio', blob, `dictation.${extension}`);
+
+    const response = await fetch(`${API_BASE}/api/voice/transcribe`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const payload = await response.text().catch(() => 'Transcription failed');
+      throw new Error(payload || `Transcription failed (${response.status})`);
+    }
+
+    return response.json();
+  }
+
+  function clearDictationResources() {
+    if (dictationRecorderRef.current) {
+      try {
+        dictationRecorderRef.current.ondataavailable = null;
+        dictationRecorderRef.current.onstop = null;
+        dictationRecorderRef.current.onerror = null;
+      } catch {}
+    }
+
+    if (dictationStreamRef.current) {
+      dictationStreamRef.current.getTracks().forEach((track) => track.stop());
+    }
+
+    dictationRecorderRef.current = null;
+    dictationStreamRef.current = null;
+    dictationChunksRef.current = [];
+  }
+
+  async function toggleDictation() {
     if (!dictationSupported) {
-      setStatusText('Dictation is not supported in this browser.');
+      setStatusText('Dictation is not supported on this device.');
       return;
     }
 
-    if (isDictating && speechRecognitionRef.current) {
-      speechRecognitionRef.current.stop();
+    if (dictationPhaseRef.current === 'transcribing') {
+      setStatusText('Dictation is still transcribing...');
       return;
     }
 
-    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognitionCtor) {
-      setStatusText('Dictation is not supported in this browser.');
+    if (dictationPhaseRef.current === 'recording' && dictationRecorderRef.current) {
+      try {
+        dictationRecorderRef.current.stop();
+      } catch (error) {
+        setStatusText(`Dictation error: ${error.message}`);
+      }
       return;
     }
 
-    const recognition = new SpeechRecognitionCtor();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || 'en-US';
+    const mediaDevices = navigator.mediaDevices;
+    const MediaRecorderCtor = window.MediaRecorder;
+    if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {
+      setStatusText('Dictation is not supported on this device.');
+      return;
+    }
 
-    dictationBaseRef.current = input && !input.endsWith(' ') ? `${input} ` : input;
-    dictationFinalRef.current = '';
+    try {
+      const stream = await mediaDevices.getUserMedia({ audio: true });
+      const mimeType = getDictationMimeType();
+      const recorder = mimeType ? new MediaRecorderCtor(stream, { mimeType }) : new MediaRecorderCtor(stream);
 
-    recognition.onstart = () => {
-      setIsDictating(true);
-      setStatusText('Dictation on...');
-    };
+      dictationBaseRef.current = input && !input.endsWith(' ') ? `${input} ` : input;
+      dictationChunksRef.current = [];
+      dictationStreamRef.current = stream;
+      dictationRecorderRef.current = recorder;
+      dictationPhaseRef.current = 'recording';
 
-    recognition.onresult = (event) => {
-      let finalText = '';
-      let interimText = '';
+      recorder.onstart = () => {
+        setIsDictating(true);
+        setStatusText('Dictation recording...');
+      };
 
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const segment = event.results[i][0]?.transcript || '';
-        if (event.results[i].isFinal) {
-          finalText += segment.endsWith(' ') ? segment : `${segment} `;
-        } else {
-          interimText += segment;
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          dictationChunksRef.current.push(event.data);
         }
-      }
+      };
 
-      if (finalText) {
-        dictationFinalRef.current += finalText;
-      }
+      recorder.onerror = (event) => {
+        const msg = event.error?.message || event.error || 'unknown';
+        setStatusText(`Dictation error: ${msg}`);
+      };
 
-      setInput(`${dictationBaseRef.current}${dictationFinalRef.current}${interimText}`);
-    };
+      recorder.onstop = async () => {
+        dictationPhaseRef.current = 'transcribing';
+        setStatusText('Transcribing dictation...');
 
-    recognition.onerror = (event) => {
-      setStatusText(`Dictation error: ${event.error || 'unknown'}`);
-    };
+        try {
+          const blob = new Blob(dictationChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+          if (!blob.size) {
+            throw new Error('No audio captured');
+          }
 
-    recognition.onend = () => {
+          const payload = await transcribeDictationBlob(blob);
+          const transcript = String(payload?.text || '').trim();
+          if (transcript) {
+            setInput(`${dictationBaseRef.current}${transcript}`);
+            setStatusText('Ready');
+          } else {
+            setStatusText('No speech detected.');
+          }
+        } catch (error) {
+          setStatusText(`Dictation error: ${error.message}`);
+        } finally {
+          clearDictationResources();
+          dictationPhaseRef.current = 'idle';
+          setIsDictating(false);
+        }
+      };
+
+      recorder.start();
+    } catch (error) {
+      clearDictationResources();
+      dictationPhaseRef.current = 'idle';
       setIsDictating(false);
-      speechRecognitionRef.current = null;
-      setStatusText('Ready');
-    };
-
-    speechRecognitionRef.current = recognition;
-    recognition.start();
+      const message = error?.name === 'NotAllowedError'
+        ? 'Microphone access denied — check System Settings → Privacy → Microphone.'
+        : error.message || 'unknown';
+      setStatusText(`Dictation error: ${message}`);
+    }
   }
 
   async function handleAttachFiles(event) {
