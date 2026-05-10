@@ -3,6 +3,10 @@
 **Version:** 26.2R1-S28  
 **Author:** Moshiko Nayman
 
+[![Download Latest Release](https://img.shields.io/badge/Download-Latest%20Release-1aa86f?style=for-the-badge)](https://github.com/MoshikoNayman/Mirabilis/releases/latest)
+
+Default recommendation: use the desktop installer from Releases (macOS DMG / Windows EXE). Source/web mode is available for advanced users.
+
 Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API-your choice, per conversation.
 
 ---
@@ -31,6 +35,21 @@ Open: **http://localhost:3000**
 `node run.js` starts the backend, frontend, image service, and any configured local providers. **Dependencies are installed automatically on first run** - no separate install step needed. No shell scripts required.
 
 > To install or reinstall dependencies explicitly: `node run.js install`
+
+---
+
+## Desktop Downloads (Recommended)
+
+Mirabilis supports both:
+
+- **Web mode** (run from source with `node run.js`)
+- **Desktop app** (prebuilt installers)
+
+Download desktop installers from the latest public release:
+
+- macOS (Apple Silicon): [Mirabilis.AI-26.2.25-arm64.dmg](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI-26.2.25-arm64.dmg)
+- Windows (x64): [Mirabilis.AI.Setup.26.2.25.exe](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI.Setup.26.2.25.exe)
+- Linux (x64): [Mirabilis.AI-26.2.25.AppImage](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI-26.2.25.AppImage)
 
 ---
 
@@ -200,6 +219,8 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 ---
 
 ## Desktop App
+
+If you just want to install and run Mirabilis, use the **Desktop Downloads** section above.
 
 Mirabilis can be packaged as a native desktop app (Electron) using the `desktop/` folder.
 The build system stages everything in a temp directory and cleans up automatically — no mess.
