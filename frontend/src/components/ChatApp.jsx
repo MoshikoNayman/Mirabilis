@@ -444,7 +444,7 @@ function CopyButton({ text }) {
     <button
       onClick={handleCopy}
       title="Copy code"
-      className="ml-auto rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 transition hover:bg-white/10 hover:text-white"
+      className="ml-auto rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)] transition hover:bg-[var(--material-thin)] hover:text-white"
     >
       {copied ? 'Copied!' : 'Copy'}
     </button>
@@ -464,7 +464,7 @@ function CopyMessageButton({ text }) {
       type="button"
       onClick={handleCopy}
       title={copied ? 'Copied!' : 'Copy message'}
-      className="rounded p-1 text-slate-400 transition hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+      className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
     >
       {copied ? (
         <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -549,22 +549,22 @@ const MD_STATIC_COMPONENTS = {
   ol: ({ children }) => <ol className="mb-2 ps-4 list-decimal space-y-1">{children}</ol>,
   li: ({ children }) => <li className="leading-relaxed">{children}</li>,
   blockquote: ({ children }) => (
-    <blockquote className="my-2 border-s-2 border-accent ps-3 text-slate-500 italic dark:text-slate-400">{children}</blockquote>
+    <blockquote className="my-2 border-s-2 border-accent ps-3 text-[color:var(--text-muted)] italic dark:text-[color:var(--text-muted)]">{children}</blockquote>
   ),
   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
   a: ({ href, children }) => (
     <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:brightness-90">{children}</a>
   ),
   table: ({ children }) => (
-    <div className="my-2 overflow-x-auto rounded-lg border border-black/10 dark:border-white/10">
+    <div className="my-2 overflow-x-auto rounded-lg border border-[var(--hairline)]">
       <table className="w-full text-sm">{children}</table>
     </div>
   ),
   thead: ({ children }) => <thead className="bg-black/5 dark:bg-white/5">{children}</thead>,
   tbody: ({ children }) => <tbody>{children}</tbody>,
   tr: ({ children }) => <tr className="border-t border-black/5 dark:border-white/5">{children}</tr>,
-  th: ({ children }) => <th className="px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">{children}</th>,
-  td: ({ children }) => <td className="px-3 py-1.5 text-slate-700 dark:text-slate-300">{children}</td>,
+  th: ({ children }) => <th className="px-3 py-1.5 text-left text-[11px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">{children}</th>,
+  td: ({ children }) => <td className="px-3 py-1.5 text-[color:var(--text-main)]">{children}</td>,
 };
 
 function renderMessageContent(content, message = {}, remoteCtx = {}) {
@@ -572,7 +572,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
   if (message.imageGenerating) {
     return (
       <div
-        className="relative overflow-hidden rounded-xl bg-slate-200 dark:bg-slate-700"
+        className="relative overflow-hidden rounded-xl bg-slate-200"
         style={{ width: 288, height: 288 }}
         aria-label="Generating image…"
       >
@@ -603,7 +603,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
           className="max-w-full rounded-xl"
         />
         {message.content && (
-          <figcaption className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">{message.content}</figcaption>
+          <figcaption className="mt-1.5 text-xs text-[color:var(--text-muted)]">{message.content}</figcaption>
         )}
       </figure>
     );
@@ -650,7 +650,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
                 type="button"
                 onClick={() => onRunCommand(codeText, blockKey)}
                 disabled={execResult?.running}
-                className="ml-2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400 transition hover:bg-white/10 hover:text-emerald-300 disabled:opacity-50"
+                className="ml-2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400 transition hover:bg-[var(--material-thin)] hover:text-emerald-300 disabled:opacity-50"
                 title={`Run on ${remoteTargetRef.current}`}
               >
                 {execResult?.running ? '◌ Running…' : '▶ Run'}
@@ -681,7 +681,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
               {execResult.stderr && (
                 <pre className="whitespace-pre-wrap text-red-400">{execResult.stderr}</pre>
               )}
-              <div className={`mt-1 text-[10px] ${execResult.exitCode === 0 ? 'text-slate-400' : 'text-red-400'}`}>
+              <div className={`mt-1 text-[10px] ${execResult.exitCode === 0 ? 'text-[color:var(--text-muted)]' : 'text-red-400'}`}>
                 exit {execResult.exitCode} · {execResult.duration != null ? `${execResult.duration}ms` : ''}
               </div>
             </div>
@@ -730,7 +730,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
         className={`group relative flex items-start gap-2 rounded-xl border px-2 py-2 transition ${
           isActive
             ? 'border-accent bg-accentSoft/80 dark:bg-accent/20'
-            : 'border-black/10 bg-white/75 hover:bg-white dark:border-white/10 dark:bg-slate-800/60 dark:hover:bg-slate-700/60'
+            : 'border-black/10 bg-[var(--material-thin)] hover:bg-[var(--material-thick)] dark:hover:bg-slate-700/60'
         }`}
       >
         {isPinned && (
@@ -750,16 +750,16 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
               onKeyDown={(e) => {
                 if (e.key === 'Escape') { setIsRenaming(false); e.stopPropagation(); }
               }}
-              className="w-full rounded border border-accent/50 bg-white px-1.5 py-0.5 text-sm outline-none dark:bg-slate-800 dark:text-slate-100"
+              className="w-full rounded border border-accent/50 bg-[var(--material-thick)] px-1.5 py-0.5 text-sm outline-none dark:text-[color:var(--text-main)]"
             />
           </form>
         ) : (
           <button onClick={() => onSelect(chat.id)} className="min-w-0 flex-1 text-left">
             <div className="line-clamp-1 text-sm font-medium">{chat.title}</div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-slate-500 dark:text-slate-300">
+            <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
               <span>{formatTime(chat.updatedAt)}</span>
-              {chat.parentChatId ? <span className="rounded-full border border-black/10 px-1.5 py-0 dark:border-white/10">branch</span> : null}
-              {chat.snapshotCount > 0 ? <span className="rounded-full border border-black/10 px-1.5 py-0 dark:border-white/10">{chat.snapshotCount} snap</span> : null}
+              {chat.parentChatId ? <span className="rounded-full border border-[var(--hairline)] px-1.5 py-0">branch</span> : null}
+              {chat.snapshotCount > 0 ? <span className="rounded-full border border-[var(--hairline)] px-1.5 py-0">{chat.snapshotCount} snap</span> : null}
             </div>
           </button>
         )}
@@ -768,7 +768,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
             type="button"
             aria-label={`More actions for ${chat.title}`}
             title="Chat actions"
-            className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-slate-400 opacity-0 transition hover:bg-black/5 hover:text-slate-700 group-hover:opacity-100 focus:opacity-100 dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-slate-200"
+            className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[color:var(--text-muted)] opacity-0 transition hover:bg-black/5 hover:text-[color:var(--text-main)] group-hover:opacity-100 focus:opacity-100 dark:text-[color:var(--text-muted)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
             onClick={() => onToggleMenu(chat.id)}
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="currentColor">
@@ -779,10 +779,10 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
           </button>
         )}
         {isMenuOpen && (
-          <div className="absolute right-2 top-10 z-10 min-w-36 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+          <div className="absolute right-2 top-10 z-10 min-w-36 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
               onClick={startRename}
             >
               <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -793,7 +793,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
             </button>
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
               onClick={() => { onBranch(chat.id); onToggleMenu(null); }}
             >
               <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -808,7 +808,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
             </button>
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
               onClick={() => { onTogglePin(chat.id); onToggleMenu(null); }}
             >
               <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill={isPinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -818,7 +818,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
             </button>
             <button
               type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 transition hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
               onClick={() => { onExport(chat.id); onToggleMenu(null); }}
             >
               <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -877,22 +877,27 @@ const MessageRow = memo(function MessageRow({
   const isLastAssistant = message.role === 'assistant' && !message.imageGenerating && isLast;
   return (
     <article
-      className={`fade-in text-sm ${
+      className={`au-enter text-[length:var(--text-md)] leading-relaxed text-[color:var(--text-main)] ${
         message.role === 'user'
-          ? 'ml-auto max-w-[90%] rounded-2xl px-3 py-2 shadow-sm sm:max-w-[75%] bg-accent text-white shadow-[0_10px_22px_-14px_rgba(26,168,111,0.9)]'
+          ? 'ml-auto max-w-[90%] rounded-[var(--r-lg)] rounded-br-[var(--r-xs)] px-3.5 py-2.5 shadow-[var(--shadow-2)] sm:max-w-[75%] border border-[color:color-mix(in_srgb,var(--accent)_40%,transparent)]'
           : speakingMessageId === message.id
-          ? 'w-full rounded-2xl px-3 py-2 bg-accentSoft/50 text-slate-800 dark:bg-accent/15 dark:text-slate-100'
-          : 'w-full rounded-2xl px-3 py-2 bg-black/[0.025] text-slate-800 dark:bg-white/[0.04] dark:text-slate-100'
+          ? 'w-full rounded-[var(--r-lg)] px-3.5 py-2.5 au-hairline'
+          : 'w-full rounded-[var(--r-lg)] px-3.5 py-2.5'
       }`}
+      style={
+        message.role === 'user'
+          ? { background: 'color-mix(in srgb, var(--accent) 18%, var(--material-thin))' }
+          : speakingMessageId === message.id
+          ? { background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }
+          : { background: 'color-mix(in srgb, var(--text-main) 4%, transparent)' }
+      }
     >
       {isStreaming && !message.content && message.role === 'assistant' && isLast && !message.imageGenerating
         ? (
-          <div className="flex items-center gap-1.5 py-1">
-            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:0ms]" />
-            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:150ms]" />
-            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400 [animation-delay:300ms]" />
+          <div className="flex items-center gap-2 py-1" style={{ color: 'var(--accent)' }}>
+            <span className="au-typing"><i /><i /><i /></span>
             {streamingLabel && (
-              <span className="ml-1 text-[10px] font-medium uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500">{streamingLabel}</span>
+              <span className="ml-0.5 text-[length:var(--text-2xs)] font-medium uppercase tracking-[0.1em] text-[color:var(--text-muted)]">{streamingLabel}</span>
             )}
           </div>
         )
@@ -902,7 +907,7 @@ const MessageRow = memo(function MessageRow({
           {message.attachments.map((file) => {
             const isImage = String(file.mimeType || '').startsWith('image/');
             return (
-              <div key={file.storedName || file.url} className="rounded-xl border border-black/10 bg-white/80 p-2 dark:border-white/10 dark:bg-slate-900/50">
+              <div key={file.storedName || file.url} className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-2">
                 {isImage && file.url ? (
                   <img
                     src={`${API_BASE}${file.url}`}
@@ -920,7 +925,7 @@ const MessageRow = memo(function MessageRow({
                       href={`${API_BASE}${file.url}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="rounded-md border border-black/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+                      className="rounded-md border border-[var(--hairline)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     >
                       Open
                     </a>
@@ -932,15 +937,15 @@ const MessageRow = memo(function MessageRow({
         </div>
       )}
       {message.role === 'user' && message.content && (
-        <div className="mt-1.5 flex items-center justify-between border-t border-white/20 pt-1">
-          <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-white/50">
+        <div className="mt-1.5 flex items-center justify-between border-t border-[var(--hairline)] pt-1">
+          <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-[color:var(--text-main)] opacity-70">
             You · ~{(message.tokenEstimate || 0).toLocaleString()} tok
           </span>
           <button
             type="button"
             onClick={() => navigator.clipboard.writeText(message.content || '').catch(() => {})}
             title="Copy message"
-            className="rounded p-1 text-white/60 transition hover:bg-white/10 hover:text-white"
+            className="rounded p-1 text-[color:var(--text-main)] opacity-70 transition hover:bg-[var(--material-thin)] hover:opacity-100"
           >
             <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="9" y="9" width="13" height="13" rx="2" />
@@ -951,7 +956,7 @@ const MessageRow = memo(function MessageRow({
       )}
       {message.role === 'assistant' && !message.imageGenerating && (
         <div className="mt-1.5 flex items-center justify-between border-t border-black/[0.06] pt-1 dark:border-white/[0.07]">
-          <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-[color:var(--text-muted)]">
             {!message.imageUrl ? (
               <>
                 {message.effectiveProvider ? (
@@ -981,7 +986,7 @@ const MessageRow = memo(function MessageRow({
               className={`rounded p-1 transition disabled:opacity-40 ${
                 speakingMessageId === message.id && isSpeaking
                   ? 'text-accent'
-                  : 'text-slate-400 hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200'
+                  : 'text-[color:var(--text-muted)] hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200'
               }`}
             >
               <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -997,7 +1002,7 @@ const MessageRow = memo(function MessageRow({
                 onClick={regenerate}
                 disabled={isStreaming}
                 title="Regenerate response"
-                className="rounded p-1 text-slate-400 transition hover:bg-black/5 hover:text-slate-700 disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+                className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:opacity-40 dark:text-[color:var(--text-muted)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
               >
                 <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M4 4a8 8 0 0 1 12 0" />
@@ -3203,17 +3208,34 @@ export default function ChatApp() {
     refreshModels();
   }, [provider]);
 
-  // Global keyboard shortcuts: Ctrl+K / Cmd+K → new chat
+  // Aurora shell integration: the floating dock + ⌘K command palette now own
+  // the global keyboard shortcut, and drive chat actions through these DOM
+  // CustomEvents. We intentionally no longer bind ⌘K here to avoid double-firing
+  // (palette opening AND a new chat) with the shell.
   useEffect(() => {
-    function handleShortcuts(e) {
-      const ctrlOrCmd = e.metaKey || e.ctrlKey;
-      if (ctrlOrCmd && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        shortcutRef.current.createChat?.();
-      }
-    }
-    document.addEventListener('keydown', handleShortcuts);
-    return () => document.removeEventListener('keydown', handleShortcuts);
+    const onNewChat = () => shortcutRef.current.createChat?.();
+    const onSetProvider = (e) => {
+      const next = e?.detail?.provider;
+      if (!next) return;
+      setProvider(next);
+      // GGUF model names are local-only; reset to auto when switching providers.
+      setModel((m) => (typeof m === 'string' && m.toLowerCase().endsWith('.gguf') ? 'auto' : m));
+    };
+    const onToggleWebSearch = () => setDeepWebEnabled((v) => !v);
+    const onOpenChat = (e) => {
+      const id = e?.detail?.id;
+      if (id) shortcutRef.current.loadChat?.(id);
+    };
+    window.addEventListener('mirabilis:new-chat', onNewChat);
+    window.addEventListener('mirabilis:set-provider', onSetProvider);
+    window.addEventListener('mirabilis:toggle-web-search', onToggleWebSearch);
+    window.addEventListener('mirabilis:open-chat', onOpenChat);
+    return () => {
+      window.removeEventListener('mirabilis:new-chat', onNewChat);
+      window.removeEventListener('mirabilis:set-provider', onSetProvider);
+      window.removeEventListener('mirabilis:toggle-web-search', onToggleWebSearch);
+      window.removeEventListener('mirabilis:open-chat', onOpenChat);
+    };
   }, []);
 
   useEffect(() => {
@@ -3816,13 +3838,15 @@ export default function ChatApp() {
     }
   }
 
-  // Always keep shortcut ref in sync with latest createChat (avoids stale closure in keydown handler)
+  // Always keep shortcut ref in sync with latest handlers (avoids stale closure
+  // in the Aurora shell CustomEvent listeners).
   shortcutRef.current.createChat = createChat;
+  shortcutRef.current.loadChat = loadChat;
 
   return (
     <main className="relative h-screen w-screen p-3 sm:p-6">
       <div className="mx-auto flex h-full max-w-7xl gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
-        <aside className={`flex shrink-0 flex-col gap-3 rounded-2xl border border-[var(--panel-border)] bg-white/65 p-2 dark:bg-slate-950/45 sm:p-4 transition-all duration-200 ${sidebarOpen ? 'w-28 sm:w-72' : 'hidden'}`}>
+        <aside className={`flex shrink-0 flex-col gap-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--material-thin)] p-2 sm:p-4 transition-all duration-200 ${sidebarOpen ? 'w-28 sm:w-72' : 'hidden'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span aria-hidden="true" className="icq-mark" title="ICQ logo">
@@ -3856,7 +3880,7 @@ export default function ChatApp() {
             <button
               onClick={deleteLastChat}
               disabled={chats.length === 0}
-              className="rounded-full border border-black/10 px-2 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+              className="rounded-full border border-[var(--hairline)] px-2 py-1.5 text-xs font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-[var(--material-thin)]"
               title={activeChatId ? 'Delete current chat' : 'Delete most recent chat'}
             >
               Delete
@@ -3871,13 +3895,13 @@ export default function ChatApp() {
           </div>
 
           {isSystemPromptVisible && (
-          <div className="rounded-2xl border border-black/10 bg-white/70 p-3 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.25)] dark:border-white/10 dark:bg-slate-900/45">
+          <div className="rounded-2xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.25)]">
             <div className="space-y-2.5">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">
                   Assistant
                 </div>
-                <div className="text-[10px] text-slate-500 dark:text-slate-400">
+                <div className="text-[10px] text-[color:var(--text-muted)]">
                   {selectedPromptProfile?.description || (selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? 'Custom for this chat' : 'Preset active')}
                 </div>
               </div>
@@ -3910,13 +3934,13 @@ export default function ChatApp() {
                 </button>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-slate-400">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-[color:var(--text-muted)]">
                 <span className="truncate">{selectedPromptProfile?.label || 'Current custom prompt'}</span>
                 <div className="flex items-center gap-3 shrink-0">
                   <button
                     type="button"
                     onClick={() => setSystemPrompt((selectedPromptProfile?.content || buildDefaultSystemPrompt(provider)))}
-                    className="rounded-lg border border-black/10 bg-white/85 px-2 py-1 text-[10px] font-semibold text-slate-600 transition hover:bg-black/5 hover:text-slate-700 dark:border-white/15 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-slate-100"
+                    className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[10px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-[color:var(--text-main)]"
                   >
                     Reset
                   </button>
@@ -3924,7 +3948,7 @@ export default function ChatApp() {
                     type="button"
                     onClick={deleteSelectedPromptProfile}
                     disabled={!selectedPromptProfile || selectedPromptProfile.isBuiltin}
-                    className="rounded-lg border border-red-400/35 bg-white/85 px-2 py-1 text-[10px] font-semibold text-red-600 transition hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-400/25 dark:bg-slate-800 dark:text-red-300 dark:hover:bg-red-950/30 dark:hover:text-red-200"
+                    className="rounded-lg border border-red-400/35 bg-[var(--material-thin)] px-2 py-1 text-[10px] font-semibold text-red-600 transition hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-400/25 dark:text-red-300 dark:hover:bg-red-950/30 dark:hover:text-red-200"
                   >
                     Delete
                   </button>
@@ -3932,14 +3956,14 @@ export default function ChatApp() {
                 </div>
               </div>
 
-              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-300">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">
                 Prompt
               </div>
               <textarea
                 value={systemPrompt}
                 onChange={(event) => handleSystemPromptChange(event.target.value)}
                 rows={4}
-                className="w-full rounded-xl border border-black/10 bg-white/95 px-3 py-2.5 text-[12px] leading-relaxed text-slate-700 outline-none transition focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-100"
+                className="w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-2.5 text-[12px] leading-relaxed text-[color:var(--text-main)] outline-none transition focus:border-accent dark:text-[color:var(--text-main)]"
               />
             </div>
           </div>
@@ -3952,7 +3976,7 @@ export default function ChatApp() {
               placeholder="Search chats…"
               value={chatSearch}
               onChange={(e) => setChatSearch(e.target.value)}
-              className="w-full rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-xs outline-none placeholder:text-slate-400 focus:border-accent dark:border-white/20 dark:bg-slate-900/60 dark:placeholder:text-slate-500"
+              className="w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-1.5 text-xs outline-none placeholder:text-[color:var(--text-muted)] focus:border-accent dark:placeholder:text-[color:var(--text-muted)]"
             />
           </div>
 
@@ -3975,87 +3999,11 @@ export default function ChatApp() {
                 />
               ))}
               {sortedAndFilteredChats.length === 0 && (
-                <li className="rounded-lg border border-dashed border-black/20 p-3 text-xs text-slate-500">
+                <li className="rounded-lg border border-dashed border-black/20 p-3 text-xs text-[color:var(--text-muted)]">
                   {chatSearch.trim() ? 'No chats match your search.' : 'No chats yet.'}
                 </li>
               )}
             </ul>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-300 sm:text-xs">
-              Appearance
-            </label>
-
-            <div className="space-y-1">
-              <div className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-300">Theme</div>
-              <div className="grid grid-cols-3 gap-0.5 rounded-full border border-black/10 bg-white/80 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-white/15 dark:bg-slate-900/85">
-                {[
-                  { value: 'light', label: 'Light' },
-                  { value: 'dark', label: 'Dark' },
-                  { value: 'auto', label: 'System' },
-                ].map(({ value, label }) => (
-                  <button
-                    key={value}
-                    onClick={() => setThemeMode(value)}
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold tracking-[0.01em] transition ${
-                      themeMode === value
-                        ? 'bg-ink text-white shadow-[0_1px_2px_rgba(15,23,42,0.18)] dark:bg-accent'
-                        : 'text-slate-600 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-300">Font</div>
-              <div className="grid grid-cols-3 gap-0.5 rounded-full border border-black/10 bg-white/80 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-white/15 dark:bg-slate-900/85">
-                {[
-                  { id: 'jakarta', label: 'Jakarta', style: { fontFamily: 'var(--font-ui), sans-serif' } },
-                  { id: 'system', label: 'System', style: { fontFamily: "-apple-system, 'Helvetica Neue', sans-serif" } },
-                  { id: 'tahoma', label: 'Tahoma', style: { fontFamily: 'Tahoma, Geneva, sans-serif' } },
-                ].map(({ id, label, style }) => (
-                  <button
-                    key={id}
-                    onClick={() => setUiFont(id)}
-                    style={style}
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] transition ${
-                      uiFont === id
-                        ? 'border border-accent bg-accentSoft font-semibold text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
-                        : 'border border-transparent text-slate-600 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <div className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-500 dark:text-slate-300">Palette</div>
-              <div className="grid grid-cols-3 gap-0.5 rounded-full border border-black/10 bg-white/80 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-white/15 dark:bg-slate-900/85">
-                {[
-                  { id: 'mirabilis', label: 'Mirabilis' },
-                  { id: 'ember',     label: 'Ember' },
-                  { id: 'summit',    label: 'Summit' },
-                ].map(({ id, label }) => (
-                  <button
-                    key={id}
-                    onClick={() => setColorScheme(id)}
-                    className={`rounded-full px-1.5 py-0.5 text-[10px] transition ${
-                      colorScheme === id
-                        ? 'border border-accent bg-accentSoft font-semibold text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
-                        : 'border border-transparent text-slate-600 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
           </div>
         </aside>
 
@@ -4063,7 +4011,7 @@ export default function ChatApp() {
           className={`relative flex min-w-0 flex-1 flex-col rounded-2xl border p-3 sm:p-5 ${
             isDragOverChat
               ? 'border-accent bg-accentSoft/35 dark:bg-accent/10'
-              : 'border-[var(--panel-border)] bg-white/72 dark:bg-slate-950/40'
+              : 'border-[var(--panel-border)] bg-[var(--material-thin)]'
           }`}
           onDragEnter={handleChatDragEnter}
           onDragOver={handleChatDragOver}
@@ -4071,20 +4019,20 @@ export default function ChatApp() {
           onDrop={handleChatDrop}
         >
           {isDragOverChat && (
-            <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-white/75 dark:bg-slate-900/75">
+            <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-[var(--material-thin)]">
               <div className="rounded-full border border-accent/40 bg-accentSoft px-4 py-2 text-sm font-semibold text-ink dark:bg-accent/20 dark:text-white">
                 Drop files to attach
               </div>
             </div>
           )}
-          <header className="mb-3 border-b border-black/10 pb-3 dark:border-white/10">
+          <header className="mb-3 border-b border-black/10 pb-3">
             <div className="flex items-baseline justify-between gap-2">
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setSidebarOpen((v) => { const next = !v; safeStorageSet('mirabilis-sidebar-open', String(next)); return next; })}
                   title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-                  className="rounded p-1 text-slate-400 transition hover:bg-black/5 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-white/10 dark:hover:text-slate-200"
+                  className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
                 >
                   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     {sidebarOpen
@@ -4093,20 +4041,20 @@ export default function ChatApp() {
                     }
                   </svg>
                 </button>
-                <p className="shrink-0 font-mono text-xs text-slate-500 dark:text-slate-300">{statusText}</p>
+                <p className="shrink-0 font-mono text-xs text-[color:var(--text-muted)]">{statusText}</p>
               </div>
-              <p className="truncate font-mono text-[11px] text-slate-400 dark:text-slate-400">
+              <p className="truncate font-mono text-[11px] text-[color:var(--text-muted)]">
                 input {formatTokenCount(chatTokenSummary.input)} · output {formatTokenCount(chatTokenSummary.output)}
               </p>
             </div>
 
             {remoteUsage.enabled && (
-              <div className="mt-1.5 rounded-lg border border-black/10 bg-white/75 px-2 py-1.5 dark:border-white/10 dark:bg-slate-900/60">
-                <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-mono text-slate-500 dark:text-slate-400">
+              <div className="mt-1.5 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5">
+                <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-mono text-[color:var(--text-muted)]">
                   <span>{provider} est. {formatUsdEstimate(remoteUsage.estUsd)} / ${remoteUsage.budgetUsd.toFixed(2)}</span>
                   <span>{formatUsagePercent(remoteUsage.estUsd, remoteUsage.budgetUsd)}</span>
                 </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                <div className="h-1.5 overflow-hidden rounded-full bg-black/10 dark:bg-[var(--material-thin)]">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${remoteUsage.pct >= 90 ? 'bg-red-500' : remoteUsage.pct >= 70 ? 'bg-amber-500' : 'bg-accent'}`}
                     style={{ width: `${Math.max(2, remoteUsage.pct)}%` }}
@@ -4139,10 +4087,10 @@ export default function ChatApp() {
                           setIsVoiceMenuOpen(false);
                           setOpenHardwarePopover((current) => (current === key ? null : key));
                         }}
-                        className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition hover:bg-black/5 dark:hover:bg-white/10 ${
+                        className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
                           isActive
                             ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
-                            : 'border-black/10 bg-white/80 text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300'
+                            : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)]'
                         }`}
                         title={item.expanded || item.label}
                       >
@@ -4156,9 +4104,9 @@ export default function ChatApp() {
                         <span className="relative">{item.label}</span>
                       </button>
                       {openHardwarePopover === key && item.expanded ? (
-                        <div data-menu-panel={`hardware-${key}`} role="menu" tabIndex={-1} className="absolute left-0 top-full z-20 mt-2 w-72 rounded-xl border border-black/10 bg-white/95 p-2 text-[11px] text-slate-600 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95 dark:text-slate-300">
+                        <div data-menu-panel={`hardware-${key}`} role="menu" tabIndex={-1} className="absolute left-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] au-chrome au-elev-2 p-2 text-[11px] text-[color:var(--text-muted)]">
                           {item.expanded.split('\n').map((line, i) => (
-                            <div key={i} className={i === 0 ? 'font-semibold text-slate-800 dark:text-slate-100 mb-1' : 'text-slate-500 dark:text-slate-400'}>{line}</div>
+                            <div key={i} className={i === 0 ? 'font-semibold text-[color:var(--text-main)] mb-1' : 'text-[color:var(--text-muted)]'}>{line}</div>
                           ))}
                         </div>
                       ) : null}
@@ -4178,14 +4126,14 @@ export default function ChatApp() {
                       ? 'Web search on — click to disable'
                       : 'Web search off — click to enable'
                   }
-                  className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition hover:bg-black/5 dark:hover:bg-white/10 ${
+                  className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
                     webSearchStatus === 'searching'
                       ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
                       : webSearchStatus === 'error'
                       ? 'border-red-400/60 bg-red-50/80 text-red-600 dark:border-red-500/40 dark:bg-red-900/20 dark:text-red-400'
                       : deepWebEnabled
-                      ? 'border-black/10 bg-white/80 text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300'
-                      : 'border-black/10 bg-white/80 text-slate-400 opacity-50 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-500'
+                      ? 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)]'
+                      : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)] opacity-50 dark:text-[color:var(--text-muted)]'
                   }`}
                 >
                   <span className="relative">www</span>
@@ -4201,7 +4149,7 @@ export default function ChatApp() {
                     className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition ${
                       isSystemPromptVisible
                         ? 'border-accent/60 bg-accentSoft text-ink dark:border-accent/40 dark:bg-accent/20 dark:text-green-300'
-                        : 'border-black/10 bg-white/80 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10'
+                        : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                     }`}
                     title="Toggle instructions visibility"
                   >
@@ -4218,42 +4166,42 @@ export default function ChatApp() {
                         setIsVoiceMenuOpen(false);
                         setIsContextPanelOpen((prev) => !prev);
                       }}
-                      className="inline-flex items-center justify-center rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10"
+                      className="inline-flex items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                       title={`Context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens`}
                     >
                       Context {contextUsage.usedPct}%
                     </button>
 
                     {isContextPanelOpen && (
-                      <div data-menu-panel="context" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-black/10 bg-white/95 p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                      <div data-menu-panel="context" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                         <div className="mb-2 flex items-center justify-between">
-                          <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Token Limit</span>
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400">{contextUsage.usedPct}% used</span>
+                          <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Token Limit</span>
+                          <span className="text-[10px] text-[color:var(--text-muted)]">{contextUsage.usedPct}% used</span>
                         </div>
 
-                        <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                        <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-[var(--material-thin)]">
                           <div
                             className="h-full rounded-full bg-accent transition-all duration-300"
                             style={{ width: `${Math.min(contextUsage.usedPct, 100)}%` }}
                           />
                         </div>
 
-                        <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
-                          <div className="flex items-center justify-between rounded-lg border border-black/5 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-slate-800/60">
+                        <div className="space-y-1 text-[11px] text-[color:var(--text-main)]">
+                          <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
                             <span>System instructions</span>
                             <span>{contextUsage.systemPct}% · {contextUsage.systemTokens.toLocaleString()} tok</span>
                           </div>
-                          <div className="flex items-center justify-between rounded-lg border border-black/5 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-slate-800/60">
+                          <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
                             <span>User content</span>
                             <span>{contextUsage.userPct}% · {contextUsage.userTokens.toLocaleString()} tok</span>
                           </div>
-                          <div className="flex items-center justify-between rounded-lg border border-black/5 bg-white/70 px-2 py-1 dark:border-white/10 dark:bg-slate-800/60">
+                          <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
                             <span>Assistant</span>
                             <span>{contextUsage.uncategorizedPct}% · {contextUsage.uncategorizedTokens.toLocaleString()} tok</span>
                           </div>
                         </div>
 
-                        <div className="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
+                        <div className="mt-2 text-[10px] text-[color:var(--text-muted)]">
                           {contextUsage.totalTokens.toLocaleString()} / {contextUsage.windowTokens.toLocaleString()} tokens
                         </div>
                       </div>
@@ -4271,7 +4219,7 @@ export default function ChatApp() {
                           setOpenHardwarePopover(null);
                           setIsEngineMenuOpen((current) => !current);
                         }}
-                        className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10"
+                        className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                         title={selectedEngine ? `Engine: ${selectedEngine}` : 'Engine'}
                       >
                         <span>Engine</span>
@@ -4280,7 +4228,7 @@ export default function ChatApp() {
                         </svg>
                       </button>
                       {isEngineMenuOpen && Array.isArray(hardwareProfile.action.options) && hardwareProfile.action.options.length > 0 ? (
-                        <div data-menu-panel="engine" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 min-w-36 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                        <div data-menu-panel="engine" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 min-w-36 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                           {hardwareProfile.action.options.map((option) => (
                             <button
                               key={option}
@@ -4294,7 +4242,7 @@ export default function ChatApp() {
                               className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                                 selectedEngine === option
                                   ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                                  : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                                  : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                               }`}
                             >
                               <span>{option}</span>
@@ -4337,11 +4285,11 @@ export default function ChatApp() {
           >
             <div className={`mx-auto w-full space-y-3 pr-1 ${sidebarOpen ? 'max-w-3xl' : 'max-w-5xl'}`}>
             {activeChatId && (
-              <section className="rounded-2xl border border-black/10 bg-white/80 p-3 dark:border-white/10 dark:bg-slate-900/50">
+              <section className="rounded-2xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Branching & Snapshots</h3>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    <h3 className="text-sm font-semibold text-[color:var(--text-main)]">Branching & Snapshots</h3>
+                    <p className="text-[11px] text-[color:var(--text-muted)]">
                       {activeChatMeta?.parentChatId
                         ? `Branch chat${activeChatMeta?.branchLabel ? ` · ${activeChatMeta.branchLabel}` : ''}`
                         : 'Create a branch before experimenting, or save a restore point first.'}
@@ -4351,7 +4299,7 @@ export default function ChatApp() {
                     <button
                       type="button"
                       onClick={() => branchChat(activeChatId)}
-                      className="rounded-xl border border-black/10 bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-white/10"
+                      className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     >
                       Branch Chat
                     </button>
@@ -4369,7 +4317,7 @@ export default function ChatApp() {
                     value={selectedSnapshotId}
                     onChange={(event) => setSelectedSnapshotId(event.target.value)}
                     disabled={!Array.isArray(activeChatMeta?.snapshots) || activeChatMeta.snapshots.length === 0}
-                    className="min-w-0 flex-1 rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-xs outline-none disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-slate-800"
+                    className="min-w-0 flex-1 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-2 text-xs outline-none disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {Array.isArray(activeChatMeta?.snapshots) && activeChatMeta.snapshots.length > 0 ? (
                       [...activeChatMeta.snapshots].reverse().map((snapshot) => (
@@ -4385,7 +4333,7 @@ export default function ChatApp() {
                     type="button"
                     onClick={restoreSnapshot}
                     disabled={!selectedSnapshotId}
-                    className="rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-2 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[var(--material-thin)]"
                   >
                     Restore Snapshot
                   </button>
@@ -4393,21 +4341,21 @@ export default function ChatApp() {
               </section>
             )}
             {canvasEnabled && (
-              <section className="rounded-2xl border border-black/10 bg-white/80 p-3 dark:border-white/10 dark:bg-slate-900/50">
+              <section className="rounded-2xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                 <div className="mb-2 flex items-center justify-between">
                   <h3 className="text-sm font-semibold">Canvas</h3>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setCanvasText('')}
-                      className="rounded-md border border-black/10 px-2 py-1 text-[11px] text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-300 dark:hover:bg-white/10"
+                      className="rounded-md border border-[var(--hairline)] px-2 py-1 text-[11px] text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     >
                       Clear
                     </button>
                     <button
                       type="button"
                       onClick={() => setCanvasEnabled(false)}
-                      className="rounded-md border border-black/10 px-2 py-1 text-[11px] text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-300 dark:hover:bg-white/10"
+                      className="rounded-md border border-[var(--hairline)] px-2 py-1 text-[11px] text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     >
                       Hide
                     </button>
@@ -4418,28 +4366,53 @@ export default function ChatApp() {
                   onChange={(event) => setCanvasText(event.target.value)}
                   rows={6}
                   placeholder="Draft ideas, prompts, or notes here..."
-                  className="w-full resize-y rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                  className="w-full resize-y rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2 text-sm outline-none focus:border-accent"
                 />
               </section>
             )}
 
             {messages.length === 0 && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-4 py-16 text-center">
-                <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-100">
+              <div className="au-enter flex flex-1 flex-col items-center justify-center gap-5 py-16 text-center">
+                <span
+                  aria-hidden="true"
+                  className="au-orb-ring icq-mark flex h-20 w-20 items-center justify-center"
+                  style={{ boxShadow: 'inset 0 0 0 1px var(--hairline), 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow-3)' }}
+                >
+                  <svg width="44" height="44" viewBox="0 0 48 48" aria-hidden="true">
+                    <g transform="translate(24 24)">
+                      {[0, 60, 120, 180, 240, 300].map((deg) => (
+                        <ellipse key={deg} rx="7" ry="13" cx="0" cy="-9" transform={`rotate(${deg})`} fill="var(--accent)" opacity="0.92" />
+                      ))}
+                      <circle r="6.5" fill="#fff" opacity="0.95" />
+                      <circle r="4" fill="var(--accent)" />
+                    </g>
+                  </svg>
+                </span>
+                <h2 className="text-[length:var(--text-xl)] font-[650] tracking-tight text-[color:var(--text-main)]">
                   {activeChatId ? 'New Conversation' : 'Welcome to Mirabilis AI'}
                 </h2>
-                <p className="max-w-md text-sm text-slate-500 dark:text-slate-400">
-                  {activeChatId ? 'Type a message below to get started.' : 'Select a model, then start a new conversation.'}
+                <p className="max-w-md text-[length:var(--text-md)] leading-relaxed text-[color:var(--text-muted)]">
+                  {activeChatId ? 'Type a message below to get started.' : 'Pick a buddy from the flower, choose a model, and start talking.'}
                 </p>
-                {!activeChatId && (
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {!activeChatId && (
+                    <button
+                      type="button"
+                      onClick={createChat}
+                      className="au-focus rounded-[var(--r-lg)] px-5 py-2.5 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition hover:brightness-110 active:scale-[0.98]"
+                      style={{ background: 'var(--accent)' }}
+                    >
+                      Start a chat
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={createChat}
-                    className="rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition hover:brightness-95"
+                    onClick={() => { try { window.dispatchEvent(new CustomEvent('mirabilis:open-command')); } catch {} }}
+                    className="au-focus au-hairline au-material rounded-[var(--r-lg)] px-4 py-2.5 text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
                   >
-                    Start a chat
+                    ⌘K Commands
                   </button>
-                )}
+                </div>
               </div>
             )}
 
@@ -4467,18 +4440,18 @@ export default function ChatApp() {
           </div>
 
           {isTeachPanelOpen && (
-            <section className="mt-3 rounded-2xl border border-black/10 bg-white/80 p-3 dark:border-white/10 dark:bg-slate-900/50">
+            <section className="mt-3 rounded-2xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-sm font-semibold">Personal Memory</h3>
                 <button
                   type="button"
                   onClick={() => setIsTeachPanelOpen(false)}
-                  className="rounded-md border border-black/10 px-2 py-1 text-[11px] text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-300 dark:hover:bg-white/10"
+                  className="rounded-md border border-[var(--hairline)] px-2 py-1 text-[11px] text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                 >
                   Close
                 </button>
               </div>
-              <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
+              <p className="mb-2 text-[11px] text-[color:var(--text-muted)]">
                 These notes are injected as context into every conversation when memory is enabled.
               </p>
               <div className="mb-2 flex gap-2">
@@ -4488,7 +4461,7 @@ export default function ChatApp() {
                   onChange={(e) => setMemoryInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMemoryItem(); } }}
                   placeholder="Add a memory (e.g. I prefer concise answers)"
-                  className="flex-1 rounded-xl border border-black/10 bg-white/90 px-3 py-1.5 text-xs outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                  className="flex-1 rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-1.5 text-xs outline-none focus:border-accent"
                 />
                 <button
                   type="button"
@@ -4500,16 +4473,16 @@ export default function ChatApp() {
                 </button>
               </div>
               {memoryItems.length === 0 ? (
-                <p className="text-[11px] text-slate-400 dark:text-slate-500">No memories yet.</p>
+                <p className="text-[11px] text-[color:var(--text-muted)]">No memories yet.</p>
               ) : (
                 <ul className="max-h-48 space-y-1 overflow-y-auto scroll-thin">
                   {memoryItems.map((item) => (
-                    <li key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-black/5 bg-white/70 px-2 py-1.5 dark:border-white/10 dark:bg-slate-800/60">
-                      <span className="flex-1 text-[11px] text-slate-700 dark:text-slate-200">{item.text}</span>
+                    <li key={item.id} className="flex items-start justify-between gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5">
+                      <span className="flex-1 text-[11px] text-[color:var(--text-main)]">{item.text}</span>
                       <button
                         type="button"
                         onClick={() => deleteMemoryItem(item.id)}
-                        className="shrink-0 rounded px-1 text-[10px] text-slate-400 transition hover:text-red-500"
+                        className="shrink-0 rounded px-1 text-[10px] text-[color:var(--text-muted)] transition hover:text-red-500"
                         title="Remove"
                       >✕</button>
                     </li>
@@ -4519,7 +4492,7 @@ export default function ChatApp() {
             </section>
           )}
 
-          <footer className="mt-3 border-t border-black/10 pt-3 dark:border-white/10">
+          <footer className="mt-3 border-t border-black/10 pt-3">
             <div className="mb-2 flex items-start justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <div data-menu-container="true" className="relative flex items-center gap-1">
@@ -4541,7 +4514,7 @@ export default function ChatApp() {
                       setIsProviderConfigOpen(false);
                       if (installingBinary?.done) setInstallingBinary(null);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Choose provider"
                   >
                     <span className="max-w-[9rem] truncate">{PROVIDER_OPTIONS.find((opt) => opt.id === provider)?.label || provider}</span>
@@ -4551,7 +4524,7 @@ export default function ChatApp() {
                   </button>
 
                   {isProviderMenuOpen && (
-                    <div data-menu-panel="provider" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-48 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                    <div data-menu-panel="provider" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-48 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       {PROVIDER_OPTIONS.map((opt) => {
                         const binaryMissing = opt.requiresBinary && localBinaryStatus[opt.requiresBinary] !== true;
                         const isInstalling = installingBinary?.provider === opt.requiresBinary && !installingBinary?.done;
@@ -4578,7 +4551,7 @@ export default function ChatApp() {
                                   ? 'cursor-not-allowed opacity-40'
                                   : provider === opt.id
                                     ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                                    : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                                    : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                               }`}
                             >
                               <span className="flex min-w-0 flex-col">
@@ -4608,7 +4581,7 @@ export default function ChatApp() {
                                   if (provider === opt.id) setProvider('ollama');
                                   setIsProviderMenuOpen(false);
                                 }}
-                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-slate-400 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-[color:var(--text-muted)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                                 title="Uninstall binary"
                               >
                                 Uninstall
@@ -4624,7 +4597,7 @@ export default function ChatApp() {
                             setIsProviderMenuOpen(false);
                             setIsProviderConfigOpen(true);
                           }}
-                          className="mt-1 flex w-full items-center justify-between rounded-lg border-t border-black/10 px-2 py-1.5 text-left text-xs text-slate-600 transition hover:bg-black/5 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
+                          className="mt-1 flex w-full items-center justify-between rounded-lg border-t border-black/10 px-2 py-1.5 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                         >
                           <span>Configure endpoint</span>
                           <span className="opacity-60">...</span>
@@ -4636,30 +4609,30 @@ export default function ChatApp() {
 
                 {/* Provider binary install progress panel */}
                 {installingBinary && (
-                  <div className="absolute bottom-12 left-0 z-30 w-72 rounded-xl border border-black/10 bg-white/95 p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                  <div className="absolute bottom-12 left-0 z-30 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                     <div className="mb-2 flex items-center justify-between">
-                      <span className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                      <span className="text-xs font-medium text-[color:var(--text-main)]">
                         Installing {installingBinary.provider}
                       </span>
                       {installingBinary.done && (
-                        <button type="button" onClick={() => setInstallingBinary(null)} className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-200">✕</button>
+                        <button type="button" onClick={() => setInstallingBinary(null)} className="text-[10px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)] dark:hover:text-slate-200">✕</button>
                       )}
                     </div>
                     <div className="max-h-32 overflow-y-auto space-y-0.5">
                       {installingBinary.lines.map((line, i) => (
-                        <p key={i} className={`text-[11px] ${line.type === 'error' ? 'text-red-500' : line.type === 'done' ? 'text-green-500' : line.type === 'warn' ? 'text-yellow-500' : 'text-slate-600 dark:text-slate-300'}`}>
+                        <p key={i} className={`text-[11px] ${line.type === 'error' ? 'text-red-500' : line.type === 'done' ? 'text-green-500' : line.type === 'warn' ? 'text-yellow-500' : 'text-[color:var(--text-main)]'}`}>
                           {line.text}
                         </p>
                       ))}
-                      {!installingBinary.done && <p className="text-[11px] text-slate-400 animate-pulse">…</p>}
+                      {!installingBinary.done && <p className="text-[11px] text-[color:var(--text-muted)] animate-pulse">…</p>}
                     </div>
                   </div>
                 )}
 
                 {/* Provider config panel */}
                 {provider !== 'ollama' && isProviderConfigOpen && (
-                  <div data-menu-container="true" className="absolute bottom-12 left-0 z-30 w-96 rounded-xl border border-black/10 bg-white/95 p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
-                    <p className="mb-1 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <div data-menu-container="true" className="absolute bottom-12 left-0 z-30 w-96 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <p className="mb-1 text-xs font-semibold text-[color:var(--text-main)]">
                       {PROVIDER_OPTIONS.find((o) => o.id === provider)?.label}
                     </p>
                     {provider === 'koboldcpp' && (
@@ -4707,21 +4680,21 @@ export default function ChatApp() {
                         ℹ Claude uses Anthropic API at https://api.anthropic.com and requires an API key.
                       </p>
                     )}
-                    <label className="mb-1 block text-[11px] text-slate-500 dark:text-slate-400">Base URL</label>
+                    <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">Base URL</label>
                     <input
                       type="text"
-                      className="mb-2 w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-accentSoft dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
+                      className="mb-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
                       placeholder={provider === 'koboldcpp' ? 'http://127.0.0.1:5001/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'grok' ? 'https://api.x.ai/v1' : provider === 'groq' ? 'https://api.groq.com/openai/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'claude' ? 'https://api.anthropic.com' : provider === 'gpuaas' ? 'https://your-gpuaas-endpoint.example/v1' : 'http://127.0.0.1:1234/v1'}
                       value={providerConfigs[provider]?.baseUrl || ''}
                       onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], baseUrl: e.target.value } }))}
                     />
                     {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && (
                       <>
-                        <label className="mb-1 block text-[11px] text-slate-500 dark:text-slate-400">API Key <span className="opacity-60">{provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' ? '(required)' : '(leave empty for local servers)'}</span></label>
+                        <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">API Key <span className="opacity-60">{provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' ? '(required)' : '(leave empty for local servers)'}</span></label>
                         <div className="mb-2 flex gap-1">
                           <input
                             type="password"
-                            className="min-w-0 flex-1 rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-accentSoft dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
+                            className="min-w-0 flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
                             placeholder={provider === 'openai' ? 'sk-... (required)' : provider === 'grok' ? 'xai-... (required)' : provider === 'groq' ? 'gsk_... (required)' : provider === 'openrouter' ? 'sk-or-... (required)' : provider === 'gemini' ? 'AIza... (required)' : provider === 'claude' ? 'sk-ant-... (required)' : provider === 'gpuaas' ? 'provider key (required)' : 'sk-... (optional for local)'}
                             value={providerConfigs[provider]?.apiKey || ''}
                             onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], apiKey: e.target.value } }))}
@@ -4731,7 +4704,7 @@ export default function ChatApp() {
                               type="button"
                               title="Clear API key"
                               onClick={() => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], apiKey: '' } }))}
-                              className="flex-shrink-0 rounded-lg border border-black/10 px-2 py-1 text-xs text-slate-500 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-white/10 dark:text-slate-400 dark:hover:border-red-500/40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                              className="flex-shrink-0 rounded-lg border border-[var(--hairline)] px-2 py-1 text-xs text-[color:var(--text-muted)] transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:text-[color:var(--text-muted)] dark:hover:border-red-500/40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                             >
                               Clear
                             </button>
@@ -4741,12 +4714,12 @@ export default function ChatApp() {
                     )}
                     {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas') && (
                       <>
-                        <label className="mb-1 block text-[11px] text-slate-500 dark:text-slate-400">Estimated Monthly Budget (USD)</label>
+                        <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">Estimated Monthly Budget (USD)</label>
                         <input
                           type="number"
                           min="1"
                           step="1"
-                          className="mb-2 w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-xs text-slate-800 outline-none focus:ring-1 focus:ring-accentSoft dark:border-white/10 dark:bg-slate-800 dark:text-slate-100"
+                          className="mb-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
                           value={remoteBudgetUsd}
                           onChange={(e) => {
                             const next = Number(e.target.value);
@@ -4759,7 +4732,7 @@ export default function ChatApp() {
                       <button
                         type="button"
                         onClick={() => { setProvider('ollama'); setIsProviderConfigOpen(false); setStatusText('Switched back to Ollama'); }}
-                        className="flex-1 rounded-lg border border-black/10 px-2 py-1 text-xs text-slate-600 transition hover:bg-black/5 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
+                        className="flex-1 rounded-lg border border-[var(--hairline)] px-2 py-1 text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                       >
                         ← Back to Ollama
                       </button>
@@ -4781,7 +4754,7 @@ export default function ChatApp() {
                     type="button"
                     data-menu-trigger="model"
                     onClick={() => { setIsProviderMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsModelMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Choose model"
                   >
                     <span className="max-w-[9rem] truncate">
@@ -4793,7 +4766,7 @@ export default function ChatApp() {
                   </button>
 
                   {isModelMenuOpen && (
-                  <div data-menu-panel="model" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-96 w-80 overflow-y-auto rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                  <div data-menu-panel="model" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-96 w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       {models.length > 0 ? (
                         <>
                         {/* Auto mode entry — no group header, divider separates it from model groups */}
@@ -4804,7 +4777,7 @@ export default function ChatApp() {
                             className={`flex min-w-0 flex-1 items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
                               model === 'auto'
                                 ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                                : 'font-medium text-slate-800 hover:bg-black/5 dark:text-slate-100 dark:hover:bg-white/10'
+                                : 'font-medium text-[color:var(--text-main)] hover:bg-black/5 dark:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)]'
                             }`}
                           >
                             <span className="flex min-w-0 items-center gap-1.5 truncate">
@@ -4813,15 +4786,15 @@ export default function ChatApp() {
                                 : <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />}
                               <span className="truncate font-semibold">Auto</span>
                             </span>
-                            <span className="ml-2 shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                            <span className="ml-2 shrink-0 text-[10px] text-[color:var(--text-muted)]">
                               {pickBestAutoModel(models) ? `→ ${pickBestAutoModel(models).label}` : 'no model installed'}
                             </span>
                           </button>
                         </div>
-                        <div className="my-1 border-t border-black/10 dark:border-white/10" />
+                        <div className="my-1 border-t border-black/10" />
                         {Array.from(new Set(models.map((item) => item.group || 'Models'))).map((group) => (
                           <div key={group} className="mb-1 last:mb-0">
-                            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{group}</div>
+                            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">{group}</div>
                             {models
                               .filter((item) => (item.group || 'Models') === group)
                               .map((item) => {
@@ -4871,8 +4844,8 @@ export default function ChatApp() {
                                     isSelected
                                       ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
                                       : isInstalled
-                                      ? 'font-medium text-slate-800 hover:bg-black/5 dark:text-slate-100 dark:hover:bg-white/10'
-                                      : 'text-slate-400 hover:bg-black/5 dark:text-slate-500 dark:hover:bg-white/5'
+                                      ? 'font-medium text-[color:var(--text-main)] hover:bg-black/5 dark:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)]'
+                                      : 'text-[color:var(--text-muted)] hover:bg-black/5 dark:text-[color:var(--text-muted)] dark:hover:bg-white/5'
                                   }`}
                                 >
                                   <span className="flex min-w-0 items-center gap-1.5 truncate">
@@ -4883,7 +4856,7 @@ export default function ChatApp() {
                                       <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
                                     )}
                                     {!isInstalled && (
-                                      <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300 dark:bg-slate-600" />
+                                      <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
                                     )}
                                     <span className="truncate">
                                       {item.label}
@@ -4892,7 +4865,7 @@ export default function ChatApp() {
                                   {pulling ? (
                                     <div className="flex shrink-0 items-center gap-1.5">
                                       {pulling.pct !== null && (
-                                        <div className="h-1 w-16 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                                        <div className="h-1 w-16 overflow-hidden rounded-full bg-black/10 dark:bg-[var(--material-thin)]">
                                           <div
                                             className="h-full rounded-full bg-accent transition-all duration-300"
                                             style={{ width: `${pulling.pct}%` }}
@@ -4912,7 +4885,7 @@ export default function ChatApp() {
                                       >✕</span>
                                     </div>
                                   ) : (
-                                    <span className="ml-2 shrink-0 text-[10px] text-slate-400 dark:text-slate-500">
+                                    <span className="ml-2 shrink-0 text-[10px] text-[color:var(--text-muted)]">
                                       {isInstalled
                                         ? (item.paramSize || '')
                                         : provider === 'ollama'
@@ -4925,7 +4898,7 @@ export default function ChatApp() {
                                   <button
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); deleteModel(item.ollamaId || item.id, item.id); }}
-                                    className="ml-0.5 shrink-0 rounded p-1 text-[10px] text-slate-300 opacity-0 transition hover:text-red-500 group-hover/row:opacity-100 dark:text-slate-600 dark:hover:text-red-400"
+                                    className="ml-0.5 shrink-0 rounded p-1 text-[10px] text-slate-300 opacity-0 transition hover:text-red-500 group-hover/row:opacity-100 dark:text-[color:var(--text-main)] dark:hover:text-red-400"
                                     title={`Remove ${item.label} to free space`}
                                   >✕</button>
                                 )}
@@ -4939,17 +4912,17 @@ export default function ChatApp() {
                         ))}
                         </>
                       ) : (
-                        <div className="px-2 py-2 text-xs text-slate-500">No models found</div>
+                        <div className="px-2 py-2 text-xs text-[color:var(--text-muted)]">No models found</div>
                       )}
 
                     {/* Generation params at bottom of model menu */}
-                    <div className="mt-1 border-t border-black/10 px-2 py-2 dark:border-white/10">
-                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">Generation</div>
+                    <div className="mt-1 border-t border-black/10 px-2 py-2">
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Generation</div>
                       <div className="mb-1.5">
-                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                        <div className="flex items-center justify-between text-[10px] text-[color:var(--text-muted)]">
                           <span className="flex items-center gap-1">
                             Temperature
-                            <span title="Controls randomness. 0 = precise and deterministic. 0.7 = balanced (default). 1+ = more creative but less predictable." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none text-slate-400 dark:border-slate-600 dark:text-slate-500">?</span>
+                            <span title="Controls randomness. 0 = precise and deterministic. 0.7 = balanced (default). 1+ = more creative but less predictable." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none text-[color:var(--text-muted)] dark:border-slate-600 dark:text-[color:var(--text-muted)]">?</span>
                           </span>
                           <span>{temperature == null ? 'default' : temperature.toFixed(2)}</span>
                         </div>
@@ -4966,16 +4939,16 @@ export default function ChatApp() {
                           <button
                             type="button"
                             onClick={() => setTemperature(null)}
-                            className="text-[9px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+                            className="text-[9px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)] dark:hover:text-slate-300"
                           >
                             Reset to default
                           </button>
                         )}
                       </div>
                       <div>
-                        <div className="mb-0.5 flex items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
+                        <div className="mb-0.5 flex items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
                           Max tokens
-                          <span title="Hard cap on reply length. Leave blank to let the model stop naturally. Set a number (e.g. 512) to limit response length." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none text-slate-400 dark:border-slate-600 dark:text-slate-500">?</span>
+                          <span title="Hard cap on reply length. Leave blank to let the model stop naturally. Set a number (e.g. 512) to limit response length." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none text-[color:var(--text-muted)] dark:border-slate-600 dark:text-[color:var(--text-muted)]">?</span>
                         </div>
                         <input
                           type="number"
@@ -4984,7 +4957,7 @@ export default function ChatApp() {
                           placeholder="provider default"
                           value={maxTokens ?? ''}
                           onChange={(e) => setMaxTokens(e.target.value === '' ? null : Math.max(1, Number(e.target.value)))}
-                          className="w-full rounded border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                          className="w-full rounded border border-[var(--hairline)] bg-[var(--material-thick)] px-1.5 py-0.5 text-[10px] outline-none focus:border-accent"
                         />
                       </div>
                     </div>
@@ -4998,7 +4971,7 @@ export default function ChatApp() {
                     type="button"
                       data-menu-trigger="training"
                     onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsTrainingMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Training options"
                   >
                     Training
@@ -5008,7 +4981,7 @@ export default function ChatApp() {
                   </button>
 
                   {isTrainingMenuOpen && (
-                  <div data-menu-panel="training" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-72 rounded-xl border border-black/10 bg-white/95 p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                  <div data-menu-panel="training" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <button
                         type="button"
                         onClick={() => {
@@ -5018,7 +4991,7 @@ export default function ChatApp() {
                         className={`mb-1 flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           trainingMode === 'off'
                             ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         }`}
                       >
                         <span>Training Off</span>
@@ -5033,7 +5006,7 @@ export default function ChatApp() {
                         className={`mb-1 flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           trainingMode === 'fine-tuning'
                             ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         }`}
                       >
                         <span>Quick Learning</span>
@@ -5048,14 +5021,14 @@ export default function ChatApp() {
                         className={`mb-1 flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           trainingMode === 'full-training'
                             ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200'
-                            : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         }`}
                       >
                         <span>Deep Training</span>
                         <span className="opacity-70">plan only</span>
                       </button>
 
-                      <label className="mt-2 flex items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-2 py-2 text-xs text-slate-600 dark:border-white/20 dark:bg-slate-900/60 dark:text-slate-300">
+                      <label className="mt-2 flex items-center gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-2 text-xs text-[color:var(--text-main)]">
                         <input
                           type="checkbox"
                           checked={usePersonalMemory}
@@ -5065,7 +5038,7 @@ export default function ChatApp() {
                         <span>Use personal memory context</span>
                       </label>
 
-                      <div className="mt-2 rounded-lg border border-black/10 bg-white/70 px-2 py-2 text-[11px] text-slate-600 dark:border-white/20 dark:bg-slate-900/60 dark:text-slate-300">
+                      <div className="mt-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-2 text-[11px] text-[color:var(--text-main)]">
                         <div>Memory items: {trainingStats.memoryItems}</div>
                         <div>Learning examples: {trainingStats.fineTuningExamples}</div>
                         {trainingMode === 'full-training' ? (
@@ -5083,14 +5056,14 @@ export default function ChatApp() {
                             setIsTrainingMenuOpen(false);
                             loadMemoryItems();
                           }}
-                          className="flex-1 rounded-lg border border-black/10 bg-white/80 px-2 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-white/10"
+                          className="flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                         >
                           Teach
                         </button>
                         <button
                           type="button"
                           onClick={() => { exportTrainingExamples(); setIsTrainingMenuOpen(false); }}
-                          className="flex-1 rounded-lg border border-black/10 bg-white/80 px-2 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-white/10"
+                          className="flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                         >
                           Export
                         </button>
@@ -5104,7 +5077,7 @@ export default function ChatApp() {
                     type="button"
                       data-menu-trigger="tools"
                     onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsToolsMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Open tools"
                   >
                     Tools
@@ -5114,11 +5087,11 @@ export default function ChatApp() {
                   </button>
 
                   {isToolsMenuOpen && (
-                    <div data-menu-panel="tools" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-56 rounded-xl border border-black/10 bg-white/95 p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                    <div data-menu-panel="tools" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-56 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <button
                         type="button"
                         onClick={handleCreateImageTool}
-                        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-slate-700 transition hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+                        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                       >
                         <span>Create Image</span>
                         <span className="text-[10px] opacity-70">{imageServiceAvailable ? imageServiceDevice || 'ready' : 'offline'}</span>
@@ -5133,7 +5106,7 @@ export default function ChatApp() {
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           canvasEnabled
                             ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         }`}
                       >
                         <span>Canvas</span>
@@ -5148,7 +5121,7 @@ export default function ChatApp() {
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           guidedLearningEnabled
                             ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         }`}
                       >
                         <span>Guided Learning</span>
@@ -5163,7 +5136,7 @@ export default function ChatApp() {
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
                           deepThinkingEnabled
                             ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         }`}
                       >
                         <span>Deep Thinking</span>
@@ -5179,7 +5152,7 @@ export default function ChatApp() {
                     type="button"
                     data-menu-trigger="control"
                     onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsControlPanelOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Remote Control"
                   >
                     {/* Green dot indicator */}
@@ -5188,9 +5161,9 @@ export default function ChatApp() {
                   </button>
 
                   {isControlPanelOpen && (
-                    <div data-menu-panel="control" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 w-80 rounded-xl border border-black/10 bg-white/95 p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                    <div data-menu-panel="control" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 w-80 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="mb-2 flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Remote Control</span>
+                        <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Remote Control</span>
                         {remoteConnected && (
                           <button
                             type="button"
@@ -5214,7 +5187,7 @@ export default function ChatApp() {
                                 key={t}
                                 type="button"
                                 onClick={() => setRemoteType(t)}
-                                className={`flex-1 rounded-lg px-2 py-1 text-[11px] font-medium transition ${remoteType === t ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'border border-black/10 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:text-slate-300 dark:hover:bg-white/10'}`}
+                                className={`flex-1 rounded-lg px-2 py-1 text-[11px] font-medium transition ${remoteType === t ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'border border-[var(--hairline)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'}`}
                               >{t === 'local' ? 'Localhost' : 'SSH'}</button>
                             ))}
                           </div>
@@ -5226,7 +5199,7 @@ export default function ChatApp() {
                                 value={remoteHost}
                                 onChange={(e) => setRemoteHost(e.target.value)}
                                 placeholder="hostname or IP"
-                                className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                                className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                               />
                               <div className="flex gap-1.5">
                                 <input
@@ -5234,14 +5207,14 @@ export default function ChatApp() {
                                   value={remoteUser}
                                   onChange={(e) => setRemoteUser(e.target.value)}
                                   placeholder="username"
-                                  className="flex-1 rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                                  className="flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                                 />
                                 <input
                                   type="text"
                                   value={remotePort}
                                   onChange={(e) => setRemotePort(e.target.value)}
                                   placeholder="22"
-                                  className="w-14 rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                                  className="w-14 rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                                 />
                               </div>
                               {/* Auth type */}
@@ -5251,7 +5224,7 @@ export default function ChatApp() {
                                     key={a}
                                     type="button"
                                     onClick={() => setRemoteAuthType(a)}
-                                    className={`flex-1 rounded-lg px-1 py-0.5 text-[10px] font-medium transition capitalize ${remoteAuthType === a ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'border border-black/10 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:text-slate-300'}`}
+                                    className={`flex-1 rounded-lg px-1 py-0.5 text-[10px] font-medium transition capitalize ${remoteAuthType === a ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'border border-[var(--hairline)] text-[color:var(--text-main)] hover:bg-black/5'}`}
                                   >{a}</button>
                                 ))}
                               </div>
@@ -5261,7 +5234,7 @@ export default function ChatApp() {
                                   value={remoteKeyPath}
                                   onChange={(e) => setRemoteKeyPath(e.target.value)}
                                   placeholder="/path/to/id_rsa"
-                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                                  className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                                 />
                               )}
                               {remoteAuthType === 'password' && (
@@ -5271,7 +5244,7 @@ export default function ChatApp() {
                                   onChange={(e) => setRemotePassword(e.target.value)}
                                   placeholder="password"
                                   autoComplete="new-password"
-                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                                  className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                                 />
                               )}
                             </>
@@ -5297,7 +5270,7 @@ export default function ChatApp() {
                     className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
                       uncensoredMode
                         ? 'border-emerald-300/60 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-400/40 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30'
-                        : 'border-black/10 bg-white/80 text-slate-700 hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10'
+                        : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                     }`}
                     title="Toggle uncensored mode for this chat"
                   >
@@ -5313,7 +5286,7 @@ export default function ChatApp() {
                     className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
                       openClawMode
                         ? 'border-rose-300/60 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-400/40 dark:bg-rose-900/20 dark:text-rose-300 dark:hover:bg-rose-900/30'
-                        : 'border-black/10 bg-white/80 text-slate-700 hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10'
+                        : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                     }`}
                     title="OpenClaw preset: uncensored mode, no personal memory, empty app system prompt"
                   >
@@ -5321,9 +5294,9 @@ export default function ChatApp() {
                     OpenClaw
                   </button>
                   {/* Hover tooltip — no button/state needed */}
-                  <div className="pointer-events-none absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl border border-black/10 bg-white/95 p-3 text-[11px] text-slate-600 opacity-0 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur transition-all duration-150 group-hover:opacity-100 dark:border-white/10 dark:bg-slate-900/95 dark:text-slate-300">
-                    <div className="mb-1.5 text-[11px] font-semibold text-slate-800 dark:text-slate-100">OpenClaw Profile</div>
-                    <ul className="space-y-1 text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
+                  <div className="pointer-events-none absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 text-[11px] text-[color:var(--text-main)] opacity-0 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur transition-all duration-150 group-hover:opacity-100">
+                    <div className="mb-1.5 text-[11px] font-semibold text-[color:var(--text-main)]">OpenClaw Profile</div>
+                    <ul className="space-y-1 text-[10px] leading-relaxed text-[color:var(--text-muted)]">
                       <li>Turns on Uncensored mode.</li>
                       <li>Disables Personal Memory injection.</li>
                       <li>Clears the app System Prompt field.</li>
@@ -5346,7 +5319,7 @@ export default function ChatApp() {
                       setIsVoiceMenuOpen(false);
                       setIsMcpPanelOpen((prev) => !prev);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="MCP Connector"
                   >
                     <span className={`h-2 w-2 rounded-full ${selectedMcpServer ? 'bg-cyan-400 shadow-[0_0_6px_2px_rgba(34,211,238,0.45)]' : 'bg-transparent border border-slate-400/40'}`} />
@@ -5354,13 +5327,13 @@ export default function ChatApp() {
                   </button>
 
                   {isMcpPanelOpen && (
-                    <div data-menu-panel="mcp" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 w-[27rem] rounded-xl border border-black/10 bg-white/95 p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                    <div data-menu-panel="mcp" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 w-[27rem] rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="mb-2 flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">MCP Connector</span>
+                        <span className="text-[11px] font-semibold text-[color:var(--text-main)]">MCP Connector</span>
                         <button
                           type="button"
                           onClick={refreshMcpServers}
-                          className="rounded-md border border-black/10 px-2 py-0.5 text-[10px] font-medium text-slate-600 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-300 dark:hover:bg-white/10"
+                          className="rounded-md border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                         >
                           Refresh
                         </button>
@@ -5370,7 +5343,7 @@ export default function ChatApp() {
                         <select
                           value={mcpSelectedServerId}
                           onChange={(event) => setMcpSelectedServerId(event.target.value)}
-                          className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                          className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                         >
                           <option value="">Select server…</option>
                           {mcpServers.map((server) => (
@@ -5381,7 +5354,7 @@ export default function ChatApp() {
                           type="button"
                           onClick={testMcpServer}
                           disabled={!mcpSelectedServerId || mcpLoading}
-                          className="rounded-lg border border-black/10 px-2 py-1.5 text-[10px] font-medium text-slate-700 transition hover:bg-black/5 disabled:opacity-40 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                          className="rounded-lg border border-[var(--hairline)] px-2 py-1.5 text-[10px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 disabled:opacity-40 dark:hover:bg-[var(--material-thin)]"
                         >
                           Test
                         </button>
@@ -5401,14 +5374,14 @@ export default function ChatApp() {
                           value={mcpForm.id}
                           onChange={(event) => setMcpForm((prev) => ({ ...prev, id: event.target.value }))}
                           placeholder="server id"
-                          className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                          className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                         />
                         <input
                           type="text"
                           value={mcpForm.name}
                           onChange={(event) => setMcpForm((prev) => ({ ...prev, name: event.target.value }))}
                           placeholder="display name"
-                          className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                          className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                         />
                       </div>
                       <input
@@ -5416,14 +5389,14 @@ export default function ChatApp() {
                         value={mcpForm.url}
                         onChange={(event) => setMcpForm((prev) => ({ ...prev, url: event.target.value }))}
                         placeholder="http://127.0.0.1:30030/mcp"
-                        className="mb-1.5 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                        className="mb-1.5 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                       />
                       <input
                         type="password"
                         value={mcpForm.authToken}
                         onChange={(event) => setMcpForm((prev) => ({ ...prev, authToken: event.target.value }))}
                         placeholder="bearer token (optional)"
-                        className="mb-2 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                        className="mb-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                       />
 
                       <div className="mb-2 flex gap-1.5">
@@ -5438,7 +5411,7 @@ export default function ChatApp() {
                         <button
                           type="button"
                           onClick={useLocalMcpPreset}
-                          className="flex-1 rounded-lg border border-black/10 px-2 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                          className="flex-1 rounded-lg border border-[var(--hairline)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                         >
                           Local MCP Preset
                         </button>
@@ -5446,10 +5419,10 @@ export default function ChatApp() {
 
                       {mcpSelectedServerId && (
                         <>
-                          <div className="mb-2 rounded-lg border border-black/10 bg-white/70 p-2 dark:border-white/20 dark:bg-slate-900/60">
-                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Policy</div>
+                          <div className="mb-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2">
+                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Policy</div>
                             <div className="mb-1.5 grid grid-cols-2 gap-1.5">
-                              <label className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300">
+                              <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-main)]">
                                 <input
                                   type="checkbox"
                                   checked={mcpPolicy.enforceAllowlist}
@@ -5458,7 +5431,7 @@ export default function ChatApp() {
                                 />
                                 Enforce allowlist
                               </label>
-                              <label className="flex items-center gap-1.5 text-[11px] text-slate-700 dark:text-slate-300">
+                              <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-main)]">
                                 <input
                                   type="checkbox"
                                   checked={mcpPolicy.requireApproval}
@@ -5468,7 +5441,7 @@ export default function ChatApp() {
                                 Require approval
                               </label>
                             </div>
-                            <div className="flex items-center gap-2 text-[10px] text-slate-600 dark:text-slate-300">
+                            <div className="flex items-center gap-2 text-[10px] text-[color:var(--text-main)]">
                               <span>Approval TTL</span>
                               <input
                                 type="number"
@@ -5476,32 +5449,32 @@ export default function ChatApp() {
                                 max="3600"
                                 value={mcpPolicy.approvalTtlSeconds}
                                 onChange={(event) => saveMcpPolicy({ ...mcpPolicy, approvalTtlSeconds: Number(event.target.value || 300) })}
-                                className="w-20 rounded border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                                className="w-20 rounded border border-[var(--hairline)] bg-[var(--material-thick)] px-1.5 py-0.5 text-[10px] outline-none focus:border-accent"
                               />
                               <span>seconds</span>
                             </div>
                           </div>
 
-                          <div className="mb-2 rounded-lg border border-black/10 bg-white/70 p-2 dark:border-white/20 dark:bg-slate-900/60">
+                          <div className="mb-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2">
                             <div className="mb-1.5 flex items-center justify-between">
-                              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Tools</span>
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Tools</span>
                               <button
                                 type="button"
                                 onClick={loadMcpTools}
                                 disabled={mcpLoading}
-                                className="rounded-md border border-black/10 px-1.5 py-0.5 text-[10px] text-slate-600 transition hover:bg-black/5 disabled:opacity-40 dark:border-white/20 dark:text-slate-300 dark:hover:bg-white/10"
+                                className="rounded-md border border-[var(--hairline)] px-1.5 py-0.5 text-[10px] text-[color:var(--text-main)] transition hover:bg-black/5 disabled:opacity-40 dark:hover:bg-[var(--material-thin)]"
                               >
                                 Fetch
                               </button>
                             </div>
                             <div className="max-h-28 space-y-1 overflow-y-auto pr-1">
-                              {mcpTools.length === 0 && <div className="text-[10px] text-slate-500 dark:text-slate-400">No tools loaded yet.</div>}
+                              {mcpTools.length === 0 && <div className="text-[10px] text-[color:var(--text-muted)]">No tools loaded yet.</div>}
                               {mcpTools.map((tool) => {
                                 const name = String(tool?.name || '');
                                 const checked = mcpPolicy.allowedTools.includes(name);
                                 return (
-                                  <label key={name} className="flex items-center justify-between gap-2 rounded-md border border-black/5 bg-white/70 px-2 py-1 text-[10px] dark:border-white/10 dark:bg-slate-800/60">
-                                    <span className="truncate text-slate-700 dark:text-slate-200">{name}</span>
+                                  <label key={name} className="flex items-center justify-between gap-2 rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[10px]">
+                                    <span className="truncate text-[color:var(--text-main)]">{name}</span>
                                     <input
                                       type="checkbox"
                                       checked={checked}
@@ -5519,13 +5492,13 @@ export default function ChatApp() {
                             </div>
                           </div>
 
-                          <div className="rounded-lg border border-black/10 bg-white/70 p-2 dark:border-white/20 dark:bg-slate-900/60">
-                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Run Tool</div>
+                          <div className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2">
+                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Run Tool</div>
                             <div className="mb-1.5 grid grid-cols-[1fr_auto] gap-1.5">
                               <select
                                 value={mcpToolName}
                                 onChange={(event) => setMcpToolName(event.target.value)}
-                                className="rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                                className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                               >
                                 <option value="">Select tool…</option>
                                 {mcpTools.map((tool) => {
@@ -5547,9 +5520,9 @@ export default function ChatApp() {
                               onChange={(event) => setMcpToolArgsText(event.target.value)}
                               rows={4}
                               placeholder={'{\n  "arg": "value"\n}'}
-                              className="mb-1.5 w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 font-mono text-[10px] outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                              className="mb-1.5 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 font-mono text-[10px] outline-none focus:border-accent"
                             />
-                            <pre className="max-h-28 overflow-y-auto rounded-lg border border-black/10 bg-slate-950/90 p-2 font-mono text-[10px] text-emerald-300 dark:border-white/20">
+                            <pre className="max-h-28 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-slate-950/90 p-2 font-mono text-[10px] text-emerald-300">
                               {mcpCallResultText || '{ }'}
                             </pre>
                           </div>
@@ -5562,17 +5535,17 @@ export default function ChatApp() {
 
               <div className="flex flex-wrap justify-end gap-1.5">
                 {deepThinkingEnabled && (
-                  <span className="rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300">
+                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
                     Deep Thinking
                   </span>
                 )}
                 {guidedLearningEnabled && (
-                  <span className="rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300">
+                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
                     Guided
                   </span>
                 )}
                 {trainingMode === 'fine-tuning' && (
-                  <span className="rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300">
+                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
                     Quick Learning
                   </span>
                 )}
@@ -5582,7 +5555,7 @@ export default function ChatApp() {
                   </span>
                 )}
                 {canvasEnabled && (
-                  <span className="rounded-full border border-black/10 bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300">
+                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
                     Canvas
                   </span>
                 )}
@@ -5617,7 +5590,7 @@ export default function ChatApp() {
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border transition disabled:cursor-not-allowed disabled:opacity-50 ${
                     isDictating
                       ? 'border-accent/50 bg-accentSoft text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
-                      : 'border-black/10 bg-white/85 text-slate-500 hover:bg-black/5 hover:text-slate-700 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-slate-100'
+                      : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)] hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-[color:var(--text-main)]'
                   }`}
                   title={dictationSupported ? (isDictating ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported in this browser'}
                 >
@@ -5633,7 +5606,7 @@ export default function ChatApp() {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isStreaming || isUploadingFiles}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-black/10 bg-white/85 text-slate-500 transition hover:bg-black/5 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10 dark:hover:text-slate-100"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[var(--material-thin)] dark:hover:text-[color:var(--text-main)]"
                   title="Attach files"
                 >
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -5663,7 +5636,7 @@ export default function ChatApp() {
                 }}
                 placeholder="Type your message..."
                 rows={3}
-                className="w-full resize-none rounded-xl border border-black/10 bg-white/90 px-3 py-2 text-sm outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800"
+                className="au-focus w-full resize-none rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-3.5 py-2.5 text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none transition placeholder:text-[color:var(--text-muted)] focus:border-transparent"
               />
               <div className="flex w-[4.25rem] shrink-0 flex-col items-stretch justify-between">
                 <div data-menu-container="true" className="relative">
@@ -5683,7 +5656,7 @@ export default function ChatApp() {
                   className={`inline-flex h-8 w-full items-center justify-center rounded-full border text-[10px] font-semibold tracking-wide transition ${
                     isSpeaking
                       ? 'border-accent/50 bg-accentSoft text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
-                      : 'border-black/10 bg-white/80 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-white/10'
+                      : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                   }`}
                   title="Voice settings"
                 >
@@ -5698,10 +5671,10 @@ export default function ChatApp() {
                 </button>
 
                 {isVoiceMenuOpen && (
-                  <div data-menu-panel="voice" role="menu" tabIndex={-1} className="absolute bottom-full right-0 mb-2 z-20 w-80 rounded-xl border border-black/10 bg-white/95 p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur dark:border-white/10 dark:bg-slate-900/95">
+                  <div data-menu-panel="voice" role="menu" tabIndex={-1} className="absolute bottom-full right-0 mb-2 z-20 w-80 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                     <div className="mb-2 flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Voice Settings</span>
-                      <span className="text-[10px] text-slate-500 dark:text-slate-400">{voiceSupported ? 'TTS ready' : 'Unavailable'}</span>
+                      <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Voice Settings</span>
+                      <span className="text-[10px] text-[color:var(--text-muted)]">{voiceSupported ? 'TTS ready' : 'Unavailable'}</span>
                     </div>
 
                     <div className="mb-2 grid grid-cols-2 gap-1">
@@ -5711,7 +5684,7 @@ export default function ChatApp() {
                         className={`rounded-lg px-2 py-1.5 text-[11px] font-medium transition ${
                           autoSpeakEnabled
                             ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'border border-black/10 text-slate-700 hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10'
+                            : 'border border-[var(--hairline)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         }`}
                       >
                         Auto-speak {autoSpeakEnabled ? 'on' : 'off'}
@@ -5720,7 +5693,7 @@ export default function ChatApp() {
                         type="button"
                         onClick={() => (isSpeaking ? stopSpeaking() : speakText('Voice preview from Mirabilis.'))}
                         disabled={!voiceSupported && voiceEngine === 'browser'}
-                        className="rounded-lg border border-black/10 px-2 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-black/5 disabled:opacity-40 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                        className="rounded-lg border border-[var(--hairline)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 disabled:opacity-40 dark:hover:bg-[var(--material-thin)]"
                       >
                         {isSpeaking ? 'Stop' : 'Preview'}
                       </button>
@@ -5728,19 +5701,19 @@ export default function ChatApp() {
 
                     {/* Voice engine toggle */}
                     <div className="mb-2">
-                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Voice Engine</div>
-                      <div className="flex overflow-hidden rounded-lg border border-black/10 dark:border-white/20">
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Voice Engine</div>
+                      <div className="flex overflow-hidden rounded-lg border border-[var(--hairline)]">
                         <button
                           type="button"
                           onClick={() => setVoiceEngine('browser')}
-                          className={`flex-1 px-2 py-1.5 text-[10px] font-medium transition ${voiceEngine === 'browser' ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'}`}
+                          className={`flex-1 px-2 py-1.5 text-[10px] font-medium transition ${voiceEngine === 'browser' ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'}`}
                         >
                           Browser
                         </button>
                         <button
                           type="button"
                           onClick={() => setVoiceEngine('piper')}
-                          className={`flex-1 border-l border-black/10 px-2 py-1.5 text-[10px] font-medium transition dark:border-white/20 ${voiceEngine === 'piper' ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10'}`}
+                          className={`flex-1 border-l border-black/10 px-2 py-1.5 text-[10px] font-medium transition ${voiceEngine === 'piper' ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'}`}
                         >
                           Piper neural
                         </button>
@@ -5751,11 +5724,11 @@ export default function ChatApp() {
                     {voiceEngine === 'browser' && (
                       <>
                         <div className="mb-2 space-y-1">
-                          <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Voice</label>
+                          <label className="block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Voice</label>
                           <select
                             value={selectedVoiceUri}
                             onChange={(e) => setSelectedVoiceUri(e.target.value)}
-                            className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] text-slate-700 outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                            className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] text-[color:var(--text-main)] outline-none focus:border-accent"
                           >
                             {availableVoices.map((voice) => (
                               <option key={voice.voiceURI} value={voice.voiceURI}>
@@ -5764,17 +5737,17 @@ export default function ChatApp() {
                             ))}
                           </select>
                           {voiceTools?.platform === 'darwin' && (
-                            <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                            <p className="text-[10px] text-[color:var(--text-muted)]">
                               More voices: System Settings → Accessibility → Spoken Content → Manage Voices
                             </p>
                           )}
                         </div>
                         <div className="mb-1 grid grid-cols-2 gap-2">
-                          <label className="text-[10px] text-slate-500 dark:text-slate-400">
+                          <label className="text-[10px] text-[color:var(--text-muted)]">
                             Rate {voiceRate.toFixed(2)}
                             <input type="range" min="0.8" max="1.5" step="0.05" value={voiceRate} onChange={(e) => setVoiceRate(Number(e.target.value))} className="mt-1 w-full" />
                           </label>
-                          <label className="text-[10px] text-slate-500 dark:text-slate-400">
+                          <label className="text-[10px] text-[color:var(--text-muted)]">
                             Pitch {voicePitch.toFixed(2)}
                             <input type="range" min="0.8" max="1.4" step="0.05" value={voicePitch} onChange={(e) => setVoicePitch(Number(e.target.value))} className="mt-1 w-full" />
                           </label>
@@ -5786,9 +5759,9 @@ export default function ChatApp() {
                     {voiceEngine === 'piper' && (
                       <div className="space-y-2">
                         {!voiceTools?.voices?.localPiper && (
-                          <div className="rounded-lg border border-black/10 bg-slate-50/80 p-2 text-[10px] dark:border-white/10 dark:bg-slate-800/60">
-                            <div className="mb-0.5 font-semibold text-slate-700 dark:text-slate-100">Piper Neural TTS</div>
-                            <div className="mb-2 text-slate-500 dark:text-slate-400">
+                          <div className="rounded-lg border border-[var(--hairline)] bg-slate-50/80 p-2 text-[10px]">
+                            <div className="mb-0.5 font-semibold text-[color:var(--text-main)]">Piper Neural TTS</div>
+                            <div className="mb-2 text-[color:var(--text-muted)]">
                               Free, high-quality local voices that run offline. Runs on your device — no cloud.
                             </div>
                             <button
@@ -5806,11 +5779,11 @@ export default function ChatApp() {
                           <>
                             {(voiceTools.voices.piperModels || []).length > 0 && (
                               <div className="space-y-1">
-                                <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Active voice</label>
+                                <label className="block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Active voice</label>
                                 <select
                                   value={selectedPiperModelId}
                                   onChange={(e) => setSelectedPiperModelId(e.target.value)}
-                                  className="w-full rounded-lg border border-black/10 bg-white/90 px-2 py-1.5 text-[11px] text-slate-700 outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                                  className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] text-[color:var(--text-main)] outline-none focus:border-accent"
                                 >
                                   {piperModels.filter((m) => m.installed).map((m) => (
                                     <option key={m.id} value={m.id}>{m.label}</option>
@@ -5820,11 +5793,11 @@ export default function ChatApp() {
                             )}
 
                             <div>
-                              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Free voice catalog</div>
+                              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Free voice catalog</div>
                               <div className="space-y-0.5">
                                 {piperModels.map((model) => (
                                   <div key={model.id} className="flex items-center justify-between rounded-lg px-2 py-1 text-[10px]">
-                                    <span className="text-slate-700 dark:text-slate-200">{model.label}</span>
+                                    <span className="text-[color:var(--text-main)]">{model.label}</span>
                                     {model.installed ? (
                                       <span className="font-semibold text-emerald-600 dark:text-emerald-400">Installed</span>
                                     ) : (
@@ -5832,7 +5805,7 @@ export default function ChatApp() {
                                         type="button"
                                         onClick={() => downloadPiperModel(model.id)}
                                         disabled={downloadingPiperModelId !== null}
-                                        className="rounded-md bg-black/5 px-2 py-0.5 font-medium text-slate-700 transition hover:bg-accent hover:text-white disabled:opacity-40 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-accent dark:hover:text-white"
+                                        className="rounded-md bg-black/5 px-2 py-0.5 font-medium text-[color:var(--text-main)] transition hover:bg-accent hover:text-white disabled:opacity-40 dark:bg-[var(--material-thin)] dark:hover:bg-accent dark:hover:text-white"
                                       >
                                         {downloadingPiperModelId === model.id ? 'Downloading…' : `${model.sizeMb}MB`}
                                       </button>
@@ -5842,7 +5815,7 @@ export default function ChatApp() {
                               </div>
                             </div>
 
-                            <label className="block text-[10px] text-slate-500 dark:text-slate-400">
+                            <label className="block text-[10px] text-[color:var(--text-muted)]">
                               Speed {voiceRate.toFixed(2)}
                               <input type="range" min="0.8" max="1.5" step="0.05" value={voiceRate} onChange={(e) => setVoiceRate(Number(e.target.value))} className="mt-1 w-full" />
                             </label>
@@ -5856,7 +5829,8 @@ export default function ChatApp() {
 
                 <button
                   onClick={isStreaming ? stopStreaming : sendMessage}
-                  className={`w-full rounded-xl px-2 py-2 text-sm font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition ${isStreaming ? 'bg-red-500 hover:brightness-95' : 'bg-accent hover:brightness-95'}`}
+                  className={`au-focus w-full rounded-[var(--r-lg)] px-2 py-2 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition active:scale-[0.98] hover:brightness-110 ${isStreaming ? 'bg-red-500' : ''}`}
+                  style={isStreaming ? undefined : { background: 'var(--accent)' }}
                 >
                   {isStreaming ? 'Stop' : 'Send'}
                 </button>
@@ -5889,7 +5863,7 @@ export default function ChatApp() {
           )}
         </section>
       </div>
-      <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-slate-700/90 dark:text-slate-300/90">
+      <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-[color:var(--text-main)]/90/90">
         {APP_FOOTER_TEXT}
         <span className="mx-1.5 opacity-40">·</span>
         <span className="opacity-55">{APP_VERSION}</span>

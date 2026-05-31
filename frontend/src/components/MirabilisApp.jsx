@@ -8,6 +8,7 @@ import ChatApp from './ChatApp';
 import IntelLedgerSession from './IntelLedgerSession';
 import InfoHint from './ui/InfoHint';
 import AppErrorBoundary from './ui/AppErrorBoundary';
+import AuroraChrome from './shell/AuroraChrome';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -182,39 +183,16 @@ export default function MirabilisApp() {
     return id;
   });
 
+  const handleTab = (next) => {
+    const value = next === 'intel' || next === 'intelledger' ? 'intel' : 'chat';
+    setActiveTab(value);
+    safeStorageSet(LAST_ACTIVE_TAB_STORAGE_KEY, value);
+  };
+
   return (
     <div className="relative h-screen w-screen overflow-hidden">
-      {/* Compact floating mode switch */}
-      <div className="absolute right-3 top-3 z-40 flex items-center gap-1 rounded-full border border-black/10 bg-white/85 p-1 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-900/80">
-        <button
-          onClick={() => {
-            setActiveTab('chat');
-            safeStorageSet(LAST_ACTIVE_TAB_STORAGE_KEY, 'chat');
-          }}
-          className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
-            activeTab === 'chat'
-              ? 'bg-accent/15 text-accent dark:bg-accent/20'
-              : 'text-slate-600 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10'
-          }`}
-          title="Chat"
-        >
-          Chat
-        </button>
-        <button
-          onClick={() => {
-            setActiveTab('intel');
-            safeStorageSet(LAST_ACTIVE_TAB_STORAGE_KEY, 'intel');
-          }}
-          className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
-            activeTab === 'intel'
-              ? 'bg-accent/15 text-accent dark:bg-accent/20'
-              : 'text-slate-600 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10'
-          }`}
-          title="InteLedger"
-        >
-          InteLedger
-        </button>
-      </div>
+      {/* Aurora shell chrome: dock, command palette, omni-search, buddy list */}
+      <AuroraChrome activeTab={activeTab} onTab={handleTab} />
 
       {/* Content area */}
       <div className={`h-full w-full overflow-hidden ${activeTab === 'intel' ? 'pb-7 sm:pb-8' : ''}`}>
@@ -231,7 +209,7 @@ export default function MirabilisApp() {
       </div>
 
       {activeTab === 'intel' && (
-        <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-slate-700/90 dark:text-slate-300/90">
+        <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-[color:var(--text-main)]/90/90">
           {APP_FOOTER_TEXT}
           <span className="mx-1.5 opacity-40">·</span>
           <span className="opacity-55">{APP_VERSION}</span>
@@ -848,30 +826,30 @@ function IntelLedgerApp({ userId }) {
   return (
     <>
     <main className="relative h-screen w-screen overflow-hidden p-3 pb-8 sm:p-6 sm:pb-10">
-      <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
-        <div className="grid gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
+      <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-3 rounded-[var(--r-xl)] border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
+        <div className="grid gap-3 rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-4 py-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
           <div className="space-y-2">
             <div className="space-y-1">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
                 Mirabilis Workspace Memory
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white">InteLedger</h1>
-                <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:text-slate-300">
+                <h1 className="text-lg font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">InteLedger</h1>
+                <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">
                   embedded mode
                 </span>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded-full border border-black/10 bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Session</span>
-              <span className="rounded-full border border-black/10 bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Ingest</span>
-              <span className="rounded-full border border-black/10 bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Extract</span>
-              <span className="rounded-full border border-black/10 bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300">Synthesis</span>
+              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Session</span>
+              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Ingest</span>
+              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Extract</span>
+              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Synthesis</span>
               <InfoHint
                 title="InteLedger Quick Guide"
                 description="Short definitions. Keep each session focused on one topic."
-                triggerClassName="bg-white/75 px-2 py-0.5 text-[10px] font-medium text-slate-600 hover:border-black/10 hover:text-slate-600 dark:border-white/10 dark:bg-slate-900/45 dark:text-slate-300 dark:hover:border-white/10 dark:hover:text-slate-300"
+                triggerClassName="bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)] hover:border-black/10 hover:text-[color:var(--text-main)] dark:hover:border-white/10 dark:hover:text-slate-300"
                 points={[
                   'Session',
                   'Ingest',
@@ -889,16 +867,16 @@ function IntelLedgerApp({ userId }) {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search sessions"
-                className="min-w-0 flex-1 rounded-full border border-black/10 bg-white px-3 py-1.5 text-sm text-slate-900 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400"
+                className="min-w-0 flex-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-sm text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white dark:placeholder-slate-400"
               />
               {searching ? (
-                <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
+                <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.08em] text-[color:var(--text-muted)]">
                   searching...
                 </span>
               ) : null}
               <button
                 onClick={loadSessions}
-                className="shrink-0 rounded-full border border-black/10 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                className="shrink-0 rounded-full border border-[var(--hairline)] px-2.5 py-1.5 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
               >
                 Refresh
               </button>
@@ -907,14 +885,14 @@ function IntelLedgerApp({ userId }) {
                 <button
                   type="button"
                   onClick={() => setCreateBubbleOpen((prev) => !prev)}
-                  className="rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition hover:brightness-95"
+                  className="rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-white shadow-[var(--shadow-2)] transition hover:brightness-95"
                 >
                   New Session
                 </button>
 
                 {createBubbleOpen && (
-                  <div className="absolute right-0 top-[calc(100%+0.45rem)] z-30 w-[min(19rem,86vw)] rounded-2xl border border-black/10 bg-white p-2.5 shadow-lg dark:border-white/15 dark:bg-slate-900">
-                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
+                  <div className="absolute right-0 top-[calc(100%+0.45rem)] z-30 w-[min(19rem,86vw)] rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thick)] p-2.5 shadow-lg dark:border-white/15">
+                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">
                       Optional title
                     </div>
                     <input
@@ -923,7 +901,7 @@ function IntelLedgerApp({ userId }) {
                       onChange={(e) => setNewSessionTitle(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && createSession()}
                       placeholder="Leave blank for Untitled"
-                      className="w-full rounded-full border border-black/10 bg-white px-3 py-1.5 text-sm text-slate-900 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-800 dark:text-white dark:placeholder-slate-400"
+                      className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-sm text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white dark:placeholder-slate-400"
                       autoFocus
                     />
                     <div className="mt-1.5 flex items-center justify-end gap-1.5">
@@ -933,14 +911,14 @@ function IntelLedgerApp({ userId }) {
                           setCreateBubbleOpen(false);
                           setNewSessionTitle('');
                         }}
-                        className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                        className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                       >
                         Cancel
                       </button>
                       <button
                         type="button"
                         onClick={createSession}
-                        className="rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition hover:brightness-95"
+                        className="rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-white shadow-[var(--shadow-2)] transition hover:brightness-95"
                       >
                         Create
                       </button>
@@ -956,18 +934,18 @@ function IntelLedgerApp({ userId }) {
         <div className="min-h-0 overflow-auto space-y-3 lg:col-start-2">
 
         {!localMode && (digestLoading || todayDigest) && (
-          <div className="rounded-2xl border border-black/10 bg-white/75 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45">
+          <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-4 py-3">
             {digestLoading ? (
-              <div className="text-xs text-slate-500 dark:text-slate-400">Loading today digest...</div>
+              <div className="text-xs text-[color:var(--text-muted)]">Loading today digest...</div>
             ) : todayDigest && (
               <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Sessions {todayDigest.session_count || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Open {todayDigest.open_actions || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Overdue {todayDigest.overdue_actions || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Due today {todayDigest.due_today_actions || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Blocked {todayDigest.blocked_actions || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">New notes (24h) {todayDigest.new_interactions_24h || 0}</span>
+                <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Sessions {todayDigest.session_count || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Open {todayDigest.open_actions || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Overdue {todayDigest.overdue_actions || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Due today {todayDigest.due_today_actions || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Blocked {todayDigest.blocked_actions || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">New notes (24h) {todayDigest.new_interactions_24h || 0}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <button
@@ -1004,7 +982,7 @@ function IntelLedgerApp({ userId }) {
                         setCrossSynthesis({ loading: false, result: null, error: err.message, sessionCount: ids.length });
                       }
                     }}
-                    className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                    className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                   >
                     Synthesize attention sessions
                   </button>
@@ -1013,7 +991,7 @@ function IntelLedgerApp({ userId }) {
                       key={item.id}
                       type="button"
                       onClick={() => setActiveSession(item.id)}
-                      className="rounded-full border border-black/10 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600 transition hover:border-accent/40 hover:text-accent dark:border-white/10 dark:bg-slate-800 dark:text-slate-300"
+                      className="rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)] transition hover:border-accent/40 hover:text-accent"
                     >
                       {item.title} ({item.count})
                     </button>
@@ -1025,27 +1003,27 @@ function IntelLedgerApp({ userId }) {
         )}
 
         {!localMode && (auditOverviewLoading || auditOverview) && (
-          <div className="rounded-2xl border border-black/10 bg-white/75 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45">
+          <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-4 py-3">
             {auditOverviewLoading ? (
-              <div className="text-xs text-slate-500 dark:text-slate-400">Loading audit overview...</div>
+              <div className="text-xs text-[color:var(--text-muted)]">Loading audit overview...</div>
             ) : (
               <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Audit overview</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Events 24h {auditOverview?.trends?.event_count_24h || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Events 7d {auditOverview?.trends?.event_count_7d || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Events 30d {auditOverview?.trends?.event_count_30d || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Event types (7d) {(auditOverview?.summary?.event_types || []).length}</span>
+                <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Audit overview</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Events 24h {auditOverview?.trends?.event_count_24h || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Events 7d {auditOverview?.trends?.event_count_7d || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Events 30d {auditOverview?.trends?.event_count_30d || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Event types (7d) {(auditOverview?.summary?.event_types || []).length}</span>
                   {auditLastUpdatedAt ? (
-                    <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                    <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">
                       Updated {new Date(auditLastUpdatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   ) : null}
                 </div>
 
                 <div className="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-                  <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-900/35">
-                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">7-day trend</div>
+                  <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">7-day trend</div>
                     {Array.isArray(auditOverview?.trends?.daily_7) && auditOverview.trends.daily_7.length > 0 ? (
                       <div>
                         <div className="flex h-14 items-end gap-1">
@@ -1062,36 +1040,36 @@ function IntelLedgerApp({ userId }) {
                             );
                           })}
                         </div>
-                        <div className="mt-1 flex justify-between text-[10px] text-slate-400">
+                        <div className="mt-1 flex justify-between text-[10px] text-[color:var(--text-muted)]">
                           <span>{auditOverview.trends.daily_7[0]?.date?.slice(5) || ''}</span>
                           <span>today</span>
                         </div>
                       </div>
                     ) : (
-                      <div className="text-xs text-slate-500 dark:text-slate-400">No trend data available yet.</div>
+                      <div className="text-xs text-[color:var(--text-muted)]">No trend data available yet.</div>
                     )}
                   </div>
 
-                  <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-900/35">
-                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Top event types (24h)</div>
+                  <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Top event types (24h)</div>
                     {Array.isArray(auditOverview?.trends?.top_types_24h) && auditOverview.trends.top_types_24h.length > 0 ? (
                       <ul className="space-y-1">
                         {auditOverview.trends.top_types_24h.slice(0, 5).map((item) => (
                           <li key={item.event_type} className="flex items-center justify-between gap-2 text-[11px]">
-                            <span className="truncate text-slate-600 dark:text-slate-300">{String(item.event_type || '').replace(/\./g, ' › ')}</span>
-                            <span className="font-semibold text-slate-700 dark:text-slate-200">{item.count}</span>
+                            <span className="truncate text-[color:var(--text-main)]">{String(item.event_type || '').replace(/\./g, ' › ')}</span>
+                            <span className="font-semibold text-[color:var(--text-main)]">{item.count}</span>
                           </li>
                         ))}
                       </ul>
                     ) : (
-                      <div className="text-xs text-slate-500 dark:text-slate-400">No events in the last 24h.</div>
+                      <div className="text-xs text-[color:var(--text-muted)]">No events in the last 24h.</div>
                     )}
                   </div>
                 </div>
 
                 {auditTenantRollup.length > 0 && (
-                  <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-900/35">
-                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Tenant audit rollup</div>
+                  <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Tenant audit rollup</div>
                     <div className="space-y-2">
                       {(() => {
                         const topTenants = auditTenantRollup.slice(0, 5);
@@ -1099,19 +1077,19 @@ function IntelLedgerApp({ userId }) {
                         return topTenants.map((tenant) => {
                           const widthPct = Math.max(4, Math.round((Number(tenant.count_30d || 0) / max30d) * 100));
                           return (
-                            <div key={tenant.tenant_id || 'tenant'} className="rounded-lg border border-black/10 bg-white/80 px-2.5 py-2 dark:border-white/10 dark:bg-slate-800/40">
-                              <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                            <div key={tenant.tenant_id || 'tenant'} className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-2">
+                              <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-[color:var(--text-main)]">
                                 <span className="truncate font-medium">{tenant.tenant_id || 'tenant'}</span>
                                 <span>30d {tenant.count_30d || 0}</span>
                               </div>
-                              <div className="mb-1.5 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-white/10">
+                              <div className="mb-1.5 h-1.5 overflow-hidden rounded-full bg-black/5 dark:bg-[var(--material-thin)]">
                                 <div className="h-full rounded-full bg-accent/65" style={{ width: `${widthPct}%` }} />
                               </div>
-                              <div className="flex flex-wrap items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
-                                <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">24h {tenant.count_24h || 0}</span>
-                                <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">7d {tenant.count_7d || 0}</span>
+                              <div className="flex flex-wrap items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
+                                <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">24h {tenant.count_24h || 0}</span>
+                                <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">7d {tenant.count_7d || 0}</span>
                                 {(tenant.top_types || []).slice(0, 2).map((type) => (
-                                  <span key={`${tenant.tenant_id}-${type.event_type}`} className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                                  <span key={`${tenant.tenant_id}-${type.event_type}`} className="rounded-full border border-[var(--hairline)] px-2 py-0.5">
                                     {String(type.event_type || '').replace(/\./g, ' › ')} ({type.count || 0})
                                   </span>
                                 ))}
@@ -1129,12 +1107,12 @@ function IntelLedgerApp({ userId }) {
         )}
 
         {!localMode && (promptProfilesLoading || promptProfiles.length > 0 || promptRegistryError) && (
-          <div className="rounded-2xl border border-black/10 bg-white/75 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45">
+          <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-4 py-3">
             <div className="mb-3 flex items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => setPromptRegistryOpen((prev) => !prev)}
-                className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
               >
                 {promptRegistryOpen ? 'Hide Prompt Registry' : 'Show Prompt Registry (Advanced)'}
               </button>
@@ -1146,7 +1124,7 @@ function IntelLedgerApp({ userId }) {
                     if (activePromptProfileId) loadPromptProfileDetail(activePromptProfileId);
                   }}
                   disabled={promptProfilesLoading || promptDetailLoading || promptMutationLoading}
-                  className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                  className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                 >
                   Refresh prompts
                 </button>
@@ -1160,11 +1138,11 @@ function IntelLedgerApp({ userId }) {
             )}
 
             {!promptRegistryOpen ? (
-              <div className="text-xs text-slate-500 dark:text-slate-400">Hidden by default for day-to-day use. Open only when managing prompt versions.</div>
+              <div className="text-xs text-[color:var(--text-muted)]">Hidden by default for day-to-day use. Open only when managing prompt versions.</div>
             ) : promptProfilesLoading ? (
-              <div className="text-xs text-slate-500 dark:text-slate-400">Loading prompt profiles...</div>
+              <div className="text-xs text-[color:var(--text-muted)]">Loading prompt profiles...</div>
             ) : promptProfiles.length === 0 ? (
-              <div className="text-xs text-slate-500 dark:text-slate-400">No prompt profiles available.</div>
+              <div className="text-xs text-[color:var(--text-muted)]">No prompt profiles available.</div>
             ) : (
               <div className="grid gap-3 lg:grid-cols-[minmax(14rem,0.7fr)_minmax(0,1.3fr)]">
                 <div className="space-y-2">
@@ -1178,39 +1156,39 @@ function IntelLedgerApp({ userId }) {
                         className={`w-full rounded-xl border px-3 py-2 text-left transition ${
                           isActive
                             ? 'border-accent/50 bg-accent/10'
-                            : 'border-black/10 bg-white/60 hover:border-accent/30 dark:border-white/10 dark:bg-slate-900/35'
+                            : 'border-black/10 bg-[var(--material-thin)] hover:border-accent/30'
                         }`}
                       >
-                        <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">{profile.profile_id}</div>
-                        <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                        <div className="text-xs font-semibold text-[color:var(--text-main)]">{profile.profile_id}</div>
+                        <div className="mt-0.5 text-[11px] text-[color:var(--text-muted)]">
                           Active {profile.active_label || 'default'}
                         </div>
-                        <div className="mt-0.5 text-[10px] text-slate-400">Versions {profile.version_count || 0}</div>
+                        <div className="mt-0.5 text-[10px] text-[color:var(--text-muted)]">Versions {profile.version_count || 0}</div>
                       </button>
                     );
                   })}
                 </div>
 
-                <div className="space-y-3 rounded-xl border border-black/10 bg-white/60 px-3 py-3 dark:border-white/10 dark:bg-slate-900/35">
+                <div className="space-y-3 rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-3">
                   {promptDetailLoading ? (
-                    <div className="text-xs text-slate-500 dark:text-slate-400">Loading profile details...</div>
+                    <div className="text-xs text-[color:var(--text-muted)]">Loading profile details...</div>
                   ) : !promptProfileDetail ? (
-                    <div className="text-xs text-slate-500 dark:text-slate-400">Select a profile to view versions.</div>
+                    <div className="text-xs text-[color:var(--text-muted)]">Select a profile to view versions.</div>
                   ) : (
                     <>
-                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
-                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Profile {promptProfileDetail.profile_id}</span>
-                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Active {promptProfileDetail.active_label || 'default'}</span>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
+                        <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Profile {promptProfileDetail.profile_id}</span>
+                        <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Active {promptProfileDetail.active_label || 'default'}</span>
                       </div>
 
                       <div className="space-y-1.5">
                         {(promptProfileDetail.versions || []).map((version) => {
                           const selected = version.id === promptProfileDetail.active_version_id;
                           return (
-                            <div key={version.id} className="rounded-lg border border-black/10 bg-white/70 px-2.5 py-2 dark:border-white/10 dark:bg-slate-800/40">
+                            <div key={version.id} className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-2">
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div>
-                                  <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-100">{version.label || version.id}</div>
+                                  <div className="text-[11px] font-semibold text-[color:var(--text-main)]">{version.label || version.id}</div>
                                 </div>
                                 <button
                                   type="button"
@@ -1219,7 +1197,7 @@ function IntelLedgerApp({ userId }) {
                                   className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition ${
                                     selected
                                       ? 'border border-accent/40 bg-accent/15 text-accent'
-                                      : 'border border-black/10 text-slate-700 hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10'
+                                      : 'border border-[var(--hairline)] text-[color:var(--text-main)] hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]'
                                   } disabled:opacity-50`}
                                 >
                                   {selected ? 'Active' : 'Activate'}
@@ -1229,26 +1207,26 @@ function IntelLedgerApp({ userId }) {
                           );
                         })}
                         {(promptProfileDetail.versions || []).length === 0 && (
-                          <div className="text-xs text-slate-500 dark:text-slate-400">No stored versions yet (using fallback default).</div>
+                          <div className="text-xs text-[color:var(--text-muted)]">No stored versions yet (using fallback default).</div>
                         )}
                       </div>
 
-                      <div className="rounded-xl border border-black/10 bg-white/75 px-3 py-3 dark:border-white/10 dark:bg-slate-800/40">
-                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Create version</div>
+                      <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-3">
+                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Create version</div>
                         <div className="grid gap-2 sm:grid-cols-2">
                           <input
                             type="text"
                             value={newPromptVersion.version_id}
                             onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, version_id: e.target.value }))}
                             placeholder="version_id (optional)"
-                            className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-900 dark:text-white"
+                            className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                           />
                           <input
                             type="text"
                             value={newPromptVersion.label}
                             onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, label: e.target.value }))}
                             placeholder="label"
-                            className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-900 dark:text-white"
+                            className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                           />
                         </div>
                         <textarea
@@ -1256,17 +1234,17 @@ function IntelLedgerApp({ userId }) {
                           onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, system_prompt: e.target.value }))}
                           placeholder="system_prompt"
                           rows={3}
-                          className="mt-2 w-full rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-900 dark:text-white"
+                          className="mt-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                         />
                         <textarea
                           value={newPromptVersion.user_template}
                           onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, user_template: e.target.value }))}
                           placeholder="user_template"
                           rows={4}
-                          className="mt-2 w-full rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-800 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-900 dark:text-white"
+                          className="mt-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                         />
                         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                          <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                          <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-main)]">
                             <input
                               type="checkbox"
                               checked={newPromptVersion.set_active}
@@ -1288,7 +1266,7 @@ function IntelLedgerApp({ userId }) {
                                   label: prev.label || `${current.label || current.id} copy`
                                 }));
                               }}
-                              className="rounded-full border border-black/10 px-2.5 py-1 text-[10px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                              className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[10px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                             >
                               Seed from active
                             </button>
@@ -1316,26 +1294,26 @@ function IntelLedgerApp({ userId }) {
         <div className="min-h-0 flex flex-col gap-3 lg:col-start-1 lg:row-start-1">
 
         {error && (
-          <div className="rounded-2xl border border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-300">
+          <div className="rounded-[var(--r-lg)] border border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-300">
             {error}
           </div>
         )}
 
-        <div className="flex-1 overflow-auto rounded-2xl border border-black/10 bg-white/55 p-3 dark:border-white/10 dark:bg-slate-950/35 sm:p-4">
+        <div className="flex-1 overflow-auto rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] p-3 sm:p-4">
           {loading ? (
-            <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading sessions...</div>
+            <div className="flex h-full items-center justify-center text-sm text-[color:var(--text-muted)]">Loading sessions...</div>
           ) : sessions.length === 0 ? (
-            <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-black/10 bg-white/40 px-6 text-center text-sm text-slate-500 dark:border-white/10 dark:bg-slate-900/25 dark:text-slate-400">
+            <div className="flex h-full items-center justify-center rounded-[var(--r-lg)] border border-dashed border-black/10 bg-[var(--material-thin)] px-6 text-center text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
               Create a session to start tracking recurring patterns, decisions, risks, and follow-ups.
             </div>
           ) : filteredSessions.length === 0 ? (
-            <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-black/10 bg-white/40 px-6 text-center text-sm text-slate-500 dark:border-white/10 dark:bg-slate-900/25 dark:text-slate-400">
+            <div className="flex h-full items-center justify-center rounded-[var(--r-lg)] border border-dashed border-black/10 bg-[var(--material-thin)] px-6 text-center text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
               No sessions match your search.
             </div>
           ) : (
             <>
             {selectedSessions.size > 0 && (
-              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-accent/30 bg-accent/5 px-4 py-2.5 dark:border-accent/20 dark:bg-accent/10">
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--r-lg)] border border-accent/30 bg-accent/5 px-4 py-2.5 dark:border-accent/20 dark:bg-accent/10">
                 <span className="mr-1 text-xs font-semibold text-accent">{selectedSessions.size} session{selectedSessions.size !== 1 ? 's' : ''} selected</span>
                 <button
                   type="button"
@@ -1348,14 +1326,14 @@ function IntelLedgerApp({ userId }) {
                 <button
                   type="button"
                   onClick={bulkExport}
-                  className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                  className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                 >
                   Export JSON
                 </button>
                 <button
                   type="button"
                   onClick={selectedSessions.size === filteredSessions.length ? deselectAll : selectAll}
-                  className="rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                  className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                 >
                   {selectedSessions.size === filteredSessions.length ? 'Deselect all' : 'Select all'}
                 </button>
@@ -1370,7 +1348,7 @@ function IntelLedgerApp({ userId }) {
                 <button
                   type="button"
                   onClick={deselectAll}
-                  className="ml-auto rounded-full border border-black/10 px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-400 dark:hover:bg-white/10"
+                  className="ml-auto rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-muted)] transition hover:bg-black/5 dark:border-white/20 dark:text-[color:var(--text-muted)] dark:hover:bg-[var(--material-thin)]"
                 >
                   ✕
                 </button>
@@ -1386,10 +1364,10 @@ function IntelLedgerApp({ userId }) {
                   return (
                 <div
                   key={session.id}
-                  className={`group rounded-2xl border text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_-18px_rgba(15,23,42,0.35)] dark:bg-slate-900/65 ${
+                  className={`group rounded-[var(--r-lg)] border text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_-18px_rgba(15,23,42,0.35)] ${
                     isSelected
-                      ? 'border-accent/50 bg-accent/5 dark:border-accent/40 dark:bg-accent/10'
-                      : 'border-black/10 bg-white/85 hover:border-accent/40 dark:border-white/10'
+                      ? 'border-[color:color-mix(in_srgb,var(--accent)_50%,transparent)] bg-[color:color-mix(in_srgb,var(--accent)_8%,transparent)]'
+                      : 'au-hairline au-material hover:border-[color:color-mix(in_srgb,var(--accent)_45%,transparent)]'
                   } ${
                     cardDensity === 'dense' ? 'p-3' : 'p-4'
                   }`}
@@ -1405,11 +1383,11 @@ function IntelLedgerApp({ userId }) {
                           isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-60'
                         }`}
                       />
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-main)]">
                         Session
                       </span>
                     </div>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                    <span className="text-[10px] text-[color:var(--text-muted)]">
                       {new Date(session.created_at).toLocaleDateString()}
                     </span>
                   </div>
@@ -1417,28 +1395,28 @@ function IntelLedgerApp({ userId }) {
                     onClick={() => setActiveSession(session.id)}
                     className="block w-full text-left"
                   >
-                    <div className={`font-semibold tracking-tight text-slate-900 dark:text-white ${cardDensity === 'dense' ? 'line-clamp-1 text-sm' : 'line-clamp-2 text-base'}`}>
+                    <div className={`font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white ${cardDensity === 'dense' ? 'line-clamp-1 text-sm' : 'line-clamp-2 text-base'}`}>
                       {session.title}
                     </div>
                     {previewText && (
-                      <div className={`text-xs text-slate-600 transition group-hover:text-accent dark:text-slate-300 ${cardDensity === 'dense' ? 'mt-1 line-clamp-1' : 'mt-2 line-clamp-2'}`}>
+                      <div className={`text-xs text-[color:var(--text-main)] transition group-hover:text-accent ${cardDensity === 'dense' ? 'mt-1 line-clamp-1' : 'mt-2 line-clamp-2'}`}>
                         {previewText}
                       </div>
                     )}
                     {insightText && (
-                      <div className={`text-[10px] font-medium text-slate-500 dark:text-slate-400 ${cardDensity === 'dense' ? 'mt-1' : 'mt-1.5'}`}>
+                      <div className={`text-[10px] font-medium text-[color:var(--text-muted)] ${cardDensity === 'dense' ? 'mt-1' : 'mt-1.5'}`}>
                         {insightText}
                       </div>
                     )}
                     {(session.latest_synthesis_prompt_version || session.latest_signal_prompt_version) && (
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         {session.latest_synthesis_prompt_version && (
-                          <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
+                          <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
                             Synth {humanizePromptProfile(session.latest_synthesis_prompt_profile)} {humanizePromptVersion(session.latest_synthesis_prompt_version)}
                           </span>
                         )}
                         {session.latest_signal_prompt_version && (
-                          <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
+                          <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
                             Signal {humanizePromptProfile(session.latest_signal_prompt_profile)} {humanizePromptVersion(session.latest_signal_prompt_version)}
                           </span>
                         )}
@@ -1466,8 +1444,8 @@ function IntelLedgerApp({ userId }) {
           )}
 
           {sessions.length > 0 && (
-            <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-t border-black/10 pt-4 dark:border-white/10">
-              <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-t border-black/10 pt-4">
+              <label className="flex items-center gap-2 text-xs text-[color:var(--text-main)]">
                 <input
                   type="checkbox"
                   checked={allowClearAll}
@@ -1495,19 +1473,19 @@ function IntelLedgerApp({ userId }) {
     {/* Cross-session synthesis modal */}
     {crossSynthesis && (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-[rgba(8,12,22,0.42)] backdrop-blur-sm p-4"
         onClick={(e) => { if (e.target === e.currentTarget) setCrossSynthesis(null); }}
       >
-        <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-3xl border border-black/10 bg-white shadow-2xl dark:border-white/10 dark:bg-slate-900">
-          <div className="flex items-center justify-between border-b border-black/10 px-6 py-4 dark:border-white/10">
+        <div className="au-chrome au-hairline au-elev-3 relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-[var(--r-xl)]">
+          <div className="flex items-center justify-between border-b border-black/10 px-6 py-4">
             <div>
-              <h2 className="text-base font-semibold tracking-tight text-slate-900 dark:text-white">Cross-Session Synthesis</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{crossSynthesis.sessionCount} session{crossSynthesis.sessionCount !== 1 ? 's' : ''} analyzed</p>
+              <h2 className="text-base font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">Cross-Session Synthesis</h2>
+              <p className="text-xs text-[color:var(--text-muted)]">{crossSynthesis.sessionCount} session{crossSynthesis.sessionCount !== 1 ? 's' : ''} analyzed</p>
             </div>
             <button
               type="button"
               onClick={() => setCrossSynthesis(null)}
-              className="rounded-full border border-black/10 px-3 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-black/5 dark:border-white/10 dark:text-slate-300 dark:hover:bg-white/10"
+              className="rounded-full border border-[var(--hairline)] px-3 py-1.5 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
             >
               Close
             </button>
@@ -1515,18 +1493,18 @@ function IntelLedgerApp({ userId }) {
 
           <div className="flex-1 overflow-auto px-6 py-5 space-y-5">
             {crossSynthesis.loading && (
-              <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+              <div className="flex items-center gap-3 text-sm text-[color:var(--text-muted)]">
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
                 Analyzing {crossSynthesis.sessionCount} sessions...
               </div>
             )}
             {(crossSynthesis.promptProfile || crossSynthesis.promptVersion) && (
-              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
                 {crossSynthesis.promptProfile && (
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Prompt {humanizePromptProfile(crossSynthesis.promptProfile)}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Prompt {humanizePromptProfile(crossSynthesis.promptProfile)}</span>
                 )}
                 {crossSynthesis.promptVersion && (
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">{humanizePromptVersion(crossSynthesis.promptVersion)}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">{humanizePromptVersion(crossSynthesis.promptVersion)}</span>
                 )}
               </div>
             )}
@@ -1540,10 +1518,10 @@ function IntelLedgerApp({ userId }) {
               const Section = ({ label, items, color = 'slate' }) => (
                 items?.length > 0 ? (
                   <div>
-                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{label}</div>
+                    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">{label}</div>
                     <ul className="space-y-1">
                       {items.map((item, i) => (
-                        <li key={i} className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300">
+                        <li key={i} className="flex items-start gap-2 text-sm text-[color:var(--text-main)]">
                           <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
                           {item}
                         </li>
@@ -1555,7 +1533,7 @@ function IntelLedgerApp({ userId }) {
               return (
                 <div className="space-y-5">
                   {r.summary && (
-                    <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 text-sm leading-relaxed text-slate-700 dark:text-slate-300">
+                    <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 text-sm leading-relaxed text-[color:var(--text-main)]">
                       {r.summary}
                     </div>
                   )}

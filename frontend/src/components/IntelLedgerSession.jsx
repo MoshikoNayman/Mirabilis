@@ -569,50 +569,50 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
     return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
   }), [signalsByTypeRaw]);
 
-  if (!session && loadingSession) return <div className="p-6 text-center text-slate-500">Loading...</div>;
-  if (!session) return <div className="p-6 text-center text-slate-500">Loading...</div>;
+  if (!session && loadingSession) return <div className="p-6 text-center text-[color:var(--text-muted)]">Loading...</div>;
+  if (!session) return <div className="p-6 text-center text-[color:var(--text-muted)]">Loading...</div>;
 
   return (
     <main className="relative h-screen w-screen overflow-hidden p-3 pb-8 sm:p-6 sm:pb-10">
-      <div className="mx-auto flex h-full max-w-7xl flex-col gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3 rounded-2xl border border-black/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-slate-900/45">
+      <div className="mx-auto flex h-full max-w-7xl flex-col gap-3 rounded-[var(--r-xl)] border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-4 py-3">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               {onBack && (
                 <button
                   onClick={onBack}
-                  className="rounded-full border border-black/10 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-black/5 dark:border-white/20 dark:text-slate-200 dark:hover:bg-white/10"
+                  className="rounded-full border border-[var(--hairline)] px-3 py-1 text-xs font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                 >
                   Back
                 </button>
               )}
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-main)]">
                 Mirabilis Workspace Memory
               </span>
             </div>
-            <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white">{session.title}</h1>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
+            <h1 className="text-lg font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">{session.title}</h1>
+            <p className="text-sm text-[color:var(--text-muted)]">
               {interactions.length} interactions · {signals.length} signals extracted · {actions.length} actions
             </p>
-            <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-[10px] text-slate-500 dark:text-slate-400">
-              <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Open {actionStatusCounts.open || 0}</span>
-              <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">In Progress {actionStatusCounts.in_progress || 0}</span>
-              <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Done {actionStatusCounts.done || 0}</span>
-              <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Blocked {actionStatusCounts.blocked || 0}</span>
+            <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-[10px] text-[color:var(--text-muted)]">
+              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Open {actionStatusCounts.open || 0}</span>
+              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">In Progress {actionStatusCounts.in_progress || 0}</span>
+              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Done {actionStatusCounts.done || 0}</span>
+              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Blocked {actionStatusCounts.blocked || 0}</span>
               {sessionBrief && (
                 <>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Due today {sessionBrief.due_today_actions || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">Overdue {sessionBrief.overdue_actions || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">New notes (24h) {sessionBrief.new_interactions_24h || 0}</span>
-                  <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">New signals (24h) {sessionBrief.new_signals_24h || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Due today {sessionBrief.due_today_actions || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Overdue {sessionBrief.overdue_actions || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">New notes (24h) {sessionBrief.new_interactions_24h || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">New signals (24h) {sessionBrief.new_signals_24h || 0}</span>
                 </>
               )}
             </div>
             {sessionBrief && (
-              <div className="space-y-1 text-[10px] text-slate-500 dark:text-slate-400">
+              <div className="space-y-1 text-[10px] text-[color:var(--text-muted)]">
                 {Array.isArray(sessionBrief.overdue_titles) && sessionBrief.overdue_titles.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1">
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Overdue items</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--text-muted)]">Overdue items</span>
                     {sessionBrief.overdue_titles.map((title) => (
                       <button
                         key={title}
@@ -627,10 +627,10 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                 )}
               </div>
             )}
-            <div className="flex items-center gap-1 overflow-x-auto pt-1 text-[10px] text-slate-500 dark:text-slate-400">
-              <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10" title="One piece of source text you added.">Interaction</span>
-              <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10" title="Extracted insight such as risk/decision/commitment.">Signal</span>
-              <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10" title="AI summary over all interactions and signals.">Synthesis</span>
+            <div className="flex items-center gap-1 overflow-x-auto pt-1 text-[10px] text-[color:var(--text-muted)]">
+              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5" title="One piece of source text you added.">Interaction</span>
+              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5" title="Extracted insight such as risk/decision/commitment.">Signal</span>
+              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5" title="AI summary over all interactions and signals.">Synthesis</span>
               <InfoHint
                 title="How it works"
                 description="Ingest raw context, review extracted signals, then synthesize for a concise action snapshot."
@@ -651,7 +651,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                 className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
                   activeTab === tab
                     ? 'bg-accent/15 text-accent dark:bg-accent/20'
-                    : 'border border-black/10 text-slate-600 hover:bg-black/5 dark:border-white/20 dark:text-slate-300 dark:hover:bg-white/10'
+                    : 'border border-[var(--hairline)] text-[color:var(--text-main)] hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]'
                 }`}
               >
                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -661,21 +661,21 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
         </div>
 
         {error && (
-          <div className="rounded-2xl border border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-300">
+          <div className="rounded-[var(--r-lg)] border border-red-300/70 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-300">
             {error}
           </div>
         )}
 
-        <div className="flex-1 overflow-auto rounded-2xl border border-black/10 bg-white/55 p-3 dark:border-white/10 dark:bg-slate-950/35 sm:p-4">
+        <div className="flex-1 overflow-auto rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] p-3 sm:p-4">
           <div className="mx-auto max-w-6xl space-y-4">
           {activeTab === 'interactions' && (
             <div className="space-y-4">
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-black/10 dark:border-white/10 shadow-sm">
-                <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">Add Interaction</h3>
+              <div className="bg-[var(--material-thick)] p-6 rounded-xl border border-[var(--hairline)] shadow-sm">
+                <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">Add Interaction</h3>
                 <div className="grid items-stretch gap-3 lg:grid-cols-2">
-                  <form onSubmit={handleIngestText} className="flex h-full flex-col gap-2 rounded-lg border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-slate-900/40">
+                  <form onSubmit={handleIngestText} className="flex h-full flex-col gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Text Note</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Text Note</div>
                       <button
                         type="submit"
                         disabled={ingesting}
@@ -686,20 +686,20 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       </button>
                     </div>
                     <textarea
-                      className="min-h-[168px] flex-1 resize-none rounded-lg border border-black/10 bg-white p-3 text-slate-900 placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:bg-slate-700 dark:text-white dark:placeholder-slate-400"
+                      className="min-h-[168px] flex-1 resize-none rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] p-3 text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white dark:placeholder-slate-400"
                       rows="7"
                       placeholder="Paste notes, meeting recap, or decisions..."
                     />
                     {ingesting && (
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                      <div className="text-xs text-[color:var(--text-muted)]">
                         Running AI extraction and action generation. This can take a few seconds.
                       </div>
                     )}
                   </form>
 
-                  <form onSubmit={handleIngestMedia} className="flex h-full flex-col gap-2 rounded-lg border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-slate-900/40">
+                  <form onSubmit={handleIngestMedia} className="flex h-full flex-col gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Upload Video / Audio</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Upload Video / Audio</div>
                       <button
                         type="submit"
                         disabled={!mediaFile || mediaUploading}
@@ -727,13 +727,13 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       className={`flex min-h-[168px] flex-1 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed px-4 py-4 text-center transition ${
                         isMediaDragActive
                           ? 'border-accent bg-accent/10 text-accent'
-                          : 'border-black/20 bg-white/80 text-slate-600 hover:border-accent/60 hover:bg-accent/5 dark:border-white/20 dark:bg-slate-800/60 dark:text-slate-300'
+                          : 'border-black/20 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:border-accent/60 hover:bg-accent/5 dark:border-white/20'
                       }`}
                     >
                       <div className="text-xs font-semibold">Drag and drop video/audio here</div>
                       <div className="mt-1 text-[11px]">or click to browse</div>
                       {mediaFile ? (
-                        <div className="mt-2 rounded-full border border-black/10 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 dark:border-white/20 dark:bg-slate-900 dark:text-slate-200">
+                        <div className="mt-2 rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] dark:border-white/20">
                           {mediaFile.name}
                         </div>
                       ) : null}
@@ -743,14 +743,14 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
               </div>
 
               {mediaJobs.length > 0 && (
-                <div className="rounded-xl border border-black/10 bg-white/80 p-3 dark:border-white/10 dark:bg-slate-900/45">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Media Jobs</div>
+                <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Media Jobs</div>
                   <div className="space-y-2">
                     {mediaJobs.slice(0, 8).map((job) => (
-                      <div key={job.id} className="rounded-lg border border-black/10 px-3 py-2 dark:border-white/10">
+                      <div key={job.id} className="rounded-lg border border-[var(--hairline)] px-3 py-2">
                         <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                          <span className="rounded-full border border-black/10 px-2 py-0.5 font-semibold uppercase tracking-[0.08em] dark:border-white/10">{job.status || 'queued'}</span>
-                          <span className="text-slate-500 dark:text-slate-400">{job.phase || 'queued'} · {Number(job.progress || 0)}%</span>
+                          <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 font-semibold uppercase tracking-[0.08em]">{job.status || 'queued'}</span>
+                          <span className="text-[color:var(--text-muted)]">{job.phase || 'queued'} · {Number(job.progress || 0)}%</span>
                         </div>
                         {job.error && (
                           <div className="mt-1 text-xs text-rose-600 dark:text-rose-300">{job.error}</div>
@@ -762,40 +762,40 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
               )}
 
               <div className="space-y-2">
-                <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">Interactions ({interactions.length})</h3>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">Interactions ({interactions.length})</h3>
                 {interactions.map(int => (
                   <div
                     id={`interaction-card-${int.id}`}
                     key={int.id}
-                    className={`p-4 border rounded-lg bg-white dark:bg-slate-800 shadow-sm transition ${
+                    className={`p-4 border rounded-lg bg-[var(--material-thick)] shadow-sm transition ${
                       highlightedInteractionId === int.id
                         ? 'border-amber-300/80 ring-2 ring-amber-200/70 dark:border-amber-500/40 dark:ring-amber-500/20'
-                        : 'border-black/10 dark:border-white/10'
+                        : 'border-black/10'
                     }`}
                   >
-                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-medium">
+                    <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-[color:var(--text-muted)] font-medium">
                       <span>{int.type}</span>
                       {int.source_name && <span>· {int.source_name}</span>}
                       {int.transcript_status && <span>· transcript {int.transcript_status}</span>}
                       {int.media?.duration_sec ? <span>· {Math.round(int.media.duration_sec)}s</span> : null}
                     </div>
-                    <div className="line-clamp-4 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{int.raw_content}</div>
+                    <div className="line-clamp-4 text-sm text-[color:var(--text-main)] whitespace-pre-wrap">{int.raw_content}</div>
 
                     {Array.isArray(int.transcript_segments) && int.transcript_segments.length > 0 && (
-                      <div className="mt-3 space-y-1 rounded-lg border border-black/10 bg-slate-50 p-2 dark:border-white/10 dark:bg-slate-900/45">
+                      <div className="mt-3 space-y-1 rounded-lg border border-[var(--hairline)] bg-slate-50 p-2">
                         {int.transcript_segments.slice(0, 8).map((seg, idx) => (
                           <button
                             key={`${int.id}-${idx}`}
                             type="button"
                             onClick={() => focusInteractionAt(int.id, Number(seg.start_ms || 0))}
-                            className="block w-full text-left text-[11px] text-slate-600 transition hover:text-accent dark:text-slate-300 dark:hover:text-accent"
+                            className="block w-full text-left text-[11px] text-[color:var(--text-main)] transition hover:text-accent dark:hover:text-accent"
                           >
                             <span className="font-semibold">[{formatMs(seg.start_ms)}]</span> {seg.speaker || 'Speaker'}: {seg.text}
                           </button>
                         ))}
                       </div>
                     )}
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                    <div className="text-xs text-[color:var(--text-muted)] mt-2">
                       {new Date(int.ingested_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
                     </div>
                   </div>
@@ -806,14 +806,14 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
 
           {activeTab === 'signals' && (
             <div className="space-y-4">
-              <div className="rounded-xl border border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-slate-900/45">
+              <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                 <div className="grid gap-2 sm:grid-cols-3">
-                  <label className="text-[11px] text-slate-500 dark:text-slate-400">
+                  <label className="text-[11px] text-[color:var(--text-muted)]">
                     <div className="mb-1">Type</div>
                     <select
                       value={signalTypeFilter}
                       onChange={(e) => setSignalTypeFilter(e.target.value)}
-                      className="w-full rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                      className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-xs text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                     >
                       <option value="all">All types</option>
                       {SIGNAL_TYPE_ORDER.map((type) => (
@@ -826,12 +826,12 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                         ))}
                     </select>
                   </label>
-                  <label className="text-[11px] text-slate-500 dark:text-slate-400">
+                  <label className="text-[11px] text-[color:var(--text-muted)]">
                     <div className="mb-1">Confidence</div>
                     <select
                       value={signalConfidenceFilter}
                       onChange={(e) => setSignalConfidenceFilter(e.target.value)}
-                      className="w-full rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                      className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-xs text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                     >
                       <option value="all">Any confidence</option>
                       <option value="0.8">80% and up</option>
@@ -839,12 +839,12 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       <option value="0.4">40% and up</option>
                     </select>
                   </label>
-                  <label className="text-[11px] text-slate-500 dark:text-slate-400">
+                  <label className="text-[11px] text-[color:var(--text-muted)]">
                     <div className="mb-1">Owner</div>
                     <select
                       value={signalOwnerFilter}
                       onChange={(e) => setSignalOwnerFilter(e.target.value)}
-                      className="w-full rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs text-slate-700 focus:outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                      className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-xs text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                     >
                       <option value="all">Any owner</option>
                       {ownerOptions.map((owner) => (
@@ -855,62 +855,62 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                 </div>
               </div>
               {signals.length === 0 && (
-                <div className="rounded-lg border border-dashed border-black/10 bg-white/60 px-4 py-3 text-sm text-slate-500 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-400">
+                <div className="rounded-lg border border-dashed border-black/10 bg-[var(--material-thin)] px-4 py-3 text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
                   No signals extracted yet. Ingest text in the Interactions tab to populate structured signals.
                 </div>
               )}
               {signals.length > 0 && filteredSignals.length === 0 && (
-                <div className="rounded-lg border border-dashed border-black/10 bg-white/60 px-4 py-3 text-sm text-slate-500 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-400">
+                <div className="rounded-lg border border-dashed border-black/10 bg-[var(--material-thin)] px-4 py-3 text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
                   No signals match the current filters.
                 </div>
               )}
               {orderedSignalTypes.map((type) => {
                 const sigs = signalsByTypeRaw[type] || [];
                 return (
-                <div key={type} className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-black/10 dark:border-white/10 shadow-sm">
-                  <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
+                <div key={type} className="bg-[var(--material-thick)] p-6 rounded-xl border border-[var(--hairline)] shadow-sm">
+                  <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">
                     {titleCaseSignalType(type)} ({sigs.length})
                   </h3>
                   <div className="space-y-3">
                     {sigs.map(sig => (
-                      <div key={sig.id} className="p-3 rounded-lg border border-black/10 bg-white dark:border-white/10 dark:bg-slate-900/50">
+                      <div key={sig.id} className="p-3 rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)]">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] ${confidenceBadgeTone(Number(sig.confidence || 0))}`}>
                             {(Number(sig.confidence || 0) * 100).toFixed(0)}% confidence
                           </span>
                           {sig.owner && (
-                            <span className="text-[11px] text-slate-500 dark:text-slate-400">Owner: {sig.owner}</span>
+                            <span className="text-[11px] text-[color:var(--text-muted)]">Owner: {sig.owner}</span>
                           )}
                           {sig.due_date && (
-                            <span className="text-[11px] text-slate-500 dark:text-slate-400">Due: {sig.due_date}</span>
+                            <span className="text-[11px] text-[color:var(--text-muted)]">Due: {sig.due_date}</span>
                           )}
                           {sig.prompt_profile && (
-                            <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
+                            <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
                               Prompt {sig.prompt_profile}
                             </span>
                           )}
                           {sig.prompt_version && (
-                            <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] text-slate-500 dark:border-white/10 dark:text-slate-400">
+                            <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
                               {humanizePromptVersion(sig.prompt_version)}
                             </span>
                           )}
                         </div>
-                        <div className="mt-2 font-semibold text-slate-900 dark:text-white text-sm">{sig.value}</div>
+                        <div className="mt-2 font-semibold text-[color:var(--text-main)] dark:text-white text-sm">{sig.value}</div>
                         {Number.isFinite(Number(sig.start_ms)) && (
                           <button
                             type="button"
                             onClick={() => focusInteractionAt(sig.interaction_id, Number(sig.start_ms || 0))}
-                            className="mt-1 rounded-full border border-black/10 px-2 py-0.5 text-[10px] font-medium text-slate-500 transition hover:text-accent dark:border-white/10 dark:text-slate-400 dark:hover:text-accent"
+                            className="mt-1 rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-muted)] transition hover:text-accent dark:text-[color:var(--text-muted)] dark:hover:text-accent"
                           >
                             Source timestamp {formatMs(sig.start_ms)}
                           </button>
                         )}
                         {sig.quote && (
-                          <div className="text-slate-700 dark:text-slate-300 italic text-sm mt-2">
+                          <div className="text-[color:var(--text-main)] italic text-sm mt-2">
                             "{sig.quote}"
                           </div>
                         )}
-                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                        <div className="text-xs text-[color:var(--text-muted)] mt-2">
                           Confidence: {(sig.confidence * 100).toFixed(0)}%
                           {sig.extracted_at && (
                             <span className="ml-2">· {new Date(sig.extracted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
@@ -928,31 +928,31 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
           {activeTab === 'actions' && (
             <div className="space-y-4">
               {reminderStatus?.worker && (
-                <div className="rounded-xl border border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-slate-900/45">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Reminder Worker</div>
+                <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Reminder Worker</div>
                   <div className="grid gap-2 text-[11px] sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                    <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                       Enabled <span className="font-semibold">{reminderStatus.worker.enabled ? 'Yes' : 'No'}</span>
                     </div>
-                    <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                    <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                       Interval <span className="font-semibold">{Math.round(Number(reminderStatus.worker.interval_ms || 0) / 1000)}s</span>
                     </div>
-                    <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                    <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                       Min gap <span className="font-semibold">{Math.round(Number(reminderStatus.worker.min_interval_ms || 0) / 1000)}s</span>
                     </div>
-                    <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                    <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                       Signing <span className="font-semibold">{reminderStatus.worker.webhook_signing_enabled ? 'On' : 'Off'}</span>
                     </div>
-                    <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                    <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                       Due preview <span className="font-semibold">{Number(reminderStatus.due_preview_count || 0)}</span>
                     </div>
-                    <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                    <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                       Processed cycle <span className="font-semibold">{Number(reminderStatus.worker.last_cycle_processed_count || 0)}</span>
                     </div>
-                    <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                    <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                       Suppressed cycle <span className="font-semibold">{Number(reminderStatus.worker.last_cycle_suppressed_count || 0)}</span>
                     </div>
-                    <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                    <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                       Dispatch history <span className="font-semibold">{Array.isArray(reminderStatus.worker.dispatches) ? reminderStatus.worker.dispatches.length : 0}</span>
                     </div>
                   </div>
@@ -963,27 +963,27 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   )}
                 </div>
               )}
-              <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-black/10 dark:border-white/10 shadow-sm">
-                <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-slate-600 dark:text-slate-300">
+              <div className="bg-[var(--material-thick)] p-6 rounded-xl border border-[var(--hairline)] shadow-sm">
+                <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">
                   Action Queue ({actions.length})
                 </h3>
                 {actions.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-black/10 bg-white/60 px-4 py-3 text-sm text-slate-500 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-400">
+                  <div className="rounded-lg border border-dashed border-black/10 bg-[var(--material-thin)] px-4 py-3 text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
                     No actions yet. Ingest more context to generate a queue.
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="grid gap-2 rounded-lg border border-black/10 bg-slate-50/70 p-2 text-[11px] dark:border-white/10 dark:bg-slate-900/50 sm:grid-cols-4">
-                      <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                    <div className="grid gap-2 rounded-lg border border-[var(--hairline)] bg-slate-50/70 p-2 text-[11px] sm:grid-cols-4">
+                      <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                         Urgent open <span className="font-semibold">{actionInsights.urgent}</span>
                       </div>
-                      <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                      <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                         Overdue <span className="font-semibold">{actionInsights.overdue}</span>
                       </div>
-                      <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                      <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                         Blocked urgent <span className="font-semibold">{actionInsights.blockedUrgent}</span>
                       </div>
-                      <div className="rounded-md border border-black/10 bg-white/80 px-2 py-1 text-slate-600 dark:border-white/10 dark:bg-slate-900/60 dark:text-slate-300">
+                      <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                         Reminders ≤24h <span className="font-semibold">{actionInsights.remindersSoon}</span>
                       </div>
                     </div>
@@ -991,28 +991,28 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       <div
                         id={`action-card-${action.id}`}
                         key={action.id}
-                        className={`rounded-lg border bg-white p-3 transition dark:bg-slate-900/50 ${
+                        className={`rounded-lg border bg-[var(--material-thick)] p-3 transition ${
                           highlightedActionId === action.id
                             ? 'border-amber-300/80 ring-2 ring-amber-200/70 dark:border-amber-500/50 dark:ring-amber-500/20'
-                            : 'border-black/10 dark:border-white/10'
+                            : 'border-black/10'
                         }`}
                       >
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-600 dark:border-white/10 dark:text-slate-300">
+                          <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-main)]">
                             {action.priority || 'medium'}
                           </span>
                           {Number.isFinite(Number(action.urgency_score)) && (
-                            <span className="rounded-full border border-black/10 px-2 py-0.5 text-[10px] font-semibold text-slate-600 dark:border-white/10 dark:text-slate-300">
+                            <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-semibold text-[color:var(--text-main)]">
                               Urgency {Math.round(Number(action.urgency_score || 0))}
                             </span>
                           )}
-                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                          <span className="text-xs text-[color:var(--text-muted)]">
                             {action.source_signal_type || 'signal'}
                           </span>
                           <select
                             value={action.status || 'open'}
                             onChange={(e) => updateAction(action.id, { status: e.target.value })}
-                            className="rounded-full border border-black/10 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-600 focus:outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                            className="rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                           >
                             <option value="open">Open</option>
                             <option value="in_progress">In Progress</option>
@@ -1020,28 +1020,28 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                             <option value="blocked">Blocked</option>
                           </select>
                         </div>
-                        <div className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">{action.title}</div>
+                        <div className="mt-2 text-sm font-semibold text-[color:var(--text-main)] dark:text-white">{action.title}</div>
                         <div className="mt-2 grid gap-2 sm:grid-cols-2">
                           <input
                             type="text"
                             value={action.owner || ''}
                             onChange={(e) => updateAction(action.id, { owner: e.target.value })}
                             placeholder="Owner"
-                            className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-slate-700 focus:outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                            className="rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1 text-xs text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                           />
                           <input
                             type="date"
                             value={action.due_date || ''}
                             onChange={(e) => updateAction(action.id, { due_date: e.target.value })}
-                            className="rounded-full border border-black/10 bg-white px-3 py-1 text-xs text-slate-700 focus:outline-none focus:border-accent dark:border-white/20 dark:bg-slate-800 dark:text-slate-200"
+                            className="rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1 text-xs text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                           />
                         </div>
                         {action.rationale && (
-                          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{action.rationale}</div>
+                          <div className="mt-1 text-xs text-[color:var(--text-muted)]">{action.rationale}</div>
                         )}
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[color:var(--text-muted)]">
                           {action.escalation_level && (
-                            <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                            <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">
                               Escalation {action.escalation_level}
                             </span>
                           )}
@@ -1061,19 +1061,19 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                               <button
                                 type="button"
                                 onClick={() => setExpandedActionSource(isOpen ? null : action.id)}
-                                className="flex items-center gap-1 text-[10px] font-medium text-slate-400 transition hover:text-accent dark:text-slate-500 dark:hover:text-accent"
+                                className="flex items-center gap-1 text-[10px] font-medium text-[color:var(--text-muted)] transition hover:text-accent dark:text-[color:var(--text-muted)] dark:hover:text-accent"
                               >
                                 <span className={`transition-transform ${isOpen ? 'rotate-90' : ''}`}>▶</span>
                                 Source ({src.signal_type || action.source_signal_type})
                               </button>
                               {isOpen && (
-                                <div className="mt-1 rounded-lg border border-black/10 bg-slate-50 px-3 py-2 text-xs italic text-slate-600 dark:border-white/10 dark:bg-slate-800 dark:text-slate-400">
+                                <div className="mt-1 rounded-lg border border-[var(--hairline)] bg-slate-50 px-3 py-2 text-xs italic text-[color:var(--text-main)] dark:text-[color:var(--text-muted)]">
                                   "{quote}"
                                   {Number.isFinite(Number(src?.start_ms)) && (
                                     <button
                                       type="button"
                                       onClick={() => focusInteractionAt(src.interaction_id, Number(src.start_ms || 0))}
-                                      className="ml-2 not-italic rounded-full border border-black/10 px-2 py-0.5 text-[10px] font-medium text-slate-500 transition hover:text-accent dark:border-white/10 dark:text-slate-400 dark:hover:text-accent"
+                                      className="ml-2 not-italic rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-muted)] transition hover:text-accent dark:text-[color:var(--text-muted)] dark:hover:text-accent"
                                     >
                                       {formatMs(src.start_ms)}
                                     </button>
@@ -1094,17 +1094,17 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
           {activeTab === 'audit' && (
             <div className="space-y-6">
               {auditLoading && (
-                <div className="text-sm text-slate-500 dark:text-slate-400">Loading audit data…</div>
+                <div className="text-sm text-[color:var(--text-muted)]">Loading audit data…</div>
               )}
               {!auditLoading && !auditSummary && !auditTrends && (
-                <div className="rounded-xl border border-black/10 bg-white/60 px-5 py-8 text-center text-sm text-slate-500 dark:border-white/10 dark:bg-slate-900/40 dark:text-slate-400">
+                <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-5 py-8 text-center text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
                   No audit data available. Activity is recorded as you use IntelLedger.
                 </div>
               )}
 
               {auditSummary && (
-                <div className="rounded-xl border border-black/10 bg-white/60 p-4 dark:border-white/10 dark:bg-slate-900/40">
-                  <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">7-Day Activity Summary</div>
+                <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-4">
+                  <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">7-Day Activity Summary</div>
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                     {[
                       { label: 'Events', value: auditSummary.event_count },
@@ -1112,27 +1112,27 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       { label: 'Sampled', value: auditSummary.sampled_events },
                       { label: 'Window (h)', value: auditSummary.since_hours }
                     ].map(({ label, value }) => (
-                      <div key={label} className="rounded-lg border border-black/8 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-slate-800/50">
-                        <div className="text-[18px] font-bold text-slate-800 dark:text-slate-100">{value ?? '—'}</div>
-                        <div className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">{label}</div>
+                      <div key={label} className="rounded-lg border border-black/8 bg-[var(--material-thin)] px-3 py-2">
+                        <div className="text-[18px] font-bold text-[color:var(--text-main)]">{value ?? '—'}</div>
+                        <div className="mt-0.5 text-[10px] text-[color:var(--text-muted)]">{label}</div>
                       </div>
                     ))}
                   </div>
 
                   {Array.isArray(auditSummary.event_types) && auditSummary.event_types.length > 0 && (
                     <div className="mt-4">
-                      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Top Event Types</div>
+                      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Top Event Types</div>
                       <div className="space-y-1.5">
                         {auditSummary.event_types.slice(0, 8).map((item) => {
                           const maxCount = auditSummary.event_types[0]?.count || 1;
                           const pct = Math.round((item.count / maxCount) * 100);
                           return (
                             <div key={item.event_type} className="flex items-center gap-2">
-                              <div className="w-44 shrink-0 truncate text-[11px] text-slate-600 dark:text-slate-300">{item.event_type}</div>
+                              <div className="w-44 shrink-0 truncate text-[11px] text-[color:var(--text-main)]">{item.event_type}</div>
                               <div className="relative flex-1 overflow-hidden rounded-full bg-black/5 dark:bg-white/8" style={{ height: 6 }}>
                                 <div className="absolute inset-y-0 left-0 rounded-full bg-accent/60" style={{ width: `${pct}%` }} />
                               </div>
-                              <div className="w-8 shrink-0 text-right text-[11px] font-medium text-slate-600 dark:text-slate-400">{item.count}</div>
+                              <div className="w-8 shrink-0 text-right text-[11px] font-medium text-[color:var(--text-main)]">{item.count}</div>
                             </div>
                           );
                         })}
@@ -1148,10 +1148,10 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   {Array.isArray(auditTrends.daily_30) && auditTrends.daily_30.length > 0 && (() => {
                     const maxCount = Math.max(...auditTrends.daily_30.map((b) => b.count), 1);
                     return (
-                      <div className="rounded-xl border border-black/10 bg-white/60 p-4 dark:border-white/10 dark:bg-slate-900/40">
+                      <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-4">
                         <div className="mb-3 flex items-center justify-between">
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">30-Day Daily Events</div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400">{auditTrends.event_count_30d} total</div>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">30-Day Daily Events</div>
+                          <div className="text-[11px] text-[color:var(--text-muted)]">{auditTrends.event_count_30d} total</div>
                         </div>
                         <div className="flex h-16 items-end gap-px">
                           {auditTrends.daily_30.map((bucket) => {
@@ -1162,7 +1162,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                             );
                           })}
                         </div>
-                        <div className="mt-1 flex justify-between text-[10px] text-slate-400">
+                        <div className="mt-1 flex justify-between text-[10px] text-[color:var(--text-muted)]">
                           <span>{auditTrends.daily_30[0]?.date?.slice(5)}</span>
                           <span>today</span>
                         </div>
@@ -1173,22 +1173,22 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   {/* Top types per window */}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     {[['24h', auditTrends.top_types_24h, auditTrends.event_count_24h], ['7d', auditTrends.top_types_7d, auditTrends.event_count_7d], ['30d', auditTrends.top_types_30d, auditTrends.event_count_30d]].map(([label, types, total]) => (
-                      <div key={label} className="rounded-xl border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-slate-900/40">
+                      <div key={label} className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                         <div className="mb-2 flex items-center justify-between">
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">Top types — {label}</div>
-                          <div className="text-[11px] font-medium text-slate-600 dark:text-slate-400">{total}</div>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Top types — {label}</div>
+                          <div className="text-[11px] font-medium text-[color:var(--text-main)]">{total}</div>
                         </div>
                         {Array.isArray(types) && types.length > 0 ? (
                           <ul className="space-y-1">
                             {types.slice(0, 5).map((item) => (
                               <li key={item.event_type} className="flex items-center justify-between gap-2">
-                                <span className="truncate text-[11px] text-slate-600 dark:text-slate-300">{item.event_type.replace(/\./g, ' › ')}</span>
-                                <span className="shrink-0 text-[11px] font-semibold text-slate-700 dark:text-slate-200">{item.count}</span>
+                                <span className="truncate text-[11px] text-[color:var(--text-main)]">{item.event_type.replace(/\./g, ' › ')}</span>
+                                <span className="shrink-0 text-[11px] font-semibold text-[color:var(--text-main)]">{item.count}</span>
                               </li>
                             ))}
                           </ul>
                         ) : (
-                          <div className="text-[11px] text-slate-400">No events</div>
+                          <div className="text-[11px] text-[color:var(--text-muted)]">No events</div>
                         )}
                       </div>
                     ))}
@@ -1214,10 +1214,10 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                 const SynthSection = ({ label, items }) =>
                   items?.length > 0 ? (
                     <div>
-                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">{label}</div>
+                      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">{label}</div>
                       <ul className="space-y-1">
                         {items.map((item, i) => (
-                          <li key={i} className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300">
+                          <li key={i} className="flex items-start gap-2 text-sm text-[color:var(--text-main)]">
                             <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
                             {item}
                           </li>
@@ -1227,25 +1227,25 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   ) : null;
                 return (
                   <div className="space-y-5">
-                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-500 dark:text-slate-400">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
                       {synthesis.prompt_profile && (
-                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                        <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">
                           Prompt {synthesis.prompt_profile}
                         </span>
                       )}
                       {synthesis.prompt_version && (
-                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                        <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">
                           {humanizePromptVersion(synthesis.prompt_version)}
                         </span>
                       )}
                       {synthesis.generated_at && (
-                        <span className="rounded-full border border-black/10 px-2 py-0.5 dark:border-white/10">
+                        <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">
                           Generated {new Date(synthesis.generated_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
                         </span>
                       )}
                     </div>
                     {r.summary && (
-                      <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 text-sm leading-relaxed text-slate-700 dark:text-slate-300">
+                      <div className="rounded-xl border border-accent/20 bg-accent/5 px-4 py-3 text-sm leading-relaxed text-[color:var(--text-main)]">
                         {r.summary}
                       </div>
                     )}
