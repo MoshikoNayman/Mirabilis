@@ -2031,22 +2031,32 @@ app.post('/api/web-search', async (req, res) => {
       foxnews:  'https://moxie.foxnews.com/google-publisher/latest.xml',
       fox:      'https://moxie.foxnews.com/google-publisher/latest.xml',
       bbc:      'https://feeds.bbci.co.uk/news/rss.xml',
-      cnn:      'http://rss.cnn.com/rss/edition.rss',
-      reuters:  'https://feeds.reuters.com/reuters/topNews',
-      ap:       'https://feeds.apnews.com/apnews/topnews',
+      cnn:      'http://rss.cnn.com/rss/cnn_topstories.rss',
+      ap:       'https://feeds.apnews.com/rss/apf-topnews',
       nyt:      'https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml',
       guardian: 'https://www.theguardian.com/world/rss',
       techcrunch: 'https://techcrunch.com/feed/',
+      tech:     'https://techcrunch.com/feed/',
       verge:    'https://www.theverge.com/rss/index.xml',
+      ars:      'https://feeds.arstechnica.com/arstechnica/index',
+      hackernews: 'https://hnrss.org/frontpage',
+      hn:       'https://hnrss.org/frontpage',
     };
-    const GENERAL_FEED = 'https://feeds.reuters.com/reuters/topNews';
+    // Reliable general feeds aggregated when the query names no specific outlet.
+    const GENERAL_FEEDS = [
+      'https://feeds.bbci.co.uk/news/rss.xml',
+      'https://www.theguardian.com/world/rss',
+      'https://hnrss.org/frontpage',
+    ];
 
-    function pickFeedUrl(q) {
+    // Returns the feed URLs to fetch: an outlet-specific one if the query names
+    // it, otherwise the aggregated general set.
+    function pickFeedUrls(q) {
       const lower = q.toLowerCase();
       for (const [key, url] of Object.entries(NEWS_FEEDS)) {
-        if (lower.includes(key)) return url;
+        if (lower.includes(key)) return [url];
       }
-      return GENERAL_FEED;
+      return GENERAL_FEEDS;
     }
 
     async function parseRssFeed(url, maxItems) {
@@ -2070,16 +2080,41 @@ app.post('/api/web-search', async (req, res) => {
       return items;
     }
 
-    const feedUrl = pickFeedUrl(query);
-    const feedItems = await parseRssFeed(feedUrl, limit);
-
-    if (feedItems.length > 0) {
-      res.json({ answer: '', sources: feedItems });
-      return;
+    const feedUrls = pickFeedUrls(query);
+    // Fetch all selected feeds in parallel; tolerate individual feed failures.
+    const settled = await Promise.allSettled(
+      feedUrls.map((url) => parseRssFeed(url, limit))
+    );
+    let collected = [];
+    for (const r of settled) {
+      if (r.status === 'fulfilled') collected.push(...r.value);
     }
 
-    // Nothing found — tell the frontend so it shows the error state
-    res.json({ answer: '', sources: [] });
+    // Rank by query-term overlap so results are relevant, not merely newest.
+    const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+    if (terms.length) {
+      for (const item of collected) {
+        const hay = `${item.title} ${item.snippet}`.toLowerCase();
+        item.score = terms.reduce((acc, t) => acc + (hay.includes(t) ? 1 : 0), 0);
+      }
+      const relevant = collected.filter((i) => i.score > 0);
+      if (relevant.length) collected = relevant;
+    }
+
+    // De-dupe by title, sort by score (then keep feed order), cap to limit.
+    const seen = new Set();
+    const sources = [];
+    collected
+      .sort((a, b) => (b.score || 0) - (a.score || 0))
+      .forEach((item) => {
+        const key = item.title.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          sources.push(item);
+        }
+      });
+
+    res.json({ answer: '', sources: sources.slice(0, Math.max(limit, 8)) });
   } catch (error) {
     res.status(503).json({ error: `Web search request failed: ${error.message}` });
   }

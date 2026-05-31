@@ -6,8 +6,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Kbd, PresenceDot, Spinner } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
-import { getJSON } from '../../lib/api';
+import { getJSON, API_BASE } from '../../lib/api';
 import { PROVIDERS } from '../../lib/presence';
+import { safeStorageGet } from '../../lib/storage';
 
 function useDebounced(value, ms) {
   const [v, setV] = useState(value);
@@ -31,6 +32,7 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
   const [query, setQuery] = useState('');
   const debounced = useDebounced(query, 180);
   const [chats, setChats] = useState([]);
+  const [ledger, setLedger] = useState([]);
   const [loading, setLoading] = useState(false);
   const loadedRef = useRef(false);
 
@@ -47,8 +49,46 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
   useEffect(() => {
     if (!open) {
       setQuery('');
+      setLedger([]);
     }
   }, [open]);
+
+  // Search IntelLedger sessions server-side (semantic ranking lives in the
+  // backend). Debounced; only fires for non-trivial queries.
+  useEffect(() => {
+    const term = debounced.trim();
+    if (!open || term.length < 2) {
+      setLedger([]);
+      return undefined;
+    }
+    const userId = safeStorageGet('mirabilis-user-id', '');
+    if (!userId) return undefined;
+    let alive = true;
+    const ctrl = new AbortController();
+    fetch(
+      `${API_BASE}/api/intelledger/sessions/search?userId=${encodeURIComponent(userId)}&query=${encodeURIComponent(term)}`,
+      { signal: ctrl.signal }
+    )
+      .then((r) => (r.ok ? r.json() : { sessions: [] }))
+      .then((p) => {
+        if (!alive) return;
+        const list = Array.isArray(p?.sessions) ? p.sessions : [];
+        setLedger(
+          list.slice(0, 6).map((s) => ({
+            id: s.id,
+            title: s.title || 'Untitled session',
+            preview: s.topic_preview || s.description || ''
+          }))
+        );
+      })
+      .catch(() => {
+        if (alive) setLedger([]);
+      });
+    return () => {
+      alive = false;
+      ctrl.abort();
+    };
+  }, [debounced, open]);
 
   const q = debounced.toLowerCase().trim();
 
@@ -79,10 +119,21 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
     onPickProvider?.(p);
   }
 
+  function openSession(s) {
+    appStore.closeSearch();
+    onTab?.('intel');
+    try {
+      window.dispatchEvent(new CustomEvent('mirabilis:open-session', { detail: { id: s.id } }));
+    } catch {
+      /* ignore */
+    }
+  }
+
   function onKeyDown(e) {
     if (e.key === 'Enter') {
       e.preventDefault();
       if (chatResults[0]) openChat(chatResults[0]);
+      else if (ledger[0]) openSession(ledger[0]);
       else if (providerResults[0]) openProvider(providerResults[0]);
     }
   }
@@ -98,7 +149,7 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search chats and providers…"
+            placeholder="Search chats, ledger, and providers…"
             className="w-full bg-transparent text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
           />
           {loading ? <Spinner /> : <Kbd>Esc</Kbd>}
@@ -108,6 +159,13 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
             <Section title="Chats">
               {chatResults.map((c) => (
                 <Row key={c.id} icon="💬" title={c.title} sub={c.preview} onClick={() => openChat(c)} />
+              ))}
+            </Section>
+          )}
+          {ledger.length > 0 && (
+            <Section title="IntelLedger">
+              {ledger.map((s) => (
+                <Row key={s.id} icon="🗂" title={s.title} sub={s.preview} onClick={() => openSession(s)} />
               ))}
             </Section>
           )}
@@ -124,7 +182,7 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
               ))}
             </Section>
           )}
-          {!loading && chatResults.length === 0 && providerResults.length === 0 && (
+          {!loading && chatResults.length === 0 && ledger.length === 0 && providerResults.length === 0 && (
             <div className="px-3 py-8 text-center text-[length:var(--text-sm)] text-[color:var(--text-muted)]">
               {q ? 'No matches' : 'Start typing to search'}
             </div>

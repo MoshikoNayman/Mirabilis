@@ -37,22 +37,48 @@ export function aggregatePresence(map, streaming = false) {
   return 'unknown';
 }
 
+// True when a hint/error string indicates a missing/invalid credential rather
+// than an unreachable service. The backend returns HTTP 400 with
+// { ok:false, hint:"OpenAI API key is required." } for keyless remotes.
+function looksLikeMissingKey(text) {
+  return /api[\s_-]*key|missing[\s_-]*key|unauthor|invalid[\s_-]*key|credential|token[\s_-]*required/i.test(
+    String(text || '')
+  );
+}
+
 // Probe a single provider's health. Returns one of the presence states.
+// Uses provider metadata so the result is semantically correct: a remote
+// provider with no key is "needkey" (blue), a local provider whose binary
+// isn't running is "offline" (gray), and a reachable engine is "online".
 export async function probeProvider(id, { signal } = {}) {
+  const meta = PROVIDERS.find((p) => p.id === id) || {};
   try {
-    const res = await fetch(`${API_BASE}/api/providers/health?provider=${encodeURIComponent(id)}`, { signal });
-    if (!res.ok) {
-      // 401/403 => reachable but auth missing => needs key
-      if (res.status === 401 || res.status === 403) return 'needkey';
-      return 'offline';
-    }
+    const res = await fetch(
+      `${API_BASE}/api/providers/health?provider=${encodeURIComponent(id)}`,
+      { signal }
+    );
     const data = await res.json().catch(() => ({}));
-    if (data?.ok === true || data?.healthy === true || data?.status === 'ok') return 'online';
+    const hint = data?.hint || data?.error || data?.reason || data?.message || '';
+
+    // Healthy in any of the shapes the backend uses.
+    if (
+      data?.reachable === true ||
+      data?.healthy === true ||
+      data?.status === 'ok' ||
+      (typeof data?.status === 'string' && /online|ready|healthy/i.test(data.status)) ||
+      (data?.ok === true && data?.reachable !== false)
+    ) {
+      return 'online';
+    }
+
+    // Explicit auth-missing signals.
     if (data?.needsKey || data?.reason === 'missing-key') return 'needkey';
-    if (data?.reachable === false) return 'offline';
-    // Some health payloads only echo a status string.
-    if (typeof data?.status === 'string' && /online|ready|healthy/i.test(data.status)) return 'online';
-    return data?.ok === false ? 'offline' : 'online';
+    if (res.status === 401 || res.status === 403) return meta.needsKey ? 'needkey' : 'offline';
+
+    // Keyless remote: backend says not reachable with an API-key hint.
+    if (meta.needsKey && looksLikeMissingKey(hint)) return 'needkey';
+
+    return 'offline';
   } catch {
     return 'offline';
   }
