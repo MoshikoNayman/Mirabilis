@@ -1208,6 +1208,8 @@ export default function ChatApp() {
   const [webSearchStatus, setWebSearchStatus] = useState('idle'); // 'idle' | 'searching' | 'error'
   // modelId → { pct: number|null, status: string, ctrl: AbortController } while pulling
   const [pullingModels, setPullingModels] = useState({});
+  // Free-text "pull any Ollama model" field in the model menu.
+  const [customModelInput, setCustomModelInput] = useState('');
   // modelId → true while a delete request is in-flight
   const [deletingModels, setDeletingModels] = useState({});
   const [isTeachPanelOpen, setIsTeachPanelOpen] = useState(false);
@@ -4914,6 +4916,51 @@ export default function ChatApp() {
                       ) : (
                         <div className="px-2 py-2 text-xs text-[color:var(--text-muted)]">No models found</div>
                       )}
+
+                    {/* Pull any model not in the list (Ollama mode) — reuses the
+                        existing install-job pipeline via installModel(). */}
+                    {provider === 'ollama' && (
+                      <div className="mt-1 border-t border-black/10 px-2 py-2">
+                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Add any model</div>
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={customModelInput}
+                            onChange={(e) => setCustomModelInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const name = customModelInput.trim();
+                                if (name) { installModel(name, name); setCustomModelInput(''); }
+                              }
+                            }}
+                            placeholder="e.g. llama3.2, qwen2.5:7b"
+                            className="au-focus min-w-0 flex-1 rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5 text-[11px] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const name = customModelInput.trim();
+                              if (name) { installModel(name, name); setCustomModelInput(''); }
+                            }}
+                            disabled={!customModelInput.trim() || !!pullingModels[customModelInput.trim()]}
+                            className="shrink-0 rounded-[var(--r-md)] px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
+                            style={{ background: 'var(--accent)' }}
+                          >
+                            Pull
+                          </button>
+                        </div>
+                        <a
+                          href="https://ollama.com/library"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1.5 inline-block text-[10px] text-[color:var(--text-muted)] underline decoration-[var(--hairline)] underline-offset-2 hover:text-accent"
+                        >
+                          Browse the Ollama model library ↗
+                        </a>
+                      </div>
+                    )}
 
                     {/* Generation params at bottom of model menu */}
                     <div className="mt-1 border-t border-black/10 px-2 py-2">
