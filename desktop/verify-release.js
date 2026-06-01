@@ -88,9 +88,19 @@ if (target === 'mac' || target === 'darwin') {
 }
 
 if (target === 'win' || target === 'windows' || target === 'win32') {
-  const setupExe = exes.find((f) => /setup/i.test(path.basename(f)));
+  // The NSIS installer is the top-level dist\*.exe. Its exact name follows the
+  // configured artifactName (e.g. "Mirabilis AI-26.2.29-x64.exe"), so do NOT
+  // require the literal word "Setup". Exclude the NSIS uninstaller stub and any
+  // exe nested under win-unpacked\ (those are app internals, not the installer).
+  const installerExes = exes.filter((f) => {
+    const base = path.basename(f).toLowerCase();
+    if (base.includes('uninstall')) return false;
+    if (f.toLowerCase().includes('win-unpacked' + path.sep)) return false;
+    return true;
+  });
+  const setupExe = installerExes.sort((a, b) => fs.statSync(b).size - fs.statSync(a).size)[0];
   if (!setupExe) {
-    fail('No Setup .exe found in dist (expected from build.bat).');
+    fail('No installer .exe found in dist (expected from electron-builder NSIS target).');
   }
 
   const setupSize = fs.statSync(setupExe).size;
