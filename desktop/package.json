@@ -1,6 +1,6 @@
 {
   "name": "mirabilis-desktop",
-  "version": "26.2.25",
+  "version": "26.2.29",
   "description": "Mirabilis AI – Desktop App",
   "author": "Moshiko Nayman",
   "main": "main.js",
@@ -11,7 +11,7 @@
   },
   "build": {
     "productName": "Mirabilis AI",
-    "artifactName": "Mirabilis AI-26.2R1-S25-${arch}.${ext}",
+    "artifactName": "Mirabilis AI-${version}-${arch}.${ext}",
     "appId": "com.mirabilis.ai",
     "asar": true,
     "files": [

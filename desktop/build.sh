@@ -71,6 +71,10 @@ echo "==> Installing backend production deps..."
 cd "$BUILD_DIR/backend" && npm install --omit=dev --silent
 
 echo "==> Syncing standalone frontend into staging..."
+# Create the full destination path first: old rsync (2.6.9, shipped on macOS
+# CI runners) does not create intermediate parent directories, so rsyncing into
+# .../frontend/.next/standalone/ fails unless .../frontend/.next/ already exists.
+mkdir -p "$BUILD_DIR/frontend/.next/standalone"
 rsync -a "$MIRABILIS/frontend/.next/standalone/" "$BUILD_DIR/frontend/.next/standalone/"
 
 echo "==> Copying static assets..."
