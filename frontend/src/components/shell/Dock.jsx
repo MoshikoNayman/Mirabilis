@@ -110,13 +110,13 @@ function Label({ children }) {
   );
 }
 
-export default function Dock({ activeTab, onTab, orbState }) {
+export default function Dock({ activeTab, onTab, orbState, spinning = false }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <div className="fixed right-3 top-3 z-[80]">
       <Panel material="chrome" className="flex items-center gap-1.5 rounded-[var(--r-pill)] p-1.5">
-        <StatusOrb state={orbState} size={32} onClick={() => appStore.toggleBuddy()} />
+        <StatusOrb state={orbState} size={32} spinning={spinning} onClick={() => appStore.toggleBuddy()} />
 
         <SegmentedControl
           size="sm"

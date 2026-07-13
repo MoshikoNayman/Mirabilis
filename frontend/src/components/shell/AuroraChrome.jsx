@@ -16,6 +16,7 @@ import { applyTheme, watchSystemTheme } from '../../lib/theme';
 
 export default function AuroraChrome({ activeTab, onTab }) {
   const [streaming, setStreaming] = useState(false);
+  const [searching, setSearching] = useState(false);
   const { map: presence, orbState } = usePresence({ streaming });
   const commandOpen = useAppStore((s) => s.commandOpen);
   const searchOpen = useAppStore((s) => s.searchOpen);
@@ -48,15 +49,22 @@ export default function AuroraChrome({ activeTab, onTab }) {
     };
   }, []);
 
-  // Let ChatApp drive the orb's "busy" state when it starts/stops streaming.
+  // Let ChatApp drive the orb's "busy" state when it starts/stops streaming,
+  // and the ICQ "searching" spin while a web search is running.
   useEffect(() => {
     const start = () => setStreaming(true);
     const stop = () => setStreaming(false);
+    const searchStart = () => setSearching(true);
+    const searchStop = () => setSearching(false);
     window.addEventListener('mirabilis:stream-start', start);
     window.addEventListener('mirabilis:stream-stop', stop);
+    window.addEventListener('mirabilis:search-start', searchStart);
+    window.addEventListener('mirabilis:search-stop', searchStop);
     return () => {
       window.removeEventListener('mirabilis:stream-start', start);
       window.removeEventListener('mirabilis:stream-stop', stop);
+      window.removeEventListener('mirabilis:search-start', searchStart);
+      window.removeEventListener('mirabilis:search-stop', searchStop);
     };
   }, []);
 
@@ -73,7 +81,7 @@ export default function AuroraChrome({ activeTab, onTab }) {
 
   return (
     <>
-      <Dock activeTab={activeTab} onTab={onTab} orbState={orbState} />
+      <Dock activeTab={activeTab} onTab={onTab} orbState={orbState} spinning={searching} />
 
       <BuddyList open={buddyOpen} presence={presence} onPick={handlePickProvider} />
       <CommandPalette open={commandOpen} onTab={onTab} />

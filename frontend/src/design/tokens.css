@@ -162,6 +162,11 @@
   50%      { transform: scale(1.04); filter: saturate(1.25); }
 }
 
+/* The classic ICQ "searching" spin - GPU-cheap transform, no per-frame work. */
+.icq-spin { animation: icq-spin 1.15s linear infinite; transform-origin: 50% 50%; will-change: transform; }
+@keyframes icq-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .icq-spin { animation: none; } }
+
 /* ── Typing dots ────────────────────────────────────────────────────────── */
 .au-typing { display: inline-flex; gap: 3px; align-items: center; }
 .au-typing > i {

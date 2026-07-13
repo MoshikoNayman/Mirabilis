@@ -26,7 +26,25 @@ const ICQ_PETALS = [
 const ICQ_PETAL_A = 'm103.44 107.4s-35.939 37.331-51.327 40.732c-15.388 3.4011-23.473 2.9458-28.129-4.9317s-5.067-16.321 7.6716-27.216 71.784-8.5849 71.784-8.5849z';
 const ICQ_PETAL_B = 'm102.01 107.02s-49.266 2.8098-69.592 0-24.215-11.647-23.745-23.745c0.46999-12.098 15.745-27.854 33.426-27.033s59.911 50.779 59.911 50.779z';
 
-export function FlowerMark({ size = 22 }) {
+export function FlowerMark({ size = 22, variant = 'accent' }) {
+  // 'classic' = the authentic ICQ colours (green petals, one red petal, yellow
+  // heart, black outline) - used for the spinning "searching" state so the red
+  // petal makes the rotation read, just like the original ICQ. 'accent' = the
+  // theme-tinted duotone used at rest.
+  if (variant === 'classic') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 210 210" className="icq-mark-svg" aria-hidden="true">
+        <g stroke="#000" strokeLinecap="round" strokeLinejoin="round" strokeWidth="13.229">
+          {ICQ_PETALS.map((d, i) => (
+            <path key={i} d={d} fill="#00ff03" />
+          ))}
+          <path d={ICQ_PETAL_A} fill="#f5091f" />
+          <path d={ICQ_PETAL_B} fill="#00ff03" />
+          <circle cx="103.56" cy="104.51" r="22.852" fill="#f8ee3e" />
+        </g>
+      </svg>
+    );
+  }
   const light = 'color-mix(in srgb, var(--accent) 55%, #ffffff)';
   return (
     <svg width={size} height={size} viewBox="0 0 210 210" className="icq-mark-svg" aria-hidden="true">
@@ -40,27 +58,29 @@ export function FlowerMark({ size = 22 }) {
   );
 }
 
-export default function StatusOrb({ state = 'unknown', size = 34, onClick, label }) {
+export default function StatusOrb({ state = 'unknown', size = 34, onClick, label, spinning = false }) {
   const color = STATE_COLOR[state] || STATE_COLOR.unknown;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label || 'Buddy list and presence'}
-      title={label || 'Buddy list'}
+      title={spinning ? 'Searching…' : (label || 'Buddy list')}
       className="au-focus relative inline-flex items-center justify-center rounded-full transition active:scale-95"
       style={{ width: size, height: size }}
     >
       <span
         className="au-orb-ring icq-mark relative inline-flex items-center justify-center"
-        data-state={state}
+        data-state={spinning ? 'busy' : state}
         style={{
           width: size,
           height: size,
           boxShadow: `inset 0 0 0 1px var(--hairline), 0 0 0 2px color-mix(in srgb, ${color} 38%, transparent), var(--shadow-2)`
         }}
       >
-        <FlowerMark size={Math.round(size * 0.62)} />
+        <span className={spinning ? 'icq-spin inline-flex' : 'inline-flex'}>
+          <FlowerMark size={Math.round(size * 0.62)} variant={spinning ? 'classic' : 'accent'} />
+        </span>
       </span>
       <span
         className="au-dot absolute -bottom-0.5 -right-0.5"

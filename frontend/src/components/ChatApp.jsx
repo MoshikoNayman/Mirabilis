@@ -1811,6 +1811,12 @@ export default function ChatApp() {
     window.dispatchEvent(new CustomEvent(isStreaming ? 'mirabilis:stream-start' : 'mirabilis:stream-stop'));
   }, [isStreaming]);
 
+  // Spin the classic ICQ flower in the dock while a web search runs.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(webSearchStatus === 'searching' ? 'mirabilis:search-start' : 'mirabilis:search-stop'));
+  }, [webSearchStatus]);
+
   useEffect(() => {
     safeStorageSet('local-ai-model', model);
   }, [model]);
@@ -4497,10 +4503,10 @@ export default function ChatApp() {
               <div className="au-enter flex flex-1 flex-col items-center justify-center gap-5 py-16 text-center">
                 <span
                   aria-hidden="true"
-                  className="au-orb-ring icq-mark flex h-20 w-20 items-center justify-center"
-                  style={{ boxShadow: 'inset 0 0 0 1px var(--hairline), 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow-3)' }}
+                  className="au-orb-ring icq-mark flex h-36 w-36 items-center justify-center sm:h-40 sm:w-40"
+                  style={{ boxShadow: 'inset 0 0 0 1px var(--hairline), 0 0 0 8px color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow-3)' }}
                 >
-                  <FlowerMark size={46} />
+                  <FlowerMark size={104} />
                 </span>
                 <h2 className="text-[length:var(--text-xl)] font-[650] tracking-tight text-[color:var(--text-main)]">
                   {activeChatId ? 'New Conversation' : 'Welcome to Mirabilis AI'}
