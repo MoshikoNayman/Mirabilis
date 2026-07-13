@@ -1591,20 +1591,41 @@ async function main() {
     statusLine('OK', 'Frontend: http://127.0.0.1:3000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
+    // The image service (Stable Diffusion) is OPTIONAL - only image generation
+    // needs it, and its first run downloads multi-GB model assets. Do NOT block
+    // the launcher on it: chat and every other feature are ready right now, so we
+    // start it in the background and let it warm up. Set MIRABILIS_SKIP_IMAGE=1
+    // to skip it entirely, or MIRABILIS_WAIT_IMAGE=1 to restore the old blocking
+    // wait (e.g. for a headless setup that must have image generation ready).
     const imageEnv = { ...process.env, IMAGE_SERVICE_PORT: '7860', PYTHONUNBUFFERED: '1' };
-    const imageStartupTimeoutMs = Number(process.env.IMAGE_SERVICE_STARTUP_TIMEOUT_MS || 900000);
-    statusLine('INFO', `Waiting for image service readiness (timeout ${Math.round(imageStartupTimeoutMs / 1000)}s). First run may download model assets.`);
-    statusLine('INFO', `Image service logs: ${path.join(os.tmpdir(), 'image-service.log')}`);
     const imageLogFile = path.join(os.tmpdir(), 'image-service.log');
-    managed.image = await ensureServiceRunning({
-      label: 'Image service',
-      url: 'http://127.0.0.1:7860/health',
-      timeoutMs: imageStartupTimeoutMs,
-      logFile: imageLogFile,
-      validate: imageHealthReady,
-      spawnService: () => spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, imageLogFile, false)
-    });
-    statusLine('OK', 'Image service: http://127.0.0.1:7860');
+    if (process.env.MIRABILIS_SKIP_IMAGE === '1') {
+      statusLine('INFO', 'Image service skipped (MIRABILIS_SKIP_IMAGE=1). Image generation is disabled.');
+    } else if (await endpointReady('http://127.0.0.1:7860/health', imageHealthReady)) {
+      managed.image = null;
+      statusLine('INFO', 'Image service already running; reusing existing service.');
+    } else if (process.env.MIRABILIS_WAIT_IMAGE === '1') {
+      const imageStartupTimeoutMs = Number(process.env.IMAGE_SERVICE_STARTUP_TIMEOUT_MS || 900000);
+      statusLine('INFO', `Waiting for image service readiness (timeout ${Math.round(imageStartupTimeoutMs / 1000)}s). First run may download model assets.`);
+      statusLine('INFO', `Image service logs: ${imageLogFile}`);
+      managed.image = await ensureServiceRunning({
+        label: 'Image service',
+        url: 'http://127.0.0.1:7860/health',
+        timeoutMs: imageStartupTimeoutMs,
+        logFile: imageLogFile,
+        validate: imageHealthReady,
+        spawnService: () => spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, imageLogFile, false)
+      });
+      statusLine('OK', 'Image service: http://127.0.0.1:7860');
+    } else {
+      try {
+        managed.image = spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, imageLogFile, false);
+        statusLine('INFO', 'Image service starting in the background (first run downloads model assets; image generation becomes available once it is ready).');
+        statusLine('INFO', `Image service logs: ${imageLogFile}`);
+      } catch (imageError) {
+        statusLine('WARN', `Image service could not start: ${imageError?.message || imageError}. Image generation is disabled; everything else works.`);
+      }
+    }
     await writeRunState({ provider: aiProvider, logging: logEnabled });
   });
 
