@@ -111,7 +111,7 @@ export function PresenceDot({ presence = 'offline', className }) {
 /* ── Keyboard hint ──────────────────────────────────────────────────────── */
 export function Kbd({ children }) {
   return (
-    <kbd className="au-hairline inline-flex h-5 min-w-[20px] items-center justify-center rounded-[var(--r-xs)] px-1.5 text-[10px] font-medium text-[color:var(--text-muted)]">
+    <kbd className="au-hairline inline-flex h-5 min-w-[20px] items-center justify-center rounded-[var(--r-xs)] px-1.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-muted)]">
       {children}
     </kbd>
   );
@@ -128,9 +128,90 @@ export function Spinner({ size = 16 }) {
   );
 }
 
+/* ── Line icons ─────────────────────────────────────────────────────────────
+   Monochrome, stroke = currentColor, so they follow the active theme accent /
+   text color instead of clashing full-colour emoji. */
+function Svg({ size = 16, className, children }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+export function SearchIcon(props) {
+  return <Svg {...props}><circle cx="11" cy="11" r="7" /><path d="m21 21-4.35-4.35" /></Svg>;
+}
+export function RecallIcon(props) {
+  return <Svg {...props}><path d="M3 3v6h6" /><path d="M3.5 9a9 9 0 1 1-.85 6" /><path d="M12 7.5V12l3 1.8" /></Svg>;
+}
+export function MoonIcon({ filled = false, ...props }) {
+  return <Svg {...props}><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" fill={filled ? 'currentColor' : 'none'} /></Svg>;
+}
+export function ServerIcon(props) {
+  return <Svg {...props}><rect x="3" y="4" width="18" height="7" rx="1.6" /><rect x="3" y="13" width="18" height="7" rx="1.6" /><path d="M7 7.5h.01M7 16.5h.01" /></Svg>;
+}
+export function FolderIcon(props) {
+  return <Svg {...props}><path d="M3 7.5a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6l1 1a2 2 0 0 0 1.4.6H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></Svg>;
+}
+export function IncognitoIcon(props) {
+  return <Svg {...props}><path d="M3 12h18" /><path d="M6.2 12l1.1-3.9A2 2 0 0 1 9.2 6.6h5.6a2 2 0 0 1 1.9 1.5L17.8 12" /><circle cx="7.6" cy="15.2" r="2.3" /><circle cx="16.4" cy="15.2" r="2.3" /></Svg>;
+}
+export function CommandIcon(props) {
+  return <Svg {...props}><path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3Z" /></Svg>;
+}
+export function MenuDotsIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+export function RadarIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="4.5" />
+      <path d="M12 12 18.4 5.6" />
+      <circle cx="16" cy="8" r="1.1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+export function BellIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6Z" />
+      <path d="M10.2 20a2 2 0 0 0 3.6 0" />
+    </Svg>
+  );
+}
+// Two opposed arrows: reads as "then vs now", a reversed or superseded decision.
+export function ContradictionIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M4 8h13" />
+      <path d="m13 4 4 4-4 4" />
+      <path d="M20 16H7" />
+      <path d="m11 12-4 4 4 4" />
+    </Svg>
+  );
+}
+
 /* ── SegmentedControl ───────────────────────────────────────────────────── */
 export function SegmentedControl({ value, onChange, options, size = 'md' }) {
-  const pad = size === 'sm' ? 'h-7 text-[length:var(--text-2xs)]' : 'h-8 text-[length:var(--text-xs)]';
+  const pad = size === 'sm' ? 'h-7 px-2.5 text-[length:var(--text-2xs)]' : 'h-8 px-3 text-[length:var(--text-xs)]';
   return (
     <div className="au-hairline au-material inline-flex items-center gap-0.5 rounded-[var(--r-pill)] p-0.5">
       {options.map((opt) => {
@@ -141,7 +222,7 @@ export function SegmentedControl({ value, onChange, options, size = 'md' }) {
             type="button"
             onClick={() => onChange(opt.value)}
             className={cx(
-              'au-focus inline-flex items-center gap-1 rounded-[var(--r-pill)] px-3 font-medium transition',
+              'au-focus inline-flex items-center gap-1 rounded-[var(--r-pill)] font-medium transition',
               pad,
               active ? 'text-white shadow-[var(--shadow-1)]' : 'text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]'
             )}

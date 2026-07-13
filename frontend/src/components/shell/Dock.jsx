@@ -1,13 +1,17 @@
 // frontend/src/components/shell/Dock.jsx
-// The floating control cluster (top-right). Replaces the old tab pill with a
-// richer dock: StatusOrb (buddy list), tab switcher, search, and an appearance
-// menu. Apple vibrancy + ICQ presence in one compact surface.
+// The floating control cluster (top-right), kept deliberately minimal in the ICQ
+// spirit: just the presence orb and one "..." menu that holds every secondary
+// control (search, recall, homelab, commands, off-the-record, go dark, and
+// appearance). The Chat / Ledger switch lives next to the wordmark instead.
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import StatusOrb from '../ui/StatusOrb';
-import { SegmentedControl, IconButton, Panel } from '../ui/primitives';
-import { appStore } from '../../store/useAppStore';
+import {
+  IconButton, Panel, MenuDotsIcon, SearchIcon, RecallIcon, ServerIcon,
+  CommandIcon, MoonIcon, IncognitoIcon, BellIcon, FolderIcon
+} from '../ui/primitives';
+import { appStore, useAppStore } from '../../store/useAppStore';
 import {
   SCHEMES, SCHEME_META, FONTS, FONT_META, MODES,
   setScheme, setFont, setMode, getMode, getScheme, getFont, subscribeTheme
@@ -19,9 +23,37 @@ function useThemeTick() {
   useEffect(() => subscribeTheme(() => force((n) => n + 1)), []);
 }
 
-function AppearanceMenu({ onClose }) {
+function Label({ children }) {
+  return (
+    <div className="mb-1.5 mt-1 px-1 text-[length:var(--text-2xs)] font-medium uppercase tracking-wide text-[color:var(--text-muted)]">
+      {children}
+    </div>
+  );
+}
+
+function MenuRow({ icon, label, onClick, right }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="au-focus flex w-full items-center gap-2.5 rounded-[var(--r-sm)] px-2.5 py-2 text-[length:var(--text-xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
+      role="menuitem"
+    >
+      <span className="flex h-4 w-4 items-center justify-center text-[color:var(--text-muted)]">{icon}</span>
+      <span className="flex-1 text-left">{label}</span>
+      {right}
+    </button>
+  );
+}
+
+function Divider() {
+  return <div className="my-1 border-t" style={{ borderColor: 'var(--hairline)' }} />;
+}
+
+function ControlMenu({ onClose }) {
   useThemeTick();
   const ref = useRef(null);
+  const goDark = useAppStore((s) => s.goDark);
   const [muted, setMutedState] = useState(isMuted());
 
   useEffect(() => {
@@ -32,15 +64,50 @@ function AppearanceMenu({ onClose }) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [onClose]);
 
+  const act = (fn) => () => { onClose(); fn(); };
+
   return (
-    <Panel
-      ref={ref}
-      material="chrome"
-      className="au-pop absolute right-0 top-11 w-[260px] p-3"
-      role="menu"
-    >
+    <Panel ref={ref} material="chrome" className="au-pop absolute right-0 top-11 w-[252px] p-1.5" role="menu">
+      <MenuRow icon={<SearchIcon size={15} />} label="Search" onClick={act(() => appStore.openSearch())} />
+      <MenuRow icon={<BellIcon size={15} />} label="While you were away" onClick={act(() => appStore.openWywa())} />
+      <MenuRow icon={<RecallIcon size={15} />} label="Recall" onClick={act(() => appStore.openRecall())} />
+      <MenuRow icon={<ServerIcon size={15} />} label="Homelab" onClick={act(() => appStore.openHomelab())} />
+      <MenuRow icon={<FolderIcon size={15} />} label="Workspace" onClick={act(() => appStore.openWorkspace())} />
+      <MenuRow icon={<CommandIcon size={15} />} label="Commands" onClick={act(() => appStore.openCommand())} />
+      <MenuRow
+        icon={<IncognitoIcon size={15} />}
+        label="Off the Record"
+        onClick={act(() => {
+          try { window.dispatchEvent(new CustomEvent('mirabilis:set-tab', { detail: { tab: 'chat' } })); } catch { /* ignore */ }
+          setTimeout(() => {
+            try { window.dispatchEvent(new CustomEvent('mirabilis:new-ephemeral-chat')); } catch { /* ignore */ }
+          }, 60);
+        })}
+      />
+
+      <Divider />
+
+      <MenuRow
+        icon={<MoonIcon size={15} filled={goDark} />}
+        label="Go Dark"
+        onClick={() => {
+          const on = appStore.toggleGoDark();
+          appStore.toast(on ? 'Go Dark on - local models only, nothing leaves this machine' : 'Go Dark off - cloud providers allowed again', { kind: on ? 'success' : 'info' });
+        }}
+        right={(
+          <span
+            className={`rounded-full px-1.5 py-0.5 text-[length:var(--text-2xs)] font-medium ${goDark ? 'text-white' : 'au-hairline text-[color:var(--text-muted)]'}`}
+            style={goDark ? { background: 'var(--accent)' } : undefined}
+          >
+            {goDark ? 'On' : 'Off'}
+          </span>
+        )}
+      />
+
+      <Divider />
+
       <Label>Appearance</Label>
-      <div className="mb-3 flex gap-1">
+      <div className="mb-2 flex gap-1 px-1">
         {MODES.map((m) => (
           <button
             key={m}
@@ -55,9 +122,7 @@ function AppearanceMenu({ onClose }) {
           </button>
         ))}
       </div>
-
-      <Label>Palette</Label>
-      <div className="mb-3 grid grid-cols-2 gap-1.5">
+      <div className="mb-2 grid grid-cols-2 gap-1 px-1">
         {SCHEMES.map((s) => (
           <button
             key={s}
@@ -72,9 +137,7 @@ function AppearanceMenu({ onClose }) {
           </button>
         ))}
       </div>
-
-      <Label>Font</Label>
-      <div className="mb-3 flex gap-1">
+      <div className="mb-1 flex gap-1 px-1">
         {FONTS.map((f) => (
           <button
             key={f}
@@ -89,28 +152,19 @@ function AppearanceMenu({ onClose }) {
           </button>
         ))}
       </div>
-
       <button
         type="button"
         onClick={() => setMutedState(toggleMuted())}
-        className="au-focus flex w-full items-center justify-between rounded-[var(--r-sm)] px-2 py-2 text-[length:var(--text-xs)] font-medium text-[color:var(--text-main)] hover:bg-[color:var(--hairline)]"
+        className="au-focus flex w-full items-center justify-between rounded-[var(--r-sm)] px-2.5 py-2 text-[length:var(--text-xs)] font-medium text-[color:var(--text-main)] hover:bg-[color:var(--hairline)]"
       >
         <span>Sounds</span>
-        <span className="text-[color:var(--text-muted)]">{muted ? '🔕 Off' : '🔔 On'}</span>
+        <span className="text-[color:var(--text-muted)]">{muted ? 'Off' : 'On'}</span>
       </button>
     </Panel>
   );
 }
 
-function Label({ children }) {
-  return (
-    <div className="mb-1.5 text-[length:var(--text-2xs)] font-medium uppercase tracking-wide text-[color:var(--text-muted)]">
-      {children}
-    </div>
-  );
-}
-
-export default function Dock({ activeTab, onTab, orbState, spinning = false }) {
+export default function Dock({ orbState, spinning = false }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
@@ -118,23 +172,9 @@ export default function Dock({ activeTab, onTab, orbState, spinning = false }) {
       <Panel material="chrome" className="flex items-center gap-1.5 rounded-[var(--r-pill)] p-1.5">
         <StatusOrb state={orbState} size={32} spinning={spinning} onClick={() => appStore.toggleBuddy()} />
 
-        <SegmentedControl
-          size="sm"
-          value={activeTab === 'intel' ? 'intel' : 'chat'}
-          onChange={(v) => onTab?.(v)}
-          options={[
-            { value: 'chat', label: 'Chat' },
-            { value: 'intel', label: 'Ledger' }
-          ]}
-        />
-
-        <IconButton label="Search (⌘/)" onClick={() => appStore.openSearch()}>🔍</IconButton>
-
-        <IconButton label="Commands (⌘K)" onClick={() => appStore.openCommand()}>⌘</IconButton>
-
         <div className="relative">
-          <IconButton label="Appearance" onClick={() => setMenuOpen((v) => !v)}>◐</IconButton>
-          {menuOpen ? <AppearanceMenu onClose={() => setMenuOpen(false)} /> : null}
+          <IconButton label="Menu" onClick={() => setMenuOpen((v) => !v)}><MenuDotsIcon /></IconButton>
+          {menuOpen ? <ControlMenu onClose={() => setMenuOpen(false)} /> : null}
         </div>
       </Panel>
     </div>

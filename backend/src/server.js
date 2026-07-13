@@ -25,11 +25,15 @@ import {
   getEpoch
 } from './storage/chatStore.js';
 import { getEffectiveModel, listModels, streamWithProvider } from './modelService.js';
+import { listHosts, addHost, deleteHost } from './storage/homelabStore.js';
+import { probeAllHosts } from './homelab.js';
+import * as workspace from './workspace.js';
 import { McpConnectorService } from './mcp/mcpConnectorService.js';
 import { createMcpServerHandler } from './mcp/mcpServer.js';
 import { createIntelLedgerStorage } from './storage/intelLedger.js';
+import { createRecall } from './recall.js';
 import { makeHostGuard, makeMcpAuthGuard, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
-import { createIntelLedgerRoutes } from './routes/intelLedger.js';
+import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
 import { shouldSuppressReminder, buildReminderWebhookHeaders } from './intelLedgerReminderUtils.js';
 
 const app = express();
@@ -607,6 +611,45 @@ async function probeProviderTargets(targets, options = {}) {
   }
   return { reachable: false, target: targets[0] || '', status: lastStatus || undefined, error: lastError || 'fetch failed' };
 }
+
+// Providers that send data off-device. "Go Dark" (local-only lockdown) blocks
+// these so a session can be guaranteed to never leave the machine.
+const REMOTE_PROVIDERS = new Set(['openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'gpuaas', 'claude']);
+
+// Model Warmth as Presence: report which Ollama models are currently loaded in
+// memory (warm in VRAM), so local model "buddies" can show a truthful green dot
+// only when the model is actually ready to answer without a cold load.
+app.get('/api/providers/ollama/ps', async (_req, res) => {
+  const normalizedBase = String(config.ollamaBaseUrl || '').replace(/\/$/, '');
+  if (!normalizedBase) {
+    res.json({ ok: false, reachable: false, models: [] });
+    return;
+  }
+  try {
+    assertSafeProviderUrl(normalizedBase);
+  } catch (ssrfError) {
+    res.status(400).json({ ok: false, reachable: false, models: [], hint: ssrfError.message });
+    return;
+  }
+  try {
+    const response = await fetch(`${normalizedBase}/api/ps`, { signal: AbortSignal.timeout(4000) });
+    if (!response.ok) {
+      res.json({ ok: true, reachable: false, models: [] });
+      return;
+    }
+    const data = await response.json();
+    const models = Array.isArray(data?.models)
+      ? data.models.map((m) => ({
+          name: m.name || m.model || '',
+          warm: Number(m.size_vram || 0) > 0,
+          expiresAt: m.expires_at || null
+        }))
+      : [];
+    res.json({ ok: true, reachable: true, models });
+  } catch (error) {
+    res.json({ ok: true, reachable: false, models: [], error: error?.message || 'fetch failed' });
+  }
+});
 
 app.get('/api/providers/health', async (req, res) => {
   const provider = String(req.query?.provider || config.aiProvider || 'ollama').trim();
@@ -1603,6 +1646,102 @@ app.delete('/api/remote/disconnect', (_req, res) => {
   res.status(204).end();
 });
 
+// ── Watched Workspace (live local folder as chat context) ─────────────────
+// Point Mirabilis at a local folder; it lists the folder's text files and reads
+// any file's FRESH bytes on demand. All reads are jailed to the watched root by
+// workspace.js (relative paths that escape the root are rejected). Only one root
+// is watched at a time, held in memory like remoteState above.
+
+app.post('/api/workspace/watch', async (req, res) => {
+  const { path: dir } = req.body || {};
+  if (!dir || typeof dir !== 'string') {
+    return res.status(400).json({ error: 'path is required' });
+  }
+  try {
+    const root = await workspace.setRoot(dir);
+    const files = await workspace.listFiles();
+    res.json({ root, files });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Could not watch folder' });
+  }
+});
+
+app.get('/api/workspace/files', async (_req, res) => {
+  const root = workspace.getRoot();
+  if (!root) return res.status(400).json({ error: 'No workspace is being watched.' });
+  try {
+    const files = await workspace.listFiles();
+    res.json({ root, files });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Could not list files' });
+  }
+});
+
+app.get('/api/workspace/file', async (req, res) => {
+  const rel = req.query?.path;
+  if (!rel || typeof rel !== 'string') {
+    return res.status(400).json({ error: 'path query parameter is required' });
+  }
+  try {
+    const result = await workspace.readFile(rel);
+    res.json({ path: result.path, content: result.content, size: result.size });
+  } catch (err) {
+    // Jail violations and oversize reads are caller errors, not server faults.
+    res.status(400).json({ error: err.message || 'Could not read file' });
+  }
+});
+
+app.delete('/api/workspace/watch', (_req, res) => {
+  workspace.stop();
+  res.status(204).end();
+});
+
+// ── Homelab Roster (saved machines + live reachability) ───────────────────
+// The user's own routers, NAS, servers, and Raspberry Pi saved as ICQ-style
+// buddy contacts. Hosts persist to dataDir/homelab-hosts.json (passwords are
+// never stored). Reachability is a quick TCP probe. Connecting reuses the
+// existing /api/remote/connect SSH path.
+
+const homelabStorePath = join(dirname(config.chatStorePath), 'homelab-hosts.json');
+
+app.get('/api/homelab/hosts', async (_req, res) => {
+  try {
+    const hosts = await listHosts(homelabStorePath);
+    res.json({ hosts });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to read hosts' });
+  }
+});
+
+app.post('/api/homelab/hosts', async (req, res) => {
+  try {
+    const result = await addHost(homelabStorePath, req.body || {});
+    if (result.error) return res.status(400).json({ error: result.error });
+    res.status(201).json({ host: result.host });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to add host' });
+  }
+});
+
+app.delete('/api/homelab/hosts/:id', async (req, res) => {
+  try {
+    await deleteHost(homelabStorePath, req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to delete host' });
+  }
+});
+
+app.get('/api/homelab/hosts/status', async (_req, res) => {
+  try {
+    const hosts = await listHosts(homelabStorePath);
+    const statuses = await probeAllHosts(hosts);
+    res.json({ statuses });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'Failed to probe hosts' });
+  }
+});
+
 // ── Generic MCP connector (streamable-http) ───────────────────────────────
 
 const mcpStorePath = join(dirname(config.chatStorePath), 'mcp-servers.json');
@@ -2162,6 +2301,8 @@ app.post('/api/chats', async (req, res) => {
     parentChatId: normalizePromptProfileId(req.body?.parentChatId),
     branchLabel: String(req.body?.branchLabel || '').trim().slice(0, 80),
     ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+    // Off-the-Record: an ephemeral chat is kept in memory only and never persisted.
+    ...(req.body?.ephemeral === true ? { ephemeral: true } : {}),
     snapshots: [],
     messages: []
   };
@@ -2291,7 +2432,7 @@ app.delete('/api/chats', async (_req, res) => {
 });
 
 app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
-  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens } = req.body || {};
+  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens, localOnly } = req.body || {};
   const chatId = req.params.chatId;
 
   if (!content || typeof content !== 'string') {
@@ -2301,6 +2442,14 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
 
   if (!trainingModeOptions.has(trainingMode)) {
     res.status(400).json({ error: 'Invalid trainingMode' });
+    return;
+  }
+
+  // Go Dark (local-only lockdown): hard-block any remote provider before a single
+  // byte leaves the machine. The frontend also greys these out, but this is the
+  // real guarantee - the promise is enforced here, in the send path.
+  if (localOnly === true && REMOTE_PROVIDERS.has(provider || config.aiProvider)) {
+    res.status(403).json({ error: `Go Dark is on - "${provider || config.aiProvider}" is a remote provider and was blocked. Pick a local model (Ollama or KoboldCpp).` });
     return;
   }
 
@@ -2842,6 +2991,80 @@ app.use('/api/intelledger', createIntelLedgerRoutes(intelLedgerStorage, {
   getEffectiveModel,
   config
 }));
+
+// Recall Orb: local semantic recall over the user's own chats + ledger signals.
+const recall = createRecall({
+  config,
+  chatStorePath: config.chatStorePath,
+  intelLedgerStorePath: config.intelLedgerStorePath
+});
+
+app.post('/api/recall', async (req, res) => {
+  const query = String(req.body?.query || '').trim();
+  const limit = Number(req.body?.limit) || undefined;
+  if (!query) {
+    res.status(400).json({ ok: false, error: 'query is required' });
+    return;
+  }
+  try {
+    const outcome = await recall.query(query, limit);
+    if (!outcome.ok) {
+      res.status(503).json({ ok: false, error: outcome.reason, results: [] });
+      return;
+    }
+    res.json({ ok: true, model: outcome.model, results: outcome.results });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: `Recall failed: ${error.message}`, results: [] });
+  }
+});
+
+// "Your Past Self Disagrees": detect decisions/commitments in the current
+// conversation that contradict or supersede something the user decided before.
+// Accepts either an explicit list of statements or a raw transcript, from which
+// decision/commitment statements are pulled with the shared heuristic. Always
+// returns 200 with a conflicts array; when Ollama is down the array is empty.
+app.post('/api/recall/contradictions', async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    let statements = Array.isArray(req.body?.statements) ? req.body.statements : null;
+
+    if (!statements) {
+      if (!text) {
+        res.status(400).json({ ok: false, error: 'text or statements is required', conflicts: [] });
+        return;
+      }
+      statements = extractStructuredSignals(text)
+        .filter((signal) => signal.type === 'decision' || signal.type === 'commitment')
+        .map((signal) => signal.value)
+        .filter(Boolean);
+    } else {
+      statements = statements
+        .map((item) => (typeof item === 'string' ? item : String(item?.value || item?.text || '')))
+        .filter(Boolean);
+    }
+
+    // Transcripts prefix each line with a role label ("User:" / "Assistant:").
+    // Strip it so the surfaced "current" statement reads as a plain sentence.
+    statements = statements.map((item) => String(item).replace(/^\s*(?:user|assistant)\s*:\s*/i, '').trim());
+
+    statements = statements.slice(0, 12);
+    if (statements.length === 0) {
+      res.json({ ok: true, conflicts: [] });
+      return;
+    }
+
+    const outcome = await recall.findContradictions(statements, {
+      model: req.body?.model || undefined
+    });
+    res.json({
+      ok: true,
+      model: outcome?.model || null,
+      conflicts: Array.isArray(outcome?.conflicts) ? outcome.conflicts : []
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: `Contradiction scan failed: ${error.message}`, conflicts: [] });
+  }
+});
 
 const INTELLEDGER_REMINDER_WORKER_ENABLED = String(process.env.INTELLEDGER_REMINDER_WORKER_ENABLED || '1') !== '0';
 const INTELLEDGER_REMINDER_WORKER_INTERVAL_MS = Math.max(10000, Number(process.env.INTELLEDGER_REMINDER_WORKER_INTERVAL_MS || 60000));

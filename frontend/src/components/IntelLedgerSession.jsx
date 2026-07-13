@@ -670,7 +670,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
           <div className="mx-auto max-w-6xl space-y-4">
           {activeTab === 'interactions' && (
             <div className="space-y-4">
-              <div className="bg-[var(--material-thick)] p-6 rounded-xl border border-[var(--hairline)] shadow-sm">
+              <div className="bg-[var(--material-thick)] p-4 rounded-[var(--r-lg)] border border-[var(--hairline)] shadow-sm">
                 <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">Add Interaction</h3>
                 <div className="grid items-stretch gap-3 lg:grid-cols-2">
                   <form onSubmit={handleIngestText} className="flex h-full flex-col gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
@@ -867,7 +867,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
               {orderedSignalTypes.map((type) => {
                 const sigs = signalsByTypeRaw[type] || [];
                 return (
-                <div key={type} className="bg-[var(--material-thick)] p-6 rounded-xl border border-[var(--hairline)] shadow-sm">
+                <div key={type} className="bg-[var(--material-thick)] p-4 rounded-[var(--r-lg)] border border-[var(--hairline)] shadow-sm">
                   <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">
                     {titleCaseSignalType(type)} ({sigs.length})
                   </h3>

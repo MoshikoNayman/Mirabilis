@@ -14,21 +14,31 @@
  */
 
 import { mkdir, appendFile, readFile, writeFile, readdir, stat } from 'node:fs/promises';
-import { dirname, resolve, normalize, sep } from 'node:path';
+import { dirname, resolve, normalize, sep, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 
 const execAsync = promisify(exec);
 
+// Single-source the reported version from package.json so it can never drift out
+// of sync with the app the way a hardcoded string did.
+const require = createRequire(import.meta.url);
+const { version: PKG_VERSION } = require('../../package.json');
+
+// Every provider the app supports; the MCP tools should not be capped below this.
+// Remote providers require their API key to be configured server-side.
+const MCP_PROVIDERS = ['ollama', 'openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas', 'openai-compatible', 'koboldcpp'];
+
 const PROTOCOL_VERSION = '2024-11-05';
-const SERVER_INFO = { name: 'mirabilis', version: '26.2R1-S5' };
+const SERVER_INFO = { name: 'mirabilis', version: PKG_VERSION };
 
 const TOOLS = [
   {
     name: 'mirabilis_chat',
-    description: 'Send a prompt to Mirabilis AI and receive a response. Supports all configured providers (ollama, openai-compatible, koboldcpp).',
+    description: 'Send a prompt to Mirabilis AI and receive a response. Works with any configured provider (local: ollama, openai-compatible, koboldcpp; remote providers require their API key configured server-side).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -38,7 +48,7 @@ const TOOLS = [
         },
         provider: {
           type: 'string',
-          enum: ['ollama', 'openai-compatible', 'koboldcpp'],
+          enum: MCP_PROVIDERS,
           description: 'AI provider to use. Defaults to the currently configured provider.'
         },
         model: {
@@ -61,7 +71,7 @@ const TOOLS = [
       properties: {
         provider: {
           type: 'string',
-          enum: ['ollama', 'openai-compatible', 'koboldcpp'],
+          enum: MCP_PROVIDERS,
           description: 'Provider to list models for. Defaults to current provider.'
         }
       },
@@ -161,6 +171,34 @@ async function appendServerAudit(auditLogPath, eventType, details = {}) {
     await appendFile(auditLogPath, `${JSON.stringify(payload)}\n`, 'utf8');
   } catch {
     // Best-effort; never fail the request path
+  }
+}
+
+// Local Change Journal: before an MCP write_file overwrites an existing file we
+// snapshot its old bytes so the change is reversible, and we log every write and
+// command to a journal. Unlike the audit log this ALWAYS records (not gated by
+// MIRABILIS_LOG) - it is a safety net for an agent touching your real disk.
+async function appendChangeJournal(journalDir, entry) {
+  if (!journalDir) return;
+  try {
+    await mkdir(journalDir, { recursive: true });
+    await appendFile(join(journalDir, 'journal.jsonl'), `${JSON.stringify({ ts: new Date().toISOString(), ...entry })}\n`, 'utf8');
+  } catch {
+    /* best-effort - never fail the tool call over journaling */
+  }
+}
+
+async function snapshotBeforeWrite(journalDir, resolvedPath) {
+  if (!journalDir) return null;
+  try {
+    const prev = await readFile(resolvedPath, 'utf8'); // throws if the file does not exist yet
+    const snapDir = join(journalDir, 'snapshots');
+    await mkdir(snapDir, { recursive: true });
+    const snapName = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}.snap`;
+    await writeFile(join(snapDir, snapName), prev, 'utf8');
+    return snapName;
+  } catch {
+    return null; // brand-new file (nothing to snapshot) or unreadable
   }
 }
 
@@ -287,17 +325,22 @@ async function callReadFile({ path: filePath }) {
   return { path: resolved, size: info.size, content };
 }
 
-async function callWriteFile({ path: filePath, content, confirmed }) {
+async function callWriteFile({ path: filePath, content, confirmed }, journalDir) {
   if (!confirmed) {
     throw new Error('write_file requires confirmed: true in the arguments to proceed.');
   }
   const resolved = safeResolvePath(filePath);
+  const snapshot = await snapshotBeforeWrite(journalDir, resolved);
   await mkdir(dirname(resolved), { recursive: true });
   await writeFile(resolved, String(content || ''), 'utf8');
-  return { path: resolved, bytesWritten: Buffer.byteLength(content || '', 'utf8') };
+  const bytesWritten = Buffer.byteLength(content || '', 'utf8');
+  await appendChangeJournal(journalDir, {
+    op: 'write_file', path: resolved, bytesWritten, snapshot, replacedExisting: !!snapshot
+  });
+  return { path: resolved, bytesWritten, snapshot: snapshot || null, reversible: !!snapshot };
 }
 
-async function callRunCommand({ command, cwd: workDir, confirmed }) {
+async function callRunCommand({ command, cwd: workDir, confirmed }, journalDir) {
   if (!confirmed) {
     throw new Error('run_command requires confirmed: true in the arguments to proceed.');
   }
@@ -307,16 +350,17 @@ async function callRunCommand({ command, cwd: workDir, confirmed }) {
     throw new Error('Command blocked: matches a potentially destructive pattern (e.g. rm -rf /, mkfs, dd, shutdown).');
   }
   const execCwd = workDir ? safeResolvePath(workDir) : process.cwd();
+  let result;
   try {
     const { stdout, stderr } = await execAsync(cmd, {
       cwd: execCwd,
       timeout: 30000,
       maxBuffer: 2 * 1024 * 1024
     });
-    return { command: cmd, cwd: execCwd, stdout: stdout || '', stderr: stderr || '', exitCode: 0 };
+    result = { command: cmd, cwd: execCwd, stdout: stdout || '', stderr: stderr || '', exitCode: 0 };
   } catch (err) {
     // Non-zero exit - return output rather than throwing so caller can read stderr
-    return {
+    result = {
       command: cmd,
       cwd: execCwd,
       stdout: err.stdout || '',
@@ -325,6 +369,8 @@ async function callRunCommand({ command, cwd: workDir, confirmed }) {
       error: err.message
     };
   }
+  await appendChangeJournal(journalDir, { op: 'run_command', command: cmd, cwd: execCwd, exitCode: result.exitCode });
+  return result;
 }
 
 /**
@@ -340,6 +386,8 @@ async function callRunCommand({ command, cwd: workDir, confirmed }) {
  */
 export function createMcpServerHandler({ config, streamWithProvider, getEffectiveModel, listModels, auditLogPath }) {
   const activeSessions = new Map(); // sessionId -> { createdAt }
+  // Local Change Journal lives alongside the audit log in the data directory.
+  const journalDir = auditLogPath ? join(dirname(auditLogPath), 'mcp-change-journal') : null;
 
   return async function mcpServerHandler(req, res) {
     const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
@@ -427,9 +475,9 @@ export function createMcpServerHandler({ config, streamWithProvider, getEffectiv
         } else if (toolName === 'read_file') {
           toolResult = await callReadFile(args);
         } else if (toolName === 'write_file') {
-          toolResult = await callWriteFile(args);
+          toolResult = await callWriteFile(args, journalDir);
         } else if (toolName === 'run_command') {
-          toolResult = await callRunCommand(args);
+          toolResult = await callRunCommand(args, journalDir);
         }
 
         const durationMs = Date.now() - startedAt;

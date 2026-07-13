@@ -13,6 +13,15 @@ let _cachePath = null;
 // was wiped and bails out, preventing cleared chats from being resurrected.
 let _epoch = 0;
 
+// Off-the-Record: ephemeral chats live only in this in-memory map and are never
+// written to disk. They work normally within a running session (send, stream,
+// rename) but are gone the moment the backend process exits - no chats.json trace.
+const _ephemeral = new Map();
+
+export function isEphemeralChat(chatId) {
+  return _ephemeral.has(chatId);
+}
+
 function invalidateCache() {
   _cache = null;
   _cachePath = null;
@@ -96,28 +105,40 @@ export async function writeStore(filePath, data) {
   _cachePath = filePath;
 }
 
+function summarizeChat(chat, ephemeral) {
+  return {
+    id: chat.id,
+    title: chat.title,
+    createdAt: chat.createdAt,
+    updatedAt: chat.updatedAt,
+    messageCount: chat.messages.length,
+    snapshotCount: Array.isArray(chat.snapshots) ? chat.snapshots.length : 0,
+    parentChatId: chat.parentChatId || '',
+    branchLabel: chat.branchLabel || '',
+    ephemeral: ephemeral === true
+  };
+}
+
 export async function listChats(filePath) {
   const store = await readStore(filePath);
-  return store.chats
-    .map((chat) => ({
-      id: chat.id,
-      title: chat.title,
-      createdAt: chat.createdAt,
-      updatedAt: chat.updatedAt,
-      messageCount: chat.messages.length,
-      snapshotCount: Array.isArray(chat.snapshots) ? chat.snapshots.length : 0,
-      parentChatId: chat.parentChatId || '',
-      branchLabel: chat.branchLabel || ''
-    }))
+  const persisted = store.chats.map((chat) => summarizeChat(chat, chat.ephemeral));
+  const ephemeral = [..._ephemeral.values()].map((chat) => summarizeChat(chat, true));
+  return [...persisted, ...ephemeral]
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 }
 
 export async function getChat(filePath, chatId) {
+  if (_ephemeral.has(chatId)) return _ephemeral.get(chatId);
   const store = await readStore(filePath);
   return store.chats.find((chat) => chat.id === chatId) || null;
 }
 
 export function saveChat(filePath, nextChat) {
+  // Off-the-Record: keep ephemeral chats in memory only, never touch disk.
+  if (nextChat?.ephemeral) {
+    _ephemeral.set(nextChat.id, nextChat);
+    return Promise.resolve(nextChat);
+  }
   // Snapshot epoch before entering the queue. If clearChats runs while this
   // saveChat is waiting, the epoch will have incremented and we skip the write.
   const savedEpoch = _epoch;
@@ -135,6 +156,7 @@ export function saveChat(filePath, nextChat) {
 }
 
 export function deleteChat(filePath, chatId) {
+  if (_ephemeral.delete(chatId)) return Promise.resolve(true);
   return withLock(async () => {
     const store = await readStore(filePath);
     const before = store.chats.length;

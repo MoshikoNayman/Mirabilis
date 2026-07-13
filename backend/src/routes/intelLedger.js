@@ -172,7 +172,7 @@ function extractSignalsWithFallback(rawText, aiSignals) {
   return extractStructuredSignals(rawText);
 }
 
-function extractStructuredSignals(text) {
+export function extractStructuredSignals(text) {
   const source = String(text || '');
   const sentences = source
     .split(/(?<=[.!?])\s+|\n+/)
@@ -1430,6 +1430,32 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
       confidence: Number(s.confidence) || 0.8
     })).slice(0, 36);
   }
+
+  // Commitment Radar: read-only preview scan. Runs the same heuristic
+  // extraction pipeline as ingest but never persists anything.
+  router.post('/scan', async (req, res) => {
+    try {
+      if (await enforceRateLimit(req, res, 'scan-preview', { limit: 60, windowMs: 60_000 })) return;
+      const rawText = req.body?.text ?? req.body?.content ?? '';
+      const text = String(rawText || '').trim();
+      if (!text) {
+        return res.status(400).json({ error: 'text is required' });
+      }
+      if (text.length > maxTextIngestChars) {
+        return res.status(413).json({ error: `text exceeds max length (${maxTextIngestChars} chars).` });
+      }
+
+      const rawSignals = extractStructuredSignals(text);
+      const calibrated = calibrateAndDeduplicateSignals(rawSignals, { sourceText: text });
+      const keepTypes = new Set(['commitment', 'ask', 'decision', 'risk']);
+      const signals = calibrated.filter((signal) => keepTypes.has(signal.signal_type || signal.type));
+      const actions = buildActionQueue(signals);
+
+      return res.json({ signals, actions });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
 
   // Sessions
   router.post('/sessions', async (req, res) => {

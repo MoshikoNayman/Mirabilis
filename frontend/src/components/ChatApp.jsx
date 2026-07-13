@@ -6,8 +6,12 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 import { FlowerMark } from './ui/StatusOrb';
+import { IncognitoIcon, RadarIcon } from './ui/primitives';
+import TabSwitch from './shell/TabSwitch';
+import CommitmentRadar from './shell/CommitmentRadar';
 import { playSend, playReceive, playError } from '../lib/sounds';
-import { appStore } from '../store/useAppStore';
+import { postJSON } from '../lib/api';
+import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -889,10 +893,10 @@ const MessageRow = memo(function MessageRow({
     <article
       className={`au-enter text-[length:var(--text-md)] leading-relaxed text-[color:var(--text-main)] ${
         message.role === 'user'
-          ? 'ml-auto max-w-[90%] rounded-[var(--r-lg)] rounded-br-[var(--r-xs)] px-3.5 py-2.5 shadow-[var(--shadow-2)] sm:max-w-[75%] border border-[color:color-mix(in_srgb,var(--accent)_40%,transparent)]'
+          ? 'ml-auto max-w-[90%] rounded-[var(--r-lg)] rounded-br-[var(--r-xs)] px-4 py-2.5 shadow-[var(--shadow-2)] sm:max-w-[75%] border border-[color:color-mix(in_srgb,var(--accent)_40%,transparent)]'
           : speakingMessageId === message.id
-          ? 'w-full rounded-[var(--r-lg)] px-3.5 py-2.5 au-hairline'
-          : 'w-full rounded-[var(--r-lg)] px-3.5 py-2.5'
+          ? 'w-full rounded-[var(--r-lg)] px-4 py-2.5 au-hairline'
+          : 'w-full rounded-[var(--r-lg)] px-4 py-2.5'
       }`}
       style={
         message.role === 'user'
@@ -962,17 +966,36 @@ const MessageRow = memo(function MessageRow({
           <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-[color:var(--text-muted)]">
             {!message.imageUrl ? (
               <>
-                {message.effectiveProvider ? (
-                  <span title={message.effectiveModel || message.effectiveProvider}>
-                    {{
-                      openai: 'OpenAI', grok: 'Grok', groq: 'Groq', openrouter: 'OpenRouter',
-                      gemini: 'Gemini', cerebras: 'Cerebras', claude: 'Claude', gpuaas: 'GPUaaS',
-                      'openai-compatible': 'Custom', koboldcpp: 'KoboldCpp', ollama: 'Ollama'
-                    }[message.effectiveProvider] || message.effectiveProvider}
-                    {message.effectiveModel ? ` / ${message.effectiveModel.length > 28 ? message.effectiveModel.slice(0, 28) + '…' : message.effectiveModel}` : ''}
-                    {' · '}
-                  </span>
-                ) : null}
+                {(message.effectiveProvider || message.provider) ? (() => {
+                  const prov = message.effectiveProvider || message.provider;
+                  const onDevice = ['ollama', 'koboldcpp', 'openai-compatible'].includes(prov);
+                  const provLabel = {
+                    openai: 'OpenAI', grok: 'Grok', groq: 'Groq', openrouter: 'OpenRouter',
+                    gemini: 'Gemini', cerebras: 'Cerebras', claude: 'Claude', gpuaas: 'GPUaaS',
+                    'openai-compatible': 'Custom', koboldcpp: 'KoboldCpp', ollama: 'Ollama'
+                  }[prov] || prov;
+                  const rawModel = message.effectiveModel || message.model || '';
+                  const shortModel = rawModel
+                    ? (rawModel.length > 22 ? rawModel.slice(0, 22) + '…' : rawModel)
+                    : '';
+                  // Privacy Receipt: a green on-device stamp, or an amber "left the
+                  // machine" stamp naming the cloud provider it was sent to.
+                  return (
+                    <span
+                      title={onDevice
+                        ? `On-device: generated locally by ${provLabel}. Nothing left your machine.`
+                        : `Left your machine: this prompt was sent to ${provLabel}, a remote cloud provider.`}
+                      className={`mr-1.5 inline-flex items-center gap-1 rounded-[var(--r-pill)] px-1.5 py-[2px] align-middle text-[9px] font-semibold normal-case tracking-normal ${
+                        onDevice
+                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
+                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-300'
+                      }`}
+                    >
+                      {onDevice ? 'On-device' : provLabel}
+                      {shortModel ? <span className="opacity-70">{` ${shortModel}`}</span> : null}
+                    </span>
+                  );
+                })() : null}
                 ~{(message.tokenEstimate || 0).toLocaleString()} tok
               </>
             ) : 'AI'}
@@ -1065,6 +1088,17 @@ export default function ChatApp() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingLabel, setStreamingLabel] = useState('');
   const [isCommittingToLedger, setIsCommittingToLedger] = useState(false);
+  // Commitment Radar: read-only preview of commitments/asks/decisions in the
+  // current chat. Nothing is persisted until the user files them.
+  const [radarOpen, setRadarOpen] = useState(false);
+  const [radarLoading, setRadarLoading] = useState(false);
+  const [radarError, setRadarError] = useState('');
+  const [radarScanned, setRadarScanned] = useState(false);
+  const [radarSignals, setRadarSignals] = useState([]);
+  // "Your Past Self Disagrees": conflicts between this chat and the user's own
+  // past decisions, surfaced inside the same Commitment Radar modal.
+  const [radarConflicts, setRadarConflicts] = useState([]);
+  const [radarConflictsLoading, setRadarConflictsLoading] = useState(false);
   const [themeMode, setThemeMode] = useState(() => {
     if (typeof window !== 'undefined') return safeStorageGet('local-ai-theme-mode', 'auto');
     return 'auto';
@@ -1227,6 +1261,10 @@ export default function ChatApp() {
   const autoScrollRef = useRef(true); // ref mirror - readable synchronously in scroll handler
   const [memoryItems, setMemoryItems] = useState([]);
   const [memoryInput, setMemoryInput] = useState('');
+  // Watched Workspace: pinned files (relative paths) whose FRESH contents are
+  // folded into each send. Reactive so the composer chip updates as pins change.
+  const workspacePins = useAppStore((s) => s.workspacePins);
+
   // Remote Control
   const [isControlPanelOpen, setIsControlPanelOpen] = useState(false);
   const [remoteConnected, setRemoteConnected] = useState(false);
@@ -2463,19 +2501,24 @@ export default function ChatApp() {
     });
   }
 
-  async function createChat() {
+  async function createChat({ ephemeral = false } = {}) {
     const payload = await api('/api/chats', {
       method: 'POST',
       body: JSON.stringify({
-        title: 'New Chat',
+        title: ephemeral ? 'Off the Record' : 'New Chat',
         uncensoredMode,
         systemPrompt,
-        promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
+        promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId,
+        // Off-the-Record: this chat is kept in memory only and never written to disk.
+        ...(ephemeral === true ? { ephemeral: true } : {})
       })
     });
     setChatSearch('');
     await refreshChats();
     await loadChat(payload.chat.id);
+    if (ephemeral) {
+      appStore.toast('Off the Record - this chat is never saved to disk and vanishes when you quit', { kind: 'info', ttl: 4200 });
+    }
   }
 
   async function toggleUncensoredMode() {
@@ -3246,6 +3289,7 @@ export default function ChatApp() {
   // (palette opening AND a new chat) with the shell.
   useEffect(() => {
     const onNewChat = () => shortcutRef.current.createChat?.();
+    const onNewEphemeralChat = () => shortcutRef.current.createChat?.({ ephemeral: true });
     const onSetProvider = (e) => {
       const next = e?.detail?.provider;
       if (!next) return;
@@ -3259,11 +3303,13 @@ export default function ChatApp() {
       if (id) shortcutRef.current.loadChat?.(id);
     };
     window.addEventListener('mirabilis:new-chat', onNewChat);
+    window.addEventListener('mirabilis:new-ephemeral-chat', onNewEphemeralChat);
     window.addEventListener('mirabilis:set-provider', onSetProvider);
     window.addEventListener('mirabilis:toggle-web-search', onToggleWebSearch);
     window.addEventListener('mirabilis:open-chat', onOpenChat);
     return () => {
       window.removeEventListener('mirabilis:new-chat', onNewChat);
+      window.removeEventListener('mirabilis:new-ephemeral-chat', onNewEphemeralChat);
       window.removeEventListener('mirabilis:set-provider', onSetProvider);
       window.removeEventListener('mirabilis:toggle-web-search', onToggleWebSearch);
       window.removeEventListener('mirabilis:open-chat', onOpenChat);
@@ -3550,12 +3596,64 @@ export default function ChatApp() {
   // extracting signals/actions from it, then jump straight to that session. Reuses
   // the existing create-session + ingest/text endpoints (extraction has a heuristic
   // fallback, so this works even without a live model).
-  async function commitChatToLedger() {
-    if (isCommittingToLedger) return;
-    const transcript = messages
+  // Build the plain-text transcript of the current conversation. Shared by the
+  // Chat -> Ledger commit flow and the Commitment Radar preview scan so both see
+  // exactly the same text.
+  function buildChatTranscript() {
+    return messages
       .filter((m) => m.content && (m.role === 'user' || m.role === 'assistant'))
       .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
       .join('\n\n');
+  }
+
+  // Commitment Radar: ambient, read-only pass over the current chat. Posts the
+  // transcript to the preview-only /scan endpoint (which persists nothing) and
+  // opens the radar panel with the detected commitments/asks/decisions.
+  async function runCommitmentRadar() {
+    if (radarLoading) return;
+    const transcript = buildChatTranscript();
+    setRadarOpen(true);
+    setRadarError('');
+    setRadarSignals([]);
+    setRadarConflicts([]);
+    setRadarConflictsLoading(false);
+    setRadarScanned(false);
+    if (!transcript.trim()) {
+      setRadarScanned(true);
+      return;
+    }
+    setRadarLoading(true);
+    // The contradiction pass embeds the whole history and asks a local model to
+    // judge each candidate, so it runs alongside (and slower than) the fast
+    // heuristic scan. It writes nothing and is best-effort: any failure is silent.
+    setRadarConflictsLoading(true);
+    postJSON('/api/recall/contradictions', { text: transcript }, { timeoutMs: 120000 })
+      .then((payload) => {
+        setRadarConflicts(Array.isArray(payload?.conflicts) ? payload.conflicts : []);
+      })
+      .catch(() => {
+        setRadarConflicts([]);
+      })
+      .finally(() => {
+        setRadarConflictsLoading(false);
+      });
+    try {
+      const payload = await api('/api/intelledger/scan', {
+        method: 'POST',
+        body: JSON.stringify({ text: transcript })
+      });
+      setRadarSignals(Array.isArray(payload?.signals) ? payload.signals : []);
+    } catch (err) {
+      setRadarError(err?.message || 'Commitment Radar is unavailable right now.');
+    } finally {
+      setRadarScanned(true);
+      setRadarLoading(false);
+    }
+  }
+
+  async function commitChatToLedger() {
+    if (isCommittingToLedger) return;
+    const transcript = buildChatTranscript();
     if (!transcript.trim()) {
       setStatusText('Nothing to commit - the chat has no text yet.');
       return;
@@ -3599,6 +3697,16 @@ export default function ChatApp() {
     if (isImageRequest(content)) {
       await handleImageGeneration(content);
       return;
+    }
+
+    // Go Dark: if the session is locked to local-only, refuse to send to a cloud
+    // provider before anything leaves the machine (keeps the typed text intact).
+    if (appStore.getGoDark()) {
+      const scope = PROVIDER_OPTIONS.find((p) => p.id === provider)?.scope;
+      if (scope === 'Remote') {
+        appStore.toast(`Go Dark is on - "${provider}" is a cloud provider. Switch to a local model or turn Go Dark off.`, { kind: 'warn' });
+        return;
+      }
     }
 
     setInput('');
@@ -3678,6 +3786,37 @@ export default function ChatApp() {
       }
     }
 
+    // Watched Workspace: fold pinned files' FRESH contents (pulled from disk at
+    // this exact moment, not a stale upload) into the outbound message as live
+    // context. Only the pinned relative paths are ever persisted - the file bytes
+    // are fetched on demand here and prepended. Capped so a large pin set cannot
+    // blow up the prompt; missing/oversize files are skipped, never fatal.
+    const pins = appStore.getWorkspacePins ? appStore.getWorkspacePins() : [];
+    if (pins.length > 0) {
+      const MAX_WORKSPACE_CONTEXT = 40 * 1024; // ~40 KB combined budget
+      const blocks = [];
+      let used = 0;
+      let skipped = 0;
+      for (const relPath of pins) {
+        try {
+          const payload = await api(`/api/workspace/file?path=${encodeURIComponent(relPath)}`);
+          const text = typeof payload?.content === 'string' ? payload.content : '';
+          if (used + text.length > MAX_WORKSPACE_CONTEXT) { skipped += 1; continue; }
+          used += text.length;
+          blocks.push(`--- ${payload?.path || relPath} ---\n${text}`);
+        } catch {
+          skipped += 1; // renamed / deleted / oversize / jailed - skip, keep sending
+        }
+      }
+      if (blocks.length > 0) {
+        const header = [
+          '[Watched workspace files - live context read fresh from disk. Treat these as the authoritative current contents of the named files.]',
+          skipped > 0 ? `(${skipped} pinned file(s) skipped: unavailable or over the context budget.)` : ''
+        ].filter(Boolean).join('\n');
+        outboundContent = `${header}\n\n${blocks.join('\n\n')}\n\n${outboundContent}`;
+      }
+    }
+
     const resolvedProvider = await resolveProviderForSend();
 
     setStatusText('Streaming response...');
@@ -3745,6 +3884,7 @@ export default function ChatApp() {
           usePersonalMemory: outboundUsePersonalMemory,
           providerBaseUrl: resolvedProvider.providerBaseUrl,
           providerApiKey: resolvedProvider.providerApiKey,
+          localOnly: appStore.getGoDark(),
           ...(temperature !== null && isFinite(temperature) ? { temperature } : {}),
           ...(maxTokens !== null && isFinite(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
         }),
@@ -3958,7 +4098,7 @@ export default function ChatApp() {
   return (
     <main className="relative h-screen w-screen p-3 sm:p-6">
       <div className="mx-auto flex h-full max-w-7xl gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
-        <aside className={`flex shrink-0 flex-col gap-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--material-thin)] p-2 sm:p-4 transition-all duration-200 ${sidebarOpen ? 'w-28 sm:w-72' : 'hidden'}`}>
+        <aside className={`flex shrink-0 flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--panel-border)] bg-[var(--material-thin)] p-2 sm:p-4 transition-all duration-200 ${sidebarOpen ? 'w-28 sm:w-72' : 'hidden'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span aria-hidden="true" className="icq-mark" title="ICQ logo">
@@ -3980,11 +4120,12 @@ export default function ChatApp() {
               </span>
               <h1 className="text-sm font-semibold tracking-tight sm:text-lg">Mirabilis AI</h1>
             </div>
+            <TabSwitch active="chat" />
           </div>
 
           <div className="grid grid-cols-3 gap-2">
             <button
-              onClick={createChat}
+              onClick={() => createChat()}
               className="rounded-full bg-accent px-2 py-1.5 text-xs font-semibold text-white shadow-[0_6px_14px_-8px_rgba(26,168,111,0.9)] transition hover:brightness-95"
             >
               New Chat
@@ -4007,7 +4148,7 @@ export default function ChatApp() {
           </div>
 
           {isSystemPromptVisible && (
-          <div className="rounded-2xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.25)]">
+          <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.25)]">
             <div className="space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">
@@ -4159,10 +4300,22 @@ export default function ChatApp() {
                 {messages.length > 0 && (
                   <button
                     type="button"
+                    onClick={runCommitmentRadar}
+                    disabled={radarLoading}
+                    title="Commitment Radar - scan this conversation for commitments, asks, and decisions without saving anything"
+                    className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-black/5 px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-muted)] transition hover:bg-black/10 hover:text-[color:var(--text-main)] disabled:opacity-50 dark:bg-[var(--material-thin)] dark:hover:bg-[var(--material-thin)]"
+                  >
+                    <RadarIcon size={12} />
+                    {radarLoading ? 'Scanning...' : 'Radar'}
+                  </button>
+                )}
+                {messages.length > 0 && (
+                  <button
+                    type="button"
                     onClick={commitChatToLedger}
                     disabled={isCommittingToLedger}
                     title="Commit this conversation to IntelLedger - extract signals, actions, and decisions, then open the session"
-                    className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent transition hover:bg-accent/20 disabled:opacity-50 dark:border-accent/30 dark:bg-accent/15 dark:hover:bg-accent/25"
+                    className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent transition hover:bg-accent/20 disabled:opacity-50 dark:border-accent/30 dark:bg-accent/15 dark:hover:bg-accent/25"
                   >
                     <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M9 12h6M12 9v6"/>
@@ -4215,7 +4368,7 @@ export default function ChatApp() {
                           setIsVoiceMenuOpen(false);
                           setOpenHardwarePopover((current) => (current === key ? null : key));
                         }}
-                        className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
+                        className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
                           isActive
                             ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
                             : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)]'
@@ -4254,7 +4407,7 @@ export default function ChatApp() {
                       ? 'Web search on - click to disable'
                       : 'Web search off - click to enable'
                   }
-                  className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
+                  className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
                     webSearchStatus === 'searching'
                       ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
                       : webSearchStatus === 'error'
@@ -4274,7 +4427,7 @@ export default function ChatApp() {
                   <button
                     type="button"
                     onClick={() => setIsSystemPromptVisible((v) => !v)}
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition ${
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition ${
                       isSystemPromptVisible
                         ? 'border-accent/60 bg-accentSoft text-ink dark:border-accent/40 dark:bg-accent/20 dark:text-green-300'
                         : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
@@ -4294,7 +4447,7 @@ export default function ChatApp() {
                         setIsVoiceMenuOpen(false);
                         setIsContextPanelOpen((prev) => !prev);
                       }}
-                      className="inline-flex items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                      className="inline-flex items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium tracking-wide text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                       title={`Context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens`}
                     >
                       Context {contextUsage.usedPct}%
@@ -4336,51 +4489,6 @@ export default function ChatApp() {
                     )}
                   </div>
 
-                  {hardwareProfile.action?.label ? (
-                    <div data-menu-container="true" className="relative">
-                      <button
-                        type="button"
-                        data-menu-trigger="engine"
-                        onClick={() => {
-                          setIsContextPanelOpen(false);
-                          setIsVoiceMenuOpen(false);
-                          setOpenHardwarePopover(null);
-                          setIsEngineMenuOpen((current) => !current);
-                        }}
-                        className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold tracking-wide text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                        title={selectedEngine ? `Engine: ${selectedEngine}` : 'Engine'}
-                      >
-                        <span>Engine</span>
-                        <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
-                          <path d="M5.25 7.5L10 12.25 14.75 7.5" />
-                        </svg>
-                      </button>
-                      {isEngineMenuOpen && Array.isArray(hardwareProfile.action.options) && hardwareProfile.action.options.length > 0 ? (
-                        <div data-menu-panel="engine" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 min-w-36 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                          {hardwareProfile.action.options.map((option) => (
-                            <button
-                              key={option}
-                              type="button"
-                              onClick={() => {
-                                setSelectedEngine(option);
-                                setStatusText(`Engine: ${option}`);
-                                setIsEngineMenuOpen(false);
-                                checkHardwareProfile();
-                              }}
-                              className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                                selectedEngine === option
-                                  ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                                  : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                              }`}
-                            >
-                              <span>{option}</span>
-                              {selectedEngine === option ? <span className="text-[10px] opacity-70">active</span> : null}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
                 </div>
             </div>
           </header>
@@ -4412,6 +4520,12 @@ export default function ChatApp() {
             className="flex-1 overflow-y-auto scroll-thin"
           >
             <div className={`mx-auto w-full space-y-3 pr-1 ${sidebarOpen ? 'max-w-3xl' : 'max-w-5xl'}`}>
+            {activeChatMeta?.ephemeral && (
+              <div className="flex items-center justify-center gap-1.5 rounded-2xl border border-dashed border-amber-400/50 bg-amber-500/10 px-3 py-2 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                <IncognitoIcon size={13} />
+                <span>Off the Record - this chat is never written to disk and disappears when you quit Mirabilis.</span>
+              </div>
+            )}
             {activeChatId && (
               <section className="rounded-2xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -4634,7 +4748,7 @@ export default function ChatApp() {
                       setIsProviderConfigOpen(false);
                       if (installingBinary?.done) setInstallingBinary(null);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Choose provider"
                   >
                     <span className="max-w-[9rem] truncate">{PROVIDER_OPTIONS.find((opt) => opt.id === provider)?.label || provider}</span>
@@ -4879,7 +4993,7 @@ export default function ChatApp() {
                     type="button"
                     data-menu-trigger="model"
                     onClick={() => { setIsProviderMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsModelMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Choose model"
                   >
                     <span className="max-w-[9rem] truncate">
@@ -5141,7 +5255,7 @@ export default function ChatApp() {
                     type="button"
                       data-menu-trigger="training"
                     onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsTrainingMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Training options"
                   >
                     Training
@@ -5247,7 +5361,7 @@ export default function ChatApp() {
                     type="button"
                       data-menu-trigger="tools"
                     onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsToolsMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Open tools"
                   >
                     Tools
@@ -5322,11 +5436,11 @@ export default function ChatApp() {
                     type="button"
                     data-menu-trigger="control"
                     onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsControlPanelOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="Remote Control"
                   >
                     {/* Green dot indicator */}
-                    <span className={`h-2 w-2 rounded-full ${remoteConnected ? 'bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.55)]' : 'bg-transparent border border-slate-400/40'}`} />
+                    <span className={`h-1.5 w-1.5 rounded-full ${remoteConnected ? 'bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.55)]' : 'bg-transparent border border-slate-400/40'}`} />
                     Control
                   </button>
 
@@ -5437,7 +5551,7 @@ export default function ChatApp() {
                   <button
                     type="button"
                     onClick={toggleUncensoredMode}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
                       uncensoredMode
                         ? 'border-emerald-300/60 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-400/40 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30'
                         : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
@@ -5453,7 +5567,7 @@ export default function ChatApp() {
                   <button
                     type="button"
                     onClick={toggleOpenClawMode}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition ${
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
                       openClawMode
                         ? 'border-rose-300/60 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-400/40 dark:bg-rose-900/20 dark:text-rose-300 dark:hover:bg-rose-900/30'
                         : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
@@ -5489,7 +5603,7 @@ export default function ChatApp() {
                       setIsVoiceMenuOpen(false);
                       setIsMcpPanelOpen((prev) => !prev);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     title="MCP Connector"
                   >
                     <span className={`h-2 w-2 rounded-full ${selectedMcpServer ? 'bg-cyan-400 shadow-[0_0_6px_2px_rgba(34,211,238,0.45)]' : 'bg-transparent border border-slate-400/40'}`} />
@@ -5735,6 +5849,17 @@ export default function ChatApp() {
                     {remoteTarget}
                   </span>
                 )}
+                {workspacePins.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => appStore.openWorkspace()}
+                    title="Pinned workspace files - read fresh from disk on send"
+                    className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+                    {workspacePins.length} workspace file{workspacePins.length === 1 ? '' : 's'}
+                  </button>
+                )}
                 {selectedMcpServer && (
                   <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/60 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:border-cyan-400/40 dark:bg-cyan-900/20 dark:text-cyan-300">
                     <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
@@ -5757,7 +5882,7 @@ export default function ChatApp() {
                   type="button"
                   onClick={toggleDictation}
                   disabled={!dictationSupported || isStreaming}
-                  className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] border transition disabled:cursor-not-allowed disabled:opacity-50 ${
                     isDictating
                       ? 'border-accent/50 bg-accentSoft text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
                       : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)] hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-[color:var(--text-main)]'
@@ -5776,7 +5901,7 @@ export default function ChatApp() {
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isStreaming || isUploadingFiles}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[var(--material-thin)] dark:hover:text-[color:var(--text-main)]"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[var(--material-thin)] dark:hover:text-[color:var(--text-main)]"
                   title="Attach files"
                 >
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -6000,7 +6125,7 @@ export default function ChatApp() {
                 <button
                   onClick={isStreaming ? stopStreaming : sendMessage}
                   disabled={!isStreaming && !input.trim()}
-                  className={`au-focus w-full rounded-[var(--r-lg)] px-2 py-2 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition active:scale-[0.98] enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${isStreaming ? 'bg-red-500' : ''}`}
+                  className={`au-focus w-full rounded-[var(--r-lg)] px-2 h-8 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition active:scale-[0.98] enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${isStreaming ? 'bg-red-500' : ''}`}
                   style={isStreaming ? undefined : { background: 'var(--accent)' }}
                 >
                   {isStreaming ? 'Stop' : 'Send'}
@@ -6039,6 +6164,21 @@ export default function ChatApp() {
         <span className="mx-1.5 opacity-40">·</span>
         <span className="opacity-55">{APP_VERSION}</span>
       </footer>
+      <CommitmentRadar
+        open={radarOpen}
+        onClose={() => setRadarOpen(false)}
+        loading={radarLoading}
+        error={radarError}
+        scanned={radarScanned}
+        signals={radarSignals}
+        conflicts={radarConflicts}
+        conflictsLoading={radarConflictsLoading}
+        filing={isCommittingToLedger}
+        onFileAll={async () => {
+          await commitChatToLedger();
+          setRadarOpen(false);
+        }}
+      />
     </main>
   );
 }

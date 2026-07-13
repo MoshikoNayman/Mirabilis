@@ -9,6 +9,7 @@ import IntelLedgerSession from './IntelLedgerSession';
 import InfoHint from './ui/InfoHint';
 import AppErrorBoundary from './ui/AppErrorBoundary';
 import AuroraChrome from './shell/AuroraChrome';
+import TabSwitch from './shell/TabSwitch';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -202,8 +203,20 @@ export default function MirabilisApp() {
       safeStorageSet(LAST_ACTIVE_TAB_STORAGE_KEY, 'intel');
       setPendingSessionId(id);
     };
+    // The header TabSwitch (beside the wordmark) drives the view from here.
+    const onSetTab = (e) => {
+      const tab = e?.detail?.tab;
+      if (tab === 'chat' || tab === 'intel') {
+        setActiveTab(tab);
+        safeStorageSet(LAST_ACTIVE_TAB_STORAGE_KEY, tab);
+      }
+    };
     window.addEventListener('mirabilis:open-session', onOpenSession);
-    return () => window.removeEventListener('mirabilis:open-session', onOpenSession);
+    window.addEventListener('mirabilis:set-tab', onSetTab);
+    return () => {
+      window.removeEventListener('mirabilis:open-session', onOpenSession);
+      window.removeEventListener('mirabilis:set-tab', onSetTab);
+    };
   }, []);
 
   return (
@@ -866,21 +879,22 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-lg font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">IntelLedger</h1>
-                <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">
+                <TabSwitch active="intel" />
+                <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">
                   embedded mode
                 </span>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Session</span>
-              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Ingest</span>
-              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Extract</span>
-              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Synthesis</span>
+              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">Session</span>
+              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">Ingest</span>
+              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">Extract</span>
+              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">Synthesis</span>
               <InfoHint
                 title="IntelLedger Quick Guide"
                 description="Short definitions. Keep each session focused on one topic."
-                triggerClassName="bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)] hover:border-black/10 hover:text-[color:var(--text-main)] dark:hover:border-white/10 dark:hover:text-slate-300"
+                triggerClassName="bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] hover:border-black/10 hover:text-[color:var(--text-main)] dark:hover:border-white/10 dark:hover:text-slate-300"
                 points={[
                   'Session',
                   'Ingest',
@@ -907,7 +921,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
               ) : null}
               <button
                 onClick={loadSessions}
-                className="shrink-0 rounded-full border border-[var(--hairline)] px-2.5 py-1.5 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
+                className="shrink-0 rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
               >
                 Refresh
               </button>
@@ -916,7 +930,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                 <button
                   type="button"
                   onClick={() => setCreateBubbleOpen((prev) => !prev)}
-                  className="rounded-full bg-accent px-3 py-1.5 text-[11px] font-semibold text-white shadow-[var(--shadow-2)] transition hover:brightness-95"
+                  className="rounded-full bg-accent px-3 py-1 text-[11px] font-semibold text-white shadow-[var(--shadow-2)] transition hover:brightness-95"
                 >
                   New Session
                 </button>
@@ -1053,7 +1067,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                 </div>
 
                 <div className="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-                  <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
+                  <div className="rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
                     <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">7-day trend</div>
                     {Array.isArray(auditOverview?.trends?.daily_7) && auditOverview.trends.daily_7.length > 0 ? (
                       <div>
@@ -1081,7 +1095,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                     )}
                   </div>
 
-                  <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
+                  <div className="rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
                     <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Top event types (24h)</div>
                     {Array.isArray(auditOverview?.trends?.top_types_24h) && auditOverview.trends.top_types_24h.length > 0 ? (
                       <ul className="space-y-1">
@@ -1099,7 +1113,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                 </div>
 
                 {auditTenantRollup.length > 0 && (
-                  <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
+                  <div className="rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
                     <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Tenant audit rollup</div>
                     <div className="space-y-2">
                       {(() => {
@@ -1108,7 +1122,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                         return topTenants.map((tenant) => {
                           const widthPct = Math.max(4, Math.round((Number(tenant.count_30d || 0) / max30d) * 100));
                           return (
-                            <div key={tenant.tenant_id || 'tenant'} className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-2">
+                            <div key={tenant.tenant_id || 'tenant'} className="rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-2">
                               <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] text-[color:var(--text-main)]">
                                 <span className="truncate font-medium">{tenant.tenant_id || 'tenant'}</span>
                                 <span>30d {tenant.count_30d || 0}</span>

@@ -7,8 +7,12 @@
 import { useEffect, useState } from 'react';
 import Dock from './Dock';
 import BuddyList from './BuddyList';
+import HomelabRoster from './HomelabRoster';
+import WatchedWorkspace from './WatchedWorkspace';
 import CommandPalette from './CommandPalette';
 import OmniSearch from './OmniSearch';
+import RecallOrb from './RecallOrb';
+import WhileYouWereAway from './WhileYouWereAway';
 import Toaster from './Toaster';
 import usePresence from './usePresence';
 import { appStore, useAppStore } from '../../store/useAppStore';
@@ -17,10 +21,14 @@ import { applyTheme, watchSystemTheme } from '../../lib/theme';
 export default function AuroraChrome({ activeTab, onTab }) {
   const [streaming, setStreaming] = useState(false);
   const [searching, setSearching] = useState(false);
-  const { map: presence, orbState } = usePresence({ streaming });
+  const { map: presence, warm, orbState } = usePresence({ streaming });
   const commandOpen = useAppStore((s) => s.commandOpen);
   const searchOpen = useAppStore((s) => s.searchOpen);
   const buddyOpen = useAppStore((s) => s.buddyOpen);
+  const recallOpen = useAppStore((s) => s.recallOpen);
+  const homelabOpen = useAppStore((s) => s.homelabOpen);
+  const workspaceOpen = useAppStore((s) => s.workspaceOpen);
+  const wywaOpen = useAppStore((s) => s.wywaOpen);
 
   // Apply persisted theme on mount + follow OS theme changes in system mode.
   useEffect(() => {
@@ -81,11 +89,15 @@ export default function AuroraChrome({ activeTab, onTab }) {
 
   return (
     <>
-      <Dock activeTab={activeTab} onTab={onTab} orbState={orbState} spinning={searching} />
+      <Dock orbState={orbState} spinning={searching} />
 
-      <BuddyList open={buddyOpen} presence={presence} onPick={handlePickProvider} />
+      <BuddyList open={buddyOpen} presence={presence} warm={warm} onPick={handlePickProvider} />
+      <HomelabRoster open={homelabOpen} />
+      <WatchedWorkspace open={workspaceOpen} />
       <CommandPalette open={commandOpen} onTab={onTab} />
       <OmniSearch open={searchOpen} presence={presence} onTab={onTab} onPickProvider={handlePickProvider} />
+      <RecallOrb open={recallOpen} onTab={onTab} />
+      <WhileYouWereAway open={wywaOpen} />
       <Toaster />
     </>
   );

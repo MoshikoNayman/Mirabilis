@@ -28,6 +28,22 @@ export const PRESENCE_LABELS = {
   unknown: 'Checking…'
 };
 
+// Model Warmth: which Ollama models are currently loaded in memory (warm in
+// VRAM) and can answer instantly. Returns the warm model names, empty when
+// Ollama is cold or unreachable.
+export async function probeOllamaWarmth({ signal } = {}) {
+  try {
+    const res = await fetch(`${API_BASE}/api/providers/ollama/ps`, { signal });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data?.models)
+      ? data.models.filter((m) => m && m.warm).map((m) => m.name).filter(Boolean)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 // Aggregate a presence map into a single orb state for the title bar.
 export function aggregatePresence(map, streaming = false) {
   if (streaming) return 'busy';

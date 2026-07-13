@@ -9,7 +9,13 @@ import { Panel, PresenceDot, IconButton } from '../ui/primitives';
 import ContactRow from '../ui/ContactRow';
 import { appStore } from '../../store/useAppStore';
 
-function Group({ title, providers, presence, onPick }) {
+function warmLabelFor(providerId, warm) {
+  if (providerId !== 'ollama' || !Array.isArray(warm) || warm.length === 0) return undefined;
+  if (warm.length === 1) return `${warm[0]} warm`;
+  return `${warm.length} models warm`;
+}
+
+function Group({ title, providers, presence, warm, onPick }) {
   if (!providers.length) return null;
   return (
     <div className="mb-2">
@@ -22,6 +28,7 @@ function Group({ title, providers, presence, onPick }) {
             key={p.id}
             provider={p}
             presence={presence[p.id] || 'unknown'}
+            warmLabel={warmLabelFor(p.id, warm)}
             onClick={() => onPick?.(p)}
           />
         ))}
@@ -30,7 +37,7 @@ function Group({ title, providers, presence, onPick }) {
   );
 }
 
-export default function BuddyList({ open, presence, onPick }) {
+export default function BuddyList({ open, presence, warm = [], onPick }) {
   const local = useMemo(() => PROVIDERS.filter((p) => p.scope === 'local'), []);
   const remote = useMemo(() => PROVIDERS.filter((p) => p.scope === 'remote'), []);
 
@@ -61,7 +68,7 @@ export default function BuddyList({ open, presence, onPick }) {
         role="dialog"
         aria-label="Buddy list"
       >
-        <div className="flex items-center justify-between border-b px-3.5 py-3" style={{ borderColor: 'var(--hairline)' }}>
+        <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--hairline)' }}>
           <div className="flex flex-col">
             <span className="text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">Buddies</span>
             <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
@@ -71,10 +78,10 @@ export default function BuddyList({ open, presence, onPick }) {
           <IconButton label="Close" onClick={() => appStore.setBuddyOpen(false)}>✕</IconButton>
         </div>
         <div className="au-scroll flex-1 overflow-y-auto p-1.5">
-          <Group title="On this Mac" providers={local} presence={presence} onPick={onPick} />
+          <Group title="On this Mac" providers={local} presence={presence} warm={warm} onPick={onPick} />
           <Group title="Cloud providers" providers={remote} presence={presence} onPick={onPick} />
         </div>
-        <div className="flex items-center gap-2 border-t px-3.5 py-2.5 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]" style={{ borderColor: 'var(--hairline)' }}>
+        <div className="flex items-center gap-2 border-t px-4 py-2 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]" style={{ borderColor: 'var(--hairline)' }}>
           <span className="flex items-center gap-1"><PresenceDot presence="online" /> online</span>
           <span className="flex items-center gap-1"><PresenceDot presence="needkey" /> needs key</span>
           <span className="flex items-center gap-1"><PresenceDot presence="offline" /> offline</span>

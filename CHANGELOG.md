@@ -2,6 +2,24 @@
 
 Versioning follows Junos-style tags.
 
+## [26.2R1-S31] - 2026-07-13
+
+### Local-First Features + Aurora Chrome Refresh
+
+- **Go Dark**: a one-flip local-only lockdown for the session. Remote/cloud providers are blocked in the UI and refused at the send path, so a session can be guaranteed to stay on the machine.
+- **Privacy Receipt**: every reply is stamped on-device or with the remote provider it was sent to, plus a token estimate.
+- **Off the Record**: an ephemeral chat kept in memory only and never written to disk; gone when you quit.
+- **Model Warmth**: the local Ollama buddy shows which model is currently warm in memory (via Ollama /api/ps), so presence reflects real readiness.
+- **Recall Orb**: local semantic recall over your own past chats and IntelLedger signals, ranked on-device with Ollama embeddings and cited. No cloud.
+- **Your Past Self Disagrees**: flags when a decision in the current conversation contradicts or supersedes an earlier one, shown inside the Commitment Radar.
+- **Commitment Radar**: scans a conversation for commitments, asks, and dated promises and files them into IntelLedger in one click (preview-only until you file).
+- **While You Were Away**: an ICQ-style panel on open surfacing overdue and due-today ledger items with resolve, snooze, and jump.
+- **Homelab Roster**: your own machines shown as ICQ-style contacts with live reachability dots; connect to one over the existing SSH path.
+- **Watched Workspace**: point Mirabilis at a folder and pin files as live context; their contents are read fresh from disk at send time. All reads are jailed to the watched root.
+- **Local Change Journal**: the MCP file tools snapshot a file's old bytes before overwriting it, so a change is reversible, and log every write and command.
+- **Chrome refresh**: the top-right dock is reduced to the presence orb plus a single menu that holds every secondary control; the Chat/Ledger switch now sits next to the wordmark. All UI glyphs are monochrome line icons that follow the active theme. A sizing pass aligned paddings, text sizes, and radii to the design scale.
+- **Housekeeping**: the MCP server reports the real app version and exposes all providers; removed a non-functional engine picker.
+
 ## [26.2R1-S30] - 2026-07-12
 
 ### Logo System and Aurora Polish

@@ -4,7 +4,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { PROVIDERS, probeAll, aggregatePresence } from '../../lib/presence';
+import { PROVIDERS, probeAll, probeOllamaWarmth, aggregatePresence } from '../../lib/presence';
 import { playOnline } from '../../lib/sounds';
 
 const POLL_MS = 30000;
@@ -13,6 +13,8 @@ export default function usePresence({ streaming = false } = {}) {
   const [map, setMap] = useState(() =>
     Object.fromEntries(PROVIDERS.map((p) => [p.id, 'unknown']))
   );
+  // Model Warmth: names of Ollama models currently warm in VRAM.
+  const [warm, setWarm] = useState([]);
   const prev = useRef(map);
 
   useEffect(() => {
@@ -30,6 +32,13 @@ export default function usePresence({ streaming = false } = {}) {
         prev.current = next;
         setMap(next);
         if (cameOnline) playOnline();
+        // Refresh which local models are warm (best-effort, only if Ollama is up).
+        if (next.ollama === 'online') {
+          const warmModels = await probeOllamaWarmth({ signal: controller.signal });
+          if (alive) setWarm(warmModels);
+        } else if (alive) {
+          setWarm([]);
+        }
       } catch {
         /* ignore poll errors */
       }
@@ -44,5 +53,5 @@ export default function usePresence({ streaming = false } = {}) {
     };
   }, []);
 
-  return { map, orbState: aggregatePresence(map, streaming) };
+  return { map, warm, orbState: aggregatePresence(map, streaming) };
 }
