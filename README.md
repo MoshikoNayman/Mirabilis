@@ -1,13 +1,13 @@
 # Mirabilis AI
 
-**Version:** 26.2R1-S29  
+**Version:** 26.2R1-S30  
 **Author:** Moshiko Nayman
 
 [![Download Latest Release](https://img.shields.io/badge/Download-Latest%20Release-1aa86f?style=for-the-badge)](https://github.com/MoshikoNayman/Mirabilis/releases/latest)
 
-Default recommendation: use the desktop installer from Releases (macOS DMG / Windows EXE). Source/web mode is available for advanced users.
+Default recommendation: use the desktop installer from Releases (macOS DMG / Windows EXE / Linux AppImage). Source/web mode is available for advanced users.
 
-Mirabilis AI is a privacy-first, locally-run AI assistant with a Next.js frontend, Express backend, and support for both local inference engines and remote AI providers. Run entirely on your own machine or connect to any cloud API-your choice, per conversation.
+Mirabilis AI is a privacy-first AI assistant that runs on your own machine. Chat with a local model or connect any cloud provider - your choice, per conversation - and nothing leaves your computer unless you decide it should. It pairs a clean, ICQ-inspired interface (themeable, light or dark) with IntelLedger, a built-in workspace that turns messy conversations into clear decisions and next steps.
 
 ---
 
@@ -219,7 +219,7 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **MCP Server** | Exposes Mirabilis as an MCP server to VS Code / GitHub Copilot / Claude Desktop |
 | **MCP Server** | System control tools: `system_info`, `list_dir`, `read_file`, `write_file`, `run_command` |
 | **MCQ Models** | Custom model family (Raw-8B, Pro-12B, Ultra-31B) tuned for Mirabilis |
-| **Desktop App** | Package as a native macOS `.app` or Windows `.exe` from the `desktop/` folder |
+| **Desktop App** | Native installers for macOS, Windows, and Linux - download from Releases or build from the `desktop/` folder |
 
 ---
 
@@ -263,9 +263,18 @@ cd desktop
 build.bat
 ```
 
-Output: `desktop/dist/Mirabilis AI Setup.exe` (NSIS installer with custom install directory + desktop shortcut).
+Output: `desktop/dist/Mirabilis AI-<version>-x64.exe` (NSIS installer with custom install directory + desktop shortcut).
 
 > **Requirements:** Node.js 18+ must be installed on the machine running the build. The resulting app is self-contained and does not require Node.js on the end-user machine.
+
+### Linux
+
+```bash
+cd desktop
+./build.sh appimage
+```
+
+Output: `desktop/dist/Mirabilis AI-<version>-x86_64.AppImage`. Build this on Linux - it cannot be cross-built from macOS.
 
 ---
 
