@@ -2,6 +2,15 @@
 
 Versioning follows Junos-style tags.
 
+## [26.2R1-S30] - 2026-07-12
+
+### Logo System and Aurora Polish
+
+- **ICQ logo system**: rebuilt the flower mark from the authentic ICQ petal paths. The sidebar keeps the classic true-color ICQ heritage mark; the dock presence orb and the chat welcome bloom share a themeable duotone flower that recolors with the active accent. App icon and browser favicon set to the classic ICQ.
+- **Welcome screen**: the welcome flower is now a hero-sized bloom that fills its ring (fixed a class rule that had capped it to a tiny mark), sized so the screen fits with no scroll.
+- **Search cue**: during a web search the dock orb swaps to the classic true-color ICQ and spins (GPU-only transform, honors reduced-motion), echoing the original.
+- **Collapsible sidebar**: the left buddy sidebar collapses from the header to widen the workspace.
+
 ## [26.2R1-S29] - 2026-07-12
 
 ### Hardening, Providers, and Polish

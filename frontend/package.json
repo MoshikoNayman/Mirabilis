@@ -1,6 +1,6 @@
 {
   "name": "local-ai-chat-frontend",
-  "version": "26.2.29",
+  "version": "26.2.30",
   "private": true,
   "scripts": {
     "dev": "next dev",
