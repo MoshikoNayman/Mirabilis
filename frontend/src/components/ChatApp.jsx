@@ -4500,13 +4500,13 @@ export default function ChatApp() {
             )}
 
             {messages.length === 0 && (
-              <div className="au-enter flex flex-1 flex-col items-center justify-center gap-5 py-16 text-center">
+              <div className="au-enter flex flex-1 flex-col items-center justify-center gap-4 py-10 text-center">
                 <span
                   aria-hidden="true"
-                  className="au-orb-ring icq-mark flex h-36 w-36 items-center justify-center sm:h-40 sm:w-40"
-                  style={{ boxShadow: 'inset 0 0 0 1px var(--hairline), 0 0 0 8px color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow-3)' }}
+                  className="au-orb-ring icq-mark flex h-32 w-32 items-center justify-center sm:h-36 sm:w-36"
+                  style={{ boxShadow: 'inset 0 0 0 1px var(--hairline), 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow-3)' }}
                 >
-                  <FlowerMark size={104} />
+                  <FlowerMark size={120} />
                 </span>
                 <h2 className="text-[length:var(--text-xl)] font-[650] tracking-tight text-[color:var(--text-main)]">
                   {activeChatId ? 'New Conversation' : 'Welcome to Mirabilis AI'}

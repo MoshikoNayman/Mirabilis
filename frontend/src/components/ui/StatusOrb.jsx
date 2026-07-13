@@ -33,7 +33,7 @@ export function FlowerMark({ size = 22, variant = 'accent' }) {
   // theme-tinted duotone used at rest.
   if (variant === 'classic') {
     return (
-      <svg width={size} height={size} viewBox="0 0 210 210" className="icq-mark-svg" aria-hidden="true">
+      <svg width={size} height={size} viewBox="0 0 210 210" className="icq-mark-svg" style={{ width: size, height: size }} aria-hidden="true">
         <g stroke="#000" strokeLinecap="round" strokeLinejoin="round" strokeWidth="13.229">
           {ICQ_PETALS.map((d, i) => (
             <path key={i} d={d} fill="#00ff03" />
@@ -47,7 +47,7 @@ export function FlowerMark({ size = 22, variant = 'accent' }) {
   }
   const light = 'color-mix(in srgb, var(--accent) 55%, #ffffff)';
   return (
-    <svg width={size} height={size} viewBox="0 0 210 210" className="icq-mark-svg" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 210 210" className="icq-mark-svg" style={{ width: size, height: size }} aria-hidden="true">
       {ICQ_PETALS.map((d, i) => (
         <path key={i} d={d} fill="var(--accent)" />
       ))}
