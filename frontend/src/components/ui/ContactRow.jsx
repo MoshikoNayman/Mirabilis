@@ -1,5 +1,5 @@
 // frontend/src/components/ui/ContactRow.jsx
-// A single "buddy" row in the Buddy List — provider name, presence, meta.
+// A single "buddy" row in the Buddy List - provider name, presence, meta.
 'use client';
 
 import { PresenceDot, Badge } from './primitives';

@@ -1,5 +1,5 @@
 // backend/src/routes/intelLedger.js
-// InteLedger API routes — ESM
+// IntelLedger API routes - ESM
 
 import { Router } from 'express';
 import multer from 'multer';
@@ -23,7 +23,7 @@ const DEFAULT_PROMPT_PROFILES = {
       '- value: the full sentence or clause (string)',
       '- owner: person responsible (string or null)',
       '- due_date: deadline if mentioned (string or null)',
-      '- confidence: 0.0–1.0 (number)',
+      '- confidence: 0.0-1.0 (number)',
       '',
       'Return shape:',
       '{ "signals": [ { "type": "...", "value": "...", "owner": null, "due_date": null, "confidence": 0.85 } ] }',
@@ -731,7 +731,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         client.on('error', (err) => {
           if (!rateLimitWarned) {
             rateLimitWarned = true;
-            console.warn(`[InteLedger] Redis rate limiter error, using in-memory fallback: ${err?.message || err}`);
+            console.warn(`[IntelLedger] Redis rate limiter error, using in-memory fallback: ${err?.message || err}`);
           }
         });
 
@@ -748,7 +748,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         }
         if (!rateLimitWarned) {
           rateLimitWarned = true;
-          console.warn(`[InteLedger] Redis rate limiter unavailable, using in-memory fallback: ${err?.message || err}`);
+          console.warn(`[IntelLedger] Redis rate limiter unavailable, using in-memory fallback: ${err?.message || err}`);
         }
         return null;
       }
@@ -779,7 +779,7 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
         } catch (err) {
           if (!rateLimitWarned) {
             rateLimitWarned = true;
-            console.warn(`[InteLedger] Redis rate limit operation failed, using in-memory fallback: ${err?.message || err}`);
+            console.warn(`[IntelLedger] Redis rate limit operation failed, using in-memory fallback: ${err?.message || err}`);
           }
         }
       }

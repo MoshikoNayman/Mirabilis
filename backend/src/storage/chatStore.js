@@ -3,7 +3,7 @@ import path from 'path';
 
 const emptyStore = { chats: [] };
 
-// Module-level read cache — invalidated on every write so reads within the same
+// Module-level read cache - invalidated on every write so reads within the same
 // request cycle never hit the filesystem more than once.
 let _cache = null;
 let _cachePath = null;
@@ -45,14 +45,53 @@ export async function readStore(filePath) {
     _cache = JSON.parse(raw);
     _cachePath = filePath;
     return _cache;
-  } catch {
-    return { ...emptyStore };
+  } catch (parseError) {
+    // The primary file is corrupt (truncated write, disk-full, etc.). Try the
+    // last-known-good backup before giving up - silently returning empty here
+    // would let the next write overwrite the corrupt file and destroy chats.
+    try {
+      const backupRaw = await fs.readFile(`${filePath}.bak`, 'utf8');
+      _cache = JSON.parse(backupRaw);
+      _cachePath = filePath;
+      // Heal the corrupt primary immediately (temp + rename, leaving the good
+      // .bak untouched) so a later write doesn't roll the corrupt file into .bak.
+      try {
+        const healTmp = `${filePath}.heal-${process.pid}`;
+        await fs.writeFile(healTmp, backupRaw, 'utf8');
+        await fs.rename(healTmp, filePath);
+      } catch { /* best effort - cache already holds good data */ }
+      console.warn(`[chatStore] ${filePath} was corrupt; recovered from ${filePath}.bak and healed the primary`);
+      return _cache;
+    } catch {
+      // Quarantine the corrupt file instead of clobbering it, then fail loud so
+      // the user notices rather than losing everything silently.
+      const quarantine = `${filePath}.corrupt-${Date.now()}`;
+      try { await fs.rename(filePath, quarantine); } catch { /* best effort */ }
+      throw new Error(
+        `Chat store at ${filePath} is corrupt and no usable backup exists. ` +
+        `The unreadable file was moved to ${quarantine}. Original error: ${parseError.message}`
+      );
+    }
   }
 }
 
+// Atomic write: serialize to a temp file, fsync, then rename over the target
+// (atomic on POSIX). A crash mid-write leaves either the old file or the new
+// file intact - never a truncated one. The previous good copy is kept as .bak.
 export async function writeStore(filePath, data) {
   invalidateCache();
-  await fs.writeFile(filePath, JSON.stringify(data), 'utf8');
+  const serialized = JSON.stringify(data);
+  const tmpPath = `${filePath}.tmp-${process.pid}`;
+  const handle = await fs.open(tmpPath, 'w');
+  try {
+    await handle.writeFile(serialized, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  // Roll the current good file to .bak before replacing it.
+  try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write: no prior file */ }
+  await fs.rename(tmpPath, filePath);
   _cache = data;
   _cachePath = filePath;
 }

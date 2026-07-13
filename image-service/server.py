@@ -1,11 +1,11 @@
 """
-Mirabilis AI — Local image generation service
+Mirabilis AI - Local image generation service
 Uses Stable Diffusion via HuggingFace diffusers with Apple MPS (Metal) on M-series chips.
 Falls back to CPU if MPS is unavailable.
 
 Usage: python server.py
 Environment:
-  IMAGE_MODEL   HuggingFace model ID (default: runwayml/stable-diffusion-v1-5)
+  IMAGE_MODEL   HuggingFace model ID (default: sd-legacy/stable-diffusion-v1-5)
   IMAGE_SERVICE_PORT  Port to listen on (default: 7860)
 """
 
@@ -37,7 +37,9 @@ log = logging.getLogger('mirabilis-image')
 
 app = Flask(__name__)
 
-MODEL_ID = os.environ.get('IMAGE_MODEL', 'runwayml/stable-diffusion-v1-5')
+# runwayml removed stable-diffusion-v1-5 from the Hub in 2024; the maintained
+# mirror lives under sd-legacy. Override with IMAGE_MODEL.
+MODEL_ID = os.environ.get('IMAGE_MODEL', 'sd-legacy/stable-diffusion-v1-5')
 pipe = None
 DEVICE = 'uninitialized'
 LOAD_ERROR = None
@@ -161,7 +163,7 @@ def generate():
         image.save(buf, format='PNG')
         img_b64 = base64.b64encode(buf.getvalue()).decode()
 
-        log.info(f'Done — {len(img_b64) // 1024} kB base64 PNG')
+        log.info(f'Done - {len(img_b64) // 1024} kB base64 PNG')
         return jsonify({'image': img_b64, 'format': 'png', 'prompt': prompt, 'seed': seed_used})
 
     except Exception as exc:
@@ -173,5 +175,5 @@ if __name__ == '__main__':
     port = int(os.environ.get('IMAGE_SERVICE_PORT', 7860))
     log.info(f'Listening on http://127.0.0.1:{port}')
     Thread(target=warm_pipeline, daemon=True).start()
-    # threaded=False — SD pipeline is not thread-safe; queue requests
+    # threaded=False - SD pipeline is not thread-safe; queue requests
     app.run(host='127.0.0.1', port=port, debug=False, threaded=False)

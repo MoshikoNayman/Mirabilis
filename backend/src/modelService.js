@@ -4,45 +4,59 @@ import { fileURLToPath } from 'node:url';
 import { streamOllamaChat, listOllamaModels } from './providers/ollama.js';
 import { streamOpenAICompatibleChat, listOpenAICompatibleModels } from './providers/openaiCompatible.js';
 import { listAnthropicModels, streamAnthropicChat } from './providers/anthropic.js';
+import { assertSafeProviderUrl } from './security.js';
 
+// Curated one-click models for the Ollama panel. Every ollamaId below is verified
+// present in the Ollama registry (registry.ollama.ai). Anything not listed can
+// still be pulled via the free-text "pull any model" field in the model menu.
 const CURATED_OLLAMA_MODELS = [
-  // ── MCQ family — Mirabilis native models (built with training/mcq/setup.sh)
+  // ── MCQ family - Mirabilis native models (built with training/mcq/setup.sh)
   { id: 'mcq-pro-12b',   label: 'MCQ-Pro-12B',   group: 'MCQ', ollamaId: 'mcq-pro-12b',   size: '8.1 GB' },
   { id: 'mcq-ultra-31b', label: 'MCQ-Ultra-31B', group: 'MCQ', ollamaId: 'mcq-ultra-31b', size: '~20 GB' },
   { id: 'mcq-raw-8b',    label: 'MCQ-Raw-8B',    group: 'MCQ', ollamaId: 'mcq-raw-8b',    size: '4.9 GB', uncensored: true },
-  // Lightweight models — run well on most hardware
-  { id: 'llama3',         label: 'Llama 3',           group: 'Lightweight', ollamaId: 'llama3',           size: '4.7 GB' },
-  { id: 'llama3.1',       label: 'Llama 3.1',         group: 'Lightweight', ollamaId: 'llama3.1',         size: '4.7 GB' },
-  { id: 'mistral',        label: 'Mistral 7B',         group: 'Lightweight', ollamaId: 'mistral',          size: '4.1 GB' },
-  { id: 'qwen2.5',        label: 'Qwen 2.5',           group: 'Lightweight', ollamaId: 'qwen2.5',          size: '4.7 GB' },
-  { id: 'gemma4:e2b',     label: 'Gemma 4 E2B',        group: 'Lightweight', ollamaId: 'gemma4:e2b',       size: '7.2 GB' },
-  { id: 'gemma4:e4b',     label: 'Gemma 4 E4B',        group: 'Lightweight', ollamaId: 'gemma4:e4b',       size: '9.6 GB' },
-  { id: 'gemma3:1b',      label: 'Gemma 3 1B',         group: 'Lightweight', ollamaId: 'gemma3:1b',        size: '815 MB' },
-  { id: 'gemma3',         label: 'Gemma 3 4B',         group: 'Lightweight', ollamaId: 'gemma3',           size: '3.3 GB' },
-  { id: 'phi4',           label: 'Phi-4',              group: 'Lightweight', ollamaId: 'phi4',             size: '9.1 GB' },
-  // Powerful models — need more RAM/VRAM
-  { id: 'gemma4:26b',     label: 'Gemma 4 26B',        group: 'Powerful',    ollamaId: 'gemma4:26b',       size: '18 GB'  },
-  { id: 'gemma4:31b',     label: 'Gemma 4 31B',        group: 'Powerful',    ollamaId: 'gemma4:31b',       size: '20 GB'  },
-  { id: 'gemma3:12b',     label: 'Gemma 3 12B',        group: 'Powerful',    ollamaId: 'gemma3:12b',       size: '8.0 GB' },
-  { id: 'gemma3:27b',     label: 'Gemma 3 27B',        group: 'Powerful',    ollamaId: 'gemma3:27b',       size: '17 GB'  },
-  { id: 'qwen3',          label: 'Qwen 3',             group: 'Powerful',    ollamaId: 'qwen3',            size: '5.2 GB' },
-  { id: 'deepseek-r1',    label: 'DeepSeek R1',        group: 'Powerful',    ollamaId: 'deepseek-r1',      size: '4.7 GB' },
-  { id: 'deepseek-v3',    label: 'DeepSeek V3',        group: 'Powerful',    ollamaId: 'deepseek-v3',      size: '404 GB' },
-  { id: 'llama3.3',       label: 'Llama 3.3 70B',      group: 'Powerful',    ollamaId: 'llama3.3',         size: '43 GB' },
-  { id: 'mistral-large',  label: 'Mistral Large 3',    group: 'Powerful',    ollamaId: 'mistral-large',    size: '69 GB' },
-  { id: 'mixtral',        label: 'Mixtral 8x22B',      group: 'Powerful',    ollamaId: 'mixtral:8x22b',    size: '80 GB' },
-  { id: 'llama4',         label: 'Llama 4 Scout',      group: 'Powerful',    ollamaId: 'llama4:scout',     size: '109 GB' },
-  { id: 'jamba',          label: 'Jamba (AI21)',       group: 'Powerful',    ollamaId: 'jamba',            size: '52 GB' },
-  { id: 'dbrx',           label: 'DBRX',               group: 'Powerful',    ollamaId: 'dbrx',             size: '74 GB' },
-  // Uncensored / less-restricted community models
-  { id: 'dolphin3',                label: 'Dolphin 3.0',        group: 'Uncensored', ollamaId: 'dolphin3',                size: '4.7 GB' },
-  { id: 'dolphin-mixtral',         label: 'Mixtral 8x7B',       group: 'Uncensored', ollamaId: 'dolphin-mixtral:8x7b',    size: '26 GB'  },
-  { id: 'deepseek-r1-abliterated', label: 'DeepSeek R1 Distill', group: 'Uncensored', ollamaId: 'deepseek-r1-abliterated', size: '4.7 GB' },
-  { id: 'qwen3.5-uncensored',      label: 'Qwen 3.5',           group: 'Uncensored', ollamaId: 'qwen3.5-uncensored',      size: '4.7 GB' },
-  { id: 'llama4.1',                label: 'Llama 4.1 Surge',    group: 'Uncensored', ollamaId: 'llama4.1:surge',          size: '55 GB'  },
+
+  // ── Small & Fast - run well on modest hardware (8-16 GB)
+  { id: 'llama3.2:3b',  label: 'Llama 3.2 3B',  group: 'Small & Fast', ollamaId: 'llama3.2:3b', size: '2.0 GB' },
+  { id: 'gemma3:1b',    label: 'Gemma 3 1B',    group: 'Small & Fast', ollamaId: 'gemma3:1b',   size: '815 MB' },
+  { id: 'gemma3',       label: 'Gemma 3 4B',    group: 'Small & Fast', ollamaId: 'gemma3',      size: '3.3 GB' },
+  { id: 'phi4-mini',    label: 'Phi-4 Mini',    group: 'Small & Fast', ollamaId: 'phi4-mini',   size: '2.5 GB' },
+  { id: 'qwen2.5',      label: 'Qwen 2.5 7B',   group: 'Small & Fast', ollamaId: 'qwen2.5',     size: '4.7 GB' },
+  { id: 'mistral',      label: 'Mistral 7B',    group: 'Small & Fast', ollamaId: 'mistral',     size: '4.1 GB' },
+  { id: 'llama3.1',     label: 'Llama 3.1 8B',  group: 'Small & Fast', ollamaId: 'llama3.1',    size: '4.7 GB' },
+
+  // ── Powerful - need more RAM/VRAM
+  { id: 'gpt-oss:20b',  label: 'GPT-OSS 20B (OpenAI)', group: 'Powerful', ollamaId: 'gpt-oss:20b',   size: '14 GB' },
+  { id: 'phi4',         label: 'Phi-4 14B',            group: 'Powerful', ollamaId: 'phi4',          size: '9.1 GB' },
+  { id: 'gemma3:12b',   label: 'Gemma 3 12B',          group: 'Powerful', ollamaId: 'gemma3:12b',    size: '8.1 GB' },
+  { id: 'gemma3:27b',   label: 'Gemma 3 27B',          group: 'Powerful', ollamaId: 'gemma3:27b',    size: '17 GB'  },
+  { id: 'gemma4:e4b',   label: 'Gemma 4 E4B (MoE)',    group: 'Powerful', ollamaId: 'gemma4:e4b',    size: '9.6 GB' },
+  { id: 'gemma4:26b',   label: 'Gemma 4 26B',          group: 'Powerful', ollamaId: 'gemma4:26b',    size: '18 GB'  },
+  { id: 'gemma4:31b',   label: 'Gemma 4 31B',          group: 'Powerful', ollamaId: 'gemma4:31b',    size: '20 GB'  },
+  { id: 'qwen3',        label: 'Qwen 3 8B',            group: 'Powerful', ollamaId: 'qwen3',         size: '5.2 GB' },
+  { id: 'qwen3:32b',    label: 'Qwen 3 32B',           group: 'Powerful', ollamaId: 'qwen3:32b',     size: '20 GB'  },
+  { id: 'llama3.3',     label: 'Llama 3.3 70B',        group: 'Powerful', ollamaId: 'llama3.3',      size: '43 GB'  },
+  { id: 'gpt-oss:120b', label: 'GPT-OSS 120B (OpenAI)',group: 'Powerful', ollamaId: 'gpt-oss:120b',  size: '65 GB'  },
+  { id: 'mixtral',      label: 'Mixtral 8x22B',        group: 'Powerful', ollamaId: 'mixtral:8x22b', size: '80 GB'  },
+  { id: 'llama4',       label: 'Llama 4 Scout (MoE)',  group: 'Powerful', ollamaId: 'llama4:scout',  size: '67 GB'  },
+
+  // ── Coding
+  { id: 'qwen2.5-coder',   label: 'Qwen2.5 Coder 7B',    group: 'Coding', ollamaId: 'qwen2.5-coder',   size: '4.7 GB' },
+  { id: 'qwen3-coder:30b', label: 'Qwen3 Coder 30B (MoE)', group: 'Coding', ollamaId: 'qwen3-coder:30b', size: '19 GB' },
+
+  // ── Reasoning
+  { id: 'deepseek-r1',     label: 'DeepSeek R1 7B',      group: 'Reasoning', ollamaId: 'deepseek-r1',    size: '4.7 GB' },
+  { id: 'deepseek-r1:14b', label: 'DeepSeek R1 14B',     group: 'Reasoning', ollamaId: 'deepseek-r1:14b', size: '9.0 GB' },
+
+  // ── Uncensored / unrestricted community models
+  { id: 'dolphin3',                 label: 'Dolphin 3.0 8B',        group: 'Uncensored', ollamaId: 'dolphin3',             size: '4.7 GB', uncensored: true },
+  { id: 'dolphin-llama3',           label: 'Dolphin Llama 3 8B',    group: 'Uncensored', ollamaId: 'dolphin-llama3',       size: '4.7 GB', uncensored: true },
+  { id: 'dolphin-mistral',          label: 'Dolphin Mistral 7B',    group: 'Uncensored', ollamaId: 'dolphin-mistral',      size: '4.1 GB', uncensored: true },
+  { id: 'dolphin-mixtral',          label: 'Dolphin Mixtral 8x7B',  group: 'Uncensored', ollamaId: 'dolphin-mixtral:8x7b', size: '26 GB',  uncensored: true },
+  { id: 'wizard-vicuna-uncensored', label: 'Wizard Vicuna Uncens.', group: 'Uncensored', ollamaId: 'wizard-vicuna-uncensored', size: '3.8 GB', uncensored: true },
+  { id: 'llama2-uncensored',        label: 'Llama 2 Uncensored',    group: 'Uncensored', ollamaId: 'llama2-uncensored',    size: '3.8 GB', uncensored: true },
 ];
 
-// All valid pull targets — used by the pull endpoint to whitelist requests
+// All valid pull targets - used by the pull endpoint to whitelist requests
 export const CURATED_OLLAMA_IDS = new Set(CURATED_OLLAMA_MODELS.map((m) => m.ollamaId || m.id));
 
 function normalizeModelId(modelId) {
@@ -106,7 +120,7 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
     let matchedLocal = null;
 
     // If this entry targets a specific version tag (e.g. gemma3:1b, gemma4:e2b),
-    // require the remote id to contain the full versioned tag — not just the base name.
+    // require the remote id to contain the full versioned tag - not just the base name.
     // This prevents gemma3:latest (4B) from being mistaken as gemma3:1b (1B).
     const ollamaId = entry.ollamaId || '';
     const ollamaHasSpecificTag = ollamaId.includes(':') && !ollamaId.endsWith(':latest');
@@ -221,7 +235,7 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
 }
 
 export async function getEffectiveModel({ provider, model, config }) {
-  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'gpuaas' || provider === 'openai-compatible') {
+  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible') {
     const isCloudOnly = provider !== 'openai-compatible';
     let preferred = model && model !== 'auto' ? model : (isCloudOnly ? null : config.openAIModel);
     // Guard: reject local GGUF filenames being sent to cloud APIs
@@ -229,9 +243,10 @@ export async function getEffectiveModel({ provider, model, config }) {
     if (preferred && preferred !== 'auto') return preferred;
     if (provider === 'openai') return 'gpt-4o-mini';
     if (provider === 'grok') return 'grok-3-mini';
-    if (provider === 'groq') return 'llama-3.1-8b-instant';
-    if (provider === 'openrouter') return 'openai/gpt-4o-mini';
-    if (provider === 'gemini') return 'gemini-2.0-flash';
+    if (provider === 'groq') return 'llama-3.3-70b-versatile';
+    if (provider === 'openrouter') return 'meta-llama/llama-3.3-70b-instruct:free';
+    if (provider === 'gemini') return 'gemini-2.5-flash';
+    if (provider === 'cerebras') return 'llama-3.3-70b';
     if (provider === 'gpuaas') return config.openAIModel || 'model';
     return config.openAIModel || 'model.gguf';
   }
@@ -263,7 +278,7 @@ export async function getEffectiveModel({ provider, model, config }) {
       }
     }
   } catch {
-    // Ollama not reachable — return preferred and let the stream fail with a clear error
+    // Ollama not reachable - return preferred and let the stream fail with a clear error
   }
   return preferred;
 }
@@ -272,7 +287,7 @@ export async function listModels(config, provider = config.aiProvider, options =
   const overrideBaseUrl = typeof options?.overrideBaseUrl === 'string' ? options.overrideBaseUrl.trim() : '';
   const overrideApiKey = typeof options?.overrideApiKey === 'string' ? options.overrideApiKey.trim() : undefined;
 
-  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'gpuaas' || provider === 'openai-compatible') {
+  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible') {
     const defaultBase = provider === 'openai'
       ? 'https://api.openai.com/v1'
       : provider === 'grok'
@@ -283,11 +298,13 @@ export async function listModels(config, provider = config.aiProvider, options =
       ? 'https://openrouter.ai/api/v1'
       : provider === 'gemini'
       ? 'https://generativelanguage.googleapis.com/v1beta/openai'
+      : provider === 'cerebras'
+      ? 'https://api.cerebras.ai/v1'
       : provider === 'gpuaas'
       ? ''
       : config.openAIBaseUrl;
 
-    // Cloud-only providers — never mix in local GGUF files; they can't be loaded via a remote API.
+    // Cloud-only providers - never mix in local GGUF files; they can't be loaded via a remote API.
     const isCloudOnly = provider !== 'openai-compatible';
     // Per-provider sensible fallback model name (used when remote listing fails/unavailable).
     const providerFallbackModel = provider === 'openai'
@@ -295,13 +312,15 @@ export async function listModels(config, provider = config.aiProvider, options =
       : provider === 'grok'
       ? 'grok-3-mini'
       : provider === 'groq'
-      ? 'llama-3.1-8b-instant'
+      ? 'llama-3.3-70b-versatile'
       : provider === 'openrouter'
-      ? 'openai/gpt-4o-mini'
+      ? 'meta-llama/llama-3.3-70b-instruct:free'
       : provider === 'gemini'
-      ? 'gemini-2.0-flash'
+      ? 'gemini-2.5-flash'
+      : provider === 'cerebras'
+      ? 'llama-3.3-70b'
       : provider === 'gpuaas'
-      ? null   // no meaningful default — user must specify
+      ? null   // no meaningful default - user must specify
       : config.openAIModel;
 
     const baseUrl = overrideBaseUrl || defaultBase;
@@ -317,7 +336,7 @@ export async function listModels(config, provider = config.aiProvider, options =
     if (locals.length > 0) {
       return buildEndpointCatalog({ remoteModels: [], selectedModelId: config.openAIModel, localModels: locals });
     }
-    if (!providerFallbackModel) return []; // gpuaas with no config yet — return empty
+    if (!providerFallbackModel) return []; // gpuaas with no config yet - return empty
     return [{
       id: providerFallbackModel,
       label: prettifyEndpointModelLabel(providerFallbackModel),
@@ -439,7 +458,13 @@ export async function listModels(config, provider = config.aiProvider, options =
 }
 
 export async function streamWithProvider({ provider, model, messages, config, signal, onToken, overrideBaseUrl, overrideApiKey, temperature, maxTokens }) {
-  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'gpuaas' || provider === 'openai-compatible') {
+  // Central SSRF guard for the streaming path too (not just /api/models and
+  // /api/providers/health): this is the one outbound call that echoes the
+  // provider response body back to the caller, so a metadata-endpoint baseUrl
+  // must be refused here as well. Only blocks cloud-metadata hosts; loopback/LAN
+  // (local models) stay allowed.
+  if (overrideBaseUrl) assertSafeProviderUrl(overrideBaseUrl);
+  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible') {
     const defaultBase = provider === 'openai'
       ? 'https://api.openai.com/v1'
       : provider === 'grok'
@@ -450,6 +475,8 @@ export async function streamWithProvider({ provider, model, messages, config, si
       ? 'https://openrouter.ai/api/v1'
       : provider === 'gemini'
       ? 'https://generativelanguage.googleapis.com/v1beta/openai'
+      : provider === 'cerebras'
+      ? 'https://api.cerebras.ai/v1'
       : provider === 'gpuaas'
       ? ''
       : config.openAIBaseUrl;
@@ -472,6 +499,8 @@ export async function streamWithProvider({ provider, model, messages, config, si
         ? 'OpenRouter'
         : provider === 'gemini'
         ? 'Gemini'
+        : provider === 'cerebras'
+        ? 'Cerebras'
         : provider === 'gpuaas'
         ? 'GPUaaS'
         : 'OpenAI-compatible',

@@ -1,5 +1,5 @@
 // frontend/src/components/MirabilisApp.jsx
-// Main app wrapper: tabs between Chat and InteLedger
+// Main app wrapper: tabs between Chat and IntelLedger
 
 'use client';
 
@@ -49,12 +49,12 @@ async function readJsonOrThrow(res, fallbackMessage) {
     try {
       payload = JSON.parse(bodyText);
     } catch {
-      throw new Error(fallbackMessage || `InteLedger returned a non-JSON response (${res.status}).`);
+      throw new Error(fallbackMessage || `IntelLedger returned a non-JSON response (${res.status}).`);
     }
   }
 
   if (!res.ok) {
-    throw new Error(payload?.error || payload?.message || fallbackMessage || `InteLedger request failed (${res.status}).`);
+    throw new Error(payload?.error || payload?.message || fallbackMessage || `IntelLedger request failed (${res.status}).`);
   }
 
   return payload;
@@ -183,11 +183,28 @@ export default function MirabilisApp() {
     return id;
   });
 
+  const [pendingSessionId, setPendingSessionId] = useState(null);
+
   const handleTab = (next) => {
     const value = next === 'intel' || next === 'intelledger' ? 'intel' : 'chat';
     setActiveTab(value);
     safeStorageSet(LAST_ACTIVE_TAB_STORAGE_KEY, value);
   };
+
+  // OmniSearch dispatches this when a ledger result is clicked. Switch to the
+  // ledger tab and hand the id to IntelLedgerApp to open (it only mounts on the
+  // intel tab, so the tab switch has to happen here first).
+  useEffect(() => {
+    const onOpenSession = (e) => {
+      const id = e?.detail?.id;
+      if (!id) return;
+      setActiveTab('intel');
+      safeStorageSet(LAST_ACTIVE_TAB_STORAGE_KEY, 'intel');
+      setPendingSessionId(id);
+    };
+    window.addEventListener('mirabilis:open-session', onOpenSession);
+    return () => window.removeEventListener('mirabilis:open-session', onOpenSession);
+  }, []);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden">
@@ -203,13 +220,17 @@ export default function MirabilisApp() {
         )}
         {activeTab === 'intel' && (
           <AppErrorBoundary>
-            <IntelLedgerApp userId={userId} />
+            <IntelLedgerApp
+              userId={userId}
+              openSessionId={pendingSessionId}
+              onSessionOpened={() => setPendingSessionId(null)}
+            />
           </AppErrorBoundary>
         )}
       </div>
 
       {activeTab === 'intel' && (
-        <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-[color:var(--text-main)]/90/90">
+        <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-[color:var(--text-main)]/90">
           {APP_FOOTER_TEXT}
           <span className="mx-1.5 opacity-40">·</span>
           <span className="opacity-55">{APP_VERSION}</span>
@@ -219,8 +240,8 @@ export default function MirabilisApp() {
   );
 }
 
-// InteLedger session management UI
-function IntelLedgerApp({ userId }) {
+// IntelLedger session management UI
+function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
   const [sessions, setSessions] = useState([]);
   const [semanticSessions, setSemanticSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
@@ -291,7 +312,7 @@ function IntelLedgerApp({ userId }) {
         const res = await fetch(`${API_BASE}/api/intelledger/sessions/${encodeURIComponent(id)}`, {
           method: 'DELETE'
         });
-        await readJsonOrThrow(res, 'Failed to delete InteLedger session.');
+        await readJsonOrThrow(res, 'Failed to delete IntelLedger session.');
         deletedIds.push(id);
       } catch {
         failedIds.push(id);
@@ -544,6 +565,16 @@ function IntelLedgerApp({ userId }) {
     loadSessions();
   }, []);
 
+  // Open a session requested from OmniSearch (via MirabilisApp). Waits for the
+  // list so the opened session is present, then clears the pending id.
+  useEffect(() => {
+    if (!openSessionId) return;
+    if (sessions.some((s) => s.id === openSessionId) || localMode) {
+      setActiveSession(openSessionId);
+      onSessionOpened?.();
+    }
+  }, [openSessionId, sessions, localMode]);
+
   useEffect(() => {
     if (!createBubbleOpen) return;
 
@@ -609,7 +640,7 @@ function IntelLedgerApp({ userId }) {
           { signal: controller.signal }
         );
         if (res.ok) {
-          const payload = await readJsonOrThrow(res, 'Failed to run InteLedger semantic search.');
+          const payload = await readJsonOrThrow(res, 'Failed to run IntelLedger semantic search.');
           setSemanticSessions(Array.isArray(payload?.sessions) ? payload.sessions : []);
           return;
         }
@@ -643,7 +674,7 @@ function IntelLedgerApp({ userId }) {
         setSemanticSessions(matches.filter(Boolean));
       } catch (err) {
         if (err?.name !== 'AbortError') {
-          console.warn('InteLedger semantic search unavailable, using local metadata fallback.');
+          console.warn('IntelLedger semantic search unavailable, using local metadata fallback.');
           setSemanticSessions([]);
         }
       } finally {
@@ -676,7 +707,7 @@ function IntelLedgerApp({ userId }) {
     setError('');
     try {
       const res = await fetch(`${API_BASE}/api/intelledger/sessions?userId=${encodeURIComponent(userId)}`);
-      const { sessions } = await readJsonOrThrow(res, 'Failed to load InteLedger sessions.');
+      const { sessions } = await readJsonOrThrow(res, 'Failed to load IntelLedger sessions.');
       setSessions(sessions);
       await Promise.all([
         loadTodayDigest(sessions),
@@ -705,7 +736,7 @@ function IntelLedgerApp({ userId }) {
           description: ''
         })
       });
-      const { session } = await readJsonOrThrow(res, 'Failed to create InteLedger session. Ensure backend is running on port 4000.');
+      const { session } = await readJsonOrThrow(res, 'Failed to create IntelLedger session. Ensure backend is running on port 4000.');
       setSessions([session, ...sessions]);
       setNewSessionTitle('');
       setCreateBubbleOpen(false);
@@ -834,7 +865,7 @@ function IntelLedgerApp({ userId }) {
                 Mirabilis Workspace Memory
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-lg font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">InteLedger</h1>
+                <h1 className="text-lg font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">IntelLedger</h1>
                 <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">
                   embedded mode
                 </span>
@@ -847,7 +878,7 @@ function IntelLedgerApp({ userId }) {
               <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Extract</span>
               <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)]">Synthesis</span>
               <InfoHint
-                title="InteLedger Quick Guide"
+                title="IntelLedger Quick Guide"
                 description="Short definitions. Keep each session focused on one topic."
                 triggerClassName="bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)] hover:border-black/10 hover:text-[color:var(--text-main)] dark:hover:border-white/10 dark:hover:text-slate-300"
                 points={[
@@ -867,7 +898,7 @@ function IntelLedgerApp({ userId }) {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search sessions"
-                className="min-w-0 flex-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-sm text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white dark:placeholder-slate-400"
+                className="min-w-0 flex-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-sm text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
               />
               {searching ? (
                 <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.08em] text-[color:var(--text-muted)]">
@@ -901,7 +932,7 @@ function IntelLedgerApp({ userId }) {
                       onChange={(e) => setNewSessionTitle(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && createSession()}
                       placeholder="Leave blank for Untitled"
-                      className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-sm text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white dark:placeholder-slate-400"
+                      className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-sm text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                       autoFocus
                     />
                     <div className="mt-1.5 flex items-center justify-end gap-1.5">
@@ -1219,14 +1250,14 @@ function IntelLedgerApp({ userId }) {
                             value={newPromptVersion.version_id}
                             onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, version_id: e.target.value }))}
                             placeholder="version_id (optional)"
-                            className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
+                            className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                           />
                           <input
                             type="text"
                             value={newPromptVersion.label}
                             onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, label: e.target.value }))}
                             placeholder="label"
-                            className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
+                            className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                           />
                         </div>
                         <textarea
@@ -1234,14 +1265,14 @@ function IntelLedgerApp({ userId }) {
                           onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, system_prompt: e.target.value }))}
                           placeholder="system_prompt"
                           rows={3}
-                          className="mt-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
+                          className="mt-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                         />
                         <textarea
                           value={newPromptVersion.user_template}
                           onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, user_template: e.target.value }))}
                           placeholder="user_template"
                           rows={4}
-                          className="mt-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
+                          className="mt-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                         />
                         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                           <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-main)]">
@@ -1383,7 +1414,7 @@ function IntelLedgerApp({ userId }) {
                           isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-60'
                         }`}
                       />
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-main)]">
+                      <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-main)]">
                         Session
                       </span>
                     </div>
@@ -1452,7 +1483,7 @@ function IntelLedgerApp({ userId }) {
                   onChange={(e) => setAllowClearAll(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent/30 dark:border-white/20"
                 />
-                I understand this deletes all saved InteLedger sessions.
+                I understand this deletes all saved IntelLedger sessions.
               </label>
               <button
                 type="button"

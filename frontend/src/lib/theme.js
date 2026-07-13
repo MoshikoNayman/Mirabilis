@@ -57,7 +57,7 @@ export function isDarkActive() {
   return mode === 'dark' || (mode === 'auto' && prefersDark());
 }
 
-// Apply current stored values to <html>. Idempotent — safe to call anytime.
+// Apply current stored values to <html>. Idempotent - safe to call anytime.
 // Mirrors ChatApp: scheme 'mirabilis' and font 'jakarta' clear the attribute.
 export function applyTheme() {
   if (typeof document === 'undefined') return;

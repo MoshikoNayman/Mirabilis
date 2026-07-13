@@ -1,5 +1,5 @@
 // frontend/src/components/IntelLedgerSession.jsx
-// InteLedger session management UI
+// IntelLedger session management UI
 
 'use client';
 
@@ -16,12 +16,12 @@ async function readJsonOrThrow(res, fallbackMessage) {
     try {
       payload = JSON.parse(bodyText);
     } catch {
-      throw new Error(fallbackMessage || `InteLedger returned a non-JSON response (${res.status}).`);
+      throw new Error(fallbackMessage || `IntelLedger returned a non-JSON response (${res.status}).`);
     }
   }
 
   if (!res.ok) {
-    throw new Error(payload?.error || payload?.message || fallbackMessage || `InteLedger request failed (${res.status}).`);
+    throw new Error(payload?.error || payload?.message || fallbackMessage || `IntelLedger request failed (${res.status}).`);
   }
 
   return payload;
@@ -179,7 +179,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
 
     const localSession = {
       id: sessionId,
-      title: seedSession?.title || 'InteLedger Session',
+      title: seedSession?.title || 'IntelLedger Session',
       description: seedSession?.description || '',
       created_at: new Date().toISOString()
     };
@@ -325,7 +325,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
 
     try {
       const res = await fetch(`${API_BASE}/api/intelledger/sessions/${sessionId}`);
-      const { session } = await readJsonOrThrow(res, 'Failed to load InteLedger session details.');
+      const { session } = await readJsonOrThrow(res, 'Failed to load IntelLedger session details.');
       setSession(session);
 
       // Load interactions and signals
@@ -586,7 +586,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   Back
                 </button>
               )}
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-main)]">
+              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-main)]">
                 Mirabilis Workspace Memory
               </span>
             </div>
@@ -782,7 +782,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                     <div className="line-clamp-4 text-sm text-[color:var(--text-main)] whitespace-pre-wrap">{int.raw_content}</div>
 
                     {Array.isArray(int.transcript_segments) && int.transcript_segments.length > 0 && (
-                      <div className="mt-3 space-y-1 rounded-lg border border-[var(--hairline)] bg-slate-50 p-2">
+                      <div className="mt-3 space-y-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2">
                         {int.transcript_segments.slice(0, 8).map((seg, idx) => (
                           <button
                             key={`${int.id}-${idx}`}
@@ -973,7 +973,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    <div className="grid gap-2 rounded-lg border border-[var(--hairline)] bg-slate-50/70 p-2 text-[11px] sm:grid-cols-4">
+                    <div className="grid gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2 text-[11px] sm:grid-cols-4">
                       <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                         Urgent open <span className="font-semibold">{actionInsights.urgent}</span>
                       </div>
@@ -1067,7 +1067,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                                 Source ({src.signal_type || action.source_signal_type})
                               </button>
                               {isOpen && (
-                                <div className="mt-1 rounded-lg border border-[var(--hairline)] bg-slate-50 px-3 py-2 text-xs italic text-[color:var(--text-main)] dark:text-[color:var(--text-muted)]">
+                                <div className="mt-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2 text-xs italic text-[color:var(--text-main)] dark:text-[color:var(--text-muted)]">
                                   "{quote}"
                                   {Number.isFinite(Number(src?.start_ms)) && (
                                     <button
@@ -1113,7 +1113,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       { label: 'Window (h)', value: auditSummary.since_hours }
                     ].map(({ label, value }) => (
                       <div key={label} className="rounded-lg border border-black/8 bg-[var(--material-thin)] px-3 py-2">
-                        <div className="text-[18px] font-bold text-[color:var(--text-main)]">{value ?? '—'}</div>
+                        <div className="text-[18px] font-bold text-[color:var(--text-main)]">{value ?? '-'}</div>
                         <div className="mt-0.5 text-[10px] text-[color:var(--text-muted)]">{label}</div>
                       </div>
                     ))}
@@ -1175,7 +1175,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                     {[['24h', auditTrends.top_types_24h, auditTrends.event_count_24h], ['7d', auditTrends.top_types_7d, auditTrends.event_count_7d], ['30d', auditTrends.top_types_30d, auditTrends.event_count_30d]].map(([label, types, total]) => (
                       <div key={label} className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                         <div className="mb-2 flex items-center justify-between">
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Top types — {label}</div>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Top types - {label}</div>
                           <div className="text-[11px] font-medium text-[color:var(--text-main)]">{total}</div>
                         </div>
                         {Array.isArray(types) && types.length > 0 ? (

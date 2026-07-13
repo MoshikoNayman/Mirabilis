@@ -1,7 +1,7 @@
 {
   "name": "mirabilis-desktop",
   "version": "26.2.29",
-  "description": "Mirabilis AI – Desktop App",
+  "description": "Mirabilis AI - Desktop App",
   "author": "Moshiko Nayman",
   "main": "main.js",
   "scripts": {

@@ -3,7 +3,7 @@
 // are "buddies" grouped by Local / Remote with live presence.
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { PROVIDERS } from '../../lib/presence';
 import { Panel, PresenceDot, IconButton } from '../ui/primitives';
 import ContactRow from '../ui/ContactRow';
@@ -41,6 +41,14 @@ export default function BuddyList({ open, presence, onPick }) {
       total: PROVIDERS.length
     };
   }, [presence]);
+
+  // Esc closes the sheet, matching CommandPalette/OmniSearch (which get it from Modal).
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') appStore.setBuddyOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
 
   if (!open) return null;
 

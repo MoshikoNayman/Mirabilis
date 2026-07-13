@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-**Version:** 26.2R1-S28  
+**Version:** 26.2R1-S29  
 **Author:** Moshiko Nayman
 
 [![Download Latest Release](https://img.shields.io/badge/Download-Latest%20Release-1aa86f?style=for-the-badge)](https://github.com/MoshikoNayman/Mirabilis/releases/latest)
@@ -45,11 +45,24 @@ Mirabilis supports both:
 - **Web mode** (run from source with `node run.js`)
 - **Desktop app** (prebuilt installers)
 
-Download desktop installers from the latest public release:
+Download desktop installers from the **[latest public release](https://github.com/MoshikoNayman/Mirabilis/releases/latest)** - pick the file for your platform:
 
-- macOS (Apple Silicon): [Mirabilis.AI-26.2.25-arm64.dmg](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI-26.2.25-arm64.dmg)
-- Windows (x64): [Mirabilis.AI.Setup.26.2.25.exe](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI.Setup.26.2.25.exe)
-- Linux (x64): [Mirabilis.AI-26.2.25.AppImage](https://github.com/MoshikoNayman/Mirabilis/releases/download/26.2R1/Mirabilis.AI-26.2.25.AppImage)
+- **macOS** (Apple Silicon): the `-arm64.dmg` asset
+- **Windows** (x64): the `-x64.exe` asset
+- **Linux** (x64): the `-x86_64.AppImage` asset
+
+> These point at `releases/latest`, so the links never go stale as the version advances. Exact filenames carry the current version (e.g. `Mirabilis.AI-<version>-arm64.dmg`).
+
+**Verify your download (recommended):** each release publishes a `SHA256SUMS-<os>.txt`. Check the file you downloaded matches:
+
+```bash
+# macOS / Linux
+shasum -a 256 -c SHA256SUMS-macos.txt      # or: sha256sum -c SHA256SUMS-linux.txt
+# Windows (PowerShell)
+Get-FileHash .\Mirabilis.AI-*-x64.exe -Algorithm SHA256
+```
+
+> Note: installers are not yet Apple-notarized / Windows-signed, so the OS may still show an unsigned-app warning even after the checksum matches.
 
 ---
 
@@ -75,7 +88,7 @@ IntelLedger is the built-in memory workspace for turning messy conversations int
 - Generate session synthesis and action-focused summaries
 - Track prompt provenance and audit trails with human-readable labels
 
-If you want structured follow-through instead of raw chat history, use the InteLedger tab.
+If you want structured follow-through instead of raw chat history, use the IntelLedger tab.
 
 ---
 
@@ -102,6 +115,7 @@ All remote providers require an API key. Configure in the **Configure endpoint**
 | **Groq** | `https://api.groq.com/openai/v1` | Yes | `gsk_...` |
 | **OpenRouter** | `https://openrouter.ai/api/v1` | Yes | `sk-or-...` |
 | **Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai` | Yes | `AIza...` |
+| **Cerebras** | `https://api.cerebras.ai/v1` | Yes | `csk-...` |
 | **Claude** (Anthropic) | `https://api.anthropic.com` | No | `sk-ant-...` |
 | **GPUaaS Endpoint** | Your endpoint URL | Varies | Provider-specific |
 
@@ -113,7 +127,7 @@ All remote providers require an API key. Configure in the **Configure endpoint**
 - Local providers that require a binary (`llama-server`, `KoboldCpp`) are **greyed out** when not installed - click **Install** inline to download and install automatically, or **Uninstall** to remove.
 - Per-provider hint banner in the config panel shows the expected base URL and key format.
 - **Estimated monthly budget bar** - set a USD budget; the bar tracks estimated token spend against it (shown for all remote providers).
-- **Auto model resolution** - selecting `auto` picks a sensible default model per provider (e.g. `gpt-4o-mini` for OpenAI, `llama-3.1-8b-instant` for Groq, `openai/gpt-4o-mini` for OpenRouter).
+- **Auto model resolution** - selecting `auto` picks a sensible default model per provider (e.g. `gpt-4o-mini` for OpenAI, `llama-3.3-70b-versatile` for Groq, `meta-llama/llama-3.3-70b-instruct:free` for OpenRouter, `gemini-2.5-flash` for Gemini).
 - **Stream stall watchdog** - aborts a stalled local stream after 120 s with a clear timeout message.
 - No forced fallback: if a remote provider is unreachable, an error is shown rather than silently switching to Ollama.
 
@@ -154,24 +168,15 @@ node run.js logs                               # Watch all service logs
 node run.js doctor                             # Check environment health
 ```
 
-### Quick Cleanup (Safe)
+### Cleanup
 
-Use the built-in cleanup helper to remove generated artifacts without touching session/chat data.
+Remove dependencies and caches (chat/IntelLedger session data is preserved):
 
 ```bash
-# Preview only (no deletion)
-./scripts/cleanup-safe.sh
-
-# Apply safe cleanup
-./scripts/cleanup-safe.sh --apply
+node run.js uninstall
 ```
 
-Optional deep cleanup flags:
-
-- `--with-heavy-cache` (image-service cache)
-- `--with-venv` (Python virtualenvs)
-- `--with-node-modules` (forces reinstall on next run)
-- `--with-runtime-data` (deletes runtime uploads/media data)
+Everything is pure JavaScript - there are no shell-script cleanup helpers to run.
 
 ---
 
@@ -199,7 +204,7 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **IntelLedger** | Signal extraction for risks, asks, commitments, opportunities, and decisions |
 | **IntelLedger** | Session synthesis, cross-session synthesis, and action-oriented next-step tracking |
 | **IntelLedger** | Prompt registry with version activation plus provenance and audit visibility |
-| **Providers** | 10 providers: Ollama, OpenAI, Grok, Groq, OpenRouter, Gemini, Claude, GPUaaS, Custom Endpoint, KoboldCpp |
+| **Providers** | 11 providers: Ollama, OpenAI, Grok, Groq, OpenRouter, Gemini, Cerebras, Claude, GPUaaS, Custom Endpoint, KoboldCpp |
 | **Providers** | Live provider health check; switch provider per session from the UI |
 | **Providers** | Pull, delete, and monitor Ollama models from the UI |
 | **Providers** | Estimated remote spend tracker with configurable monthly budget |
@@ -223,7 +228,7 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 If you just want to install and run Mirabilis, use the **Desktop Downloads** section above.
 
 Mirabilis can be packaged as a native desktop app (Electron) using the `desktop/` folder.
-The build system stages everything in a temp directory and cleans up automatically — no mess.
+The build system stages everything in a temp directory and cleans up automatically - no mess.
 
 ### macOS
 
@@ -242,7 +247,7 @@ cd desktop
 ./build.sh dmg
 ```
 
-Output: `desktop/dist/Mirabilis AI-26.2.25-arm64.dmg` (filename may vary slightly by electron-builder version).
+Output: `desktop/dist/Mirabilis AI-<version>-arm64.dmg` (the version comes from `desktop/package.json`; filename may vary slightly by electron-builder version).
 
 For full Gatekeeper-friendly distribution, macOS signing/notarization still requires:
 
@@ -296,15 +301,34 @@ POST http://127.0.0.1:4000/mcp
 | `write_file` | Write/overwrite a file - requires `confirmed: true` |
 | `run_command` | Run a shell command (macOS/Linux/Windows) - requires `confirmed: true` |
 
+### Authentication (local token)
+
+Because these tools include `run_command` and `write_file`, the `/mcp` endpoint
+requires a **local bearer token**. On startup Mirabilis prints it and saves it to
+`<data-dir>/mcp-token`:
+
+```
+MCP token (for external MCP clients): <token>  [also saved at .../mcp-token]
+```
+
+Pass it as `Authorization: Bearer <token>`. Override it with `MIRABILIS_MCP_TOKEN`.
+Requests without the token get `401`. (The backend also binds to loopback by
+default and rejects foreign `Host` headers, so `/mcp` is never reachable from the
+network unless you deliberately reconfigure it.)
+
+> Optional: set `MIRABILIS_MCP_FS_ROOT=/path` to confine `read_file` / `write_file`
+> / `list_dir` to a single directory subtree.
+
 ### Connect from VS Code
 
-Add to `.vscode/mcp.json`:
+Add to `.vscode/mcp.json` (replace `<token>` with the value from the startup log):
 
 ```json
 {
   "servers": {
     "mirabilis": {
       "url": "http://127.0.0.1:4000/mcp",
+      "headers": { "Authorization": "Bearer <token>" },
       "description": "Mirabilis local AI - start with node run.js first"
     }
   }

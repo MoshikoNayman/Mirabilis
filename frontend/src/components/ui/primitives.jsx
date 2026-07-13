@@ -1,5 +1,5 @@
 // frontend/src/components/ui/primitives.jsx
-// Aurora primitive components — the shared design-system layer that replaces
+// Aurora primitive components - the shared design-system layer that replaces
 // ad-hoc inline Tailwind. Styled via the tokens in src/design/tokens.css.
 'use client';
 

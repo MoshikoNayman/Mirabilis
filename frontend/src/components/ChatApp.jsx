@@ -5,6 +5,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
+import { playSend, playReceive, playError } from '../lib/sounds';
+import { appStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
@@ -41,7 +43,7 @@ function buildDefaultSystemPrompt(providerId) {
     ? 'You are running entirely on the user\'s own device.'
     : 'You are inside a local app and may answer using either local or user-configured remote AI providers.';
 
-  return `You are Mirabilis AI, a concise and helpful assistant. ${runtimeLine} Never describe yourself as a generic AI product. When someone asks who created or built you, answer naturally and briefly: Mirabilis AI was created by Moshiko Nayman. Do not volunteer that information unprompted. Image generation is available locally via a Stable Diffusion service — generate real images rather than ASCII art when asked.`;
+  return `You are Mirabilis AI, a concise and helpful assistant. ${runtimeLine} Never describe yourself as a generic AI product. When someone asks who created or built you, answer naturally and briefly: Mirabilis AI was created by Moshiko Nayman. Do not volunteer that information unprompted. Image generation is available locally via a Stable Diffusion service - generate real images rather than ASCII art when asked.`;
 }
 
 const DEFAULT_SYSTEM_PROMPT = buildDefaultSystemPrompt('ollama');
@@ -152,6 +154,7 @@ const PROVIDER_OPTIONS = [
   { id: 'groq', label: 'Groq', scope: 'Remote' },
   { id: 'openrouter', label: 'OpenRouter', scope: 'Remote' },
   { id: 'gemini', label: 'Gemini', scope: 'Remote' },
+  { id: 'cerebras', label: 'Cerebras', scope: 'Remote' },
   { id: 'claude', label: 'Claude', scope: 'Remote' },
   { id: 'gpuaas', label: 'GPUaaS Endpoint', scope: 'Remote' },
   { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server' },
@@ -181,14 +184,14 @@ function isUncensoredModelRecord(item) {
   );
 }
 
-// Models with guaranteed 128K+ context window — preferred when conversation is large.
+// Models with guaranteed 128K+ context window - preferred when conversation is large.
 // (phi4=16K, mistral/mixtral=32K are excluded intentionally)
 const LARGE_CONTEXT_PRIORITY = [
   'qwen2.5', 'llama3.1', 'gemma3', 'qwen3', 'deepseek-r1', 'gemma4:e2b', 'gemma4:e4b',
   'gemma3:12b', 'gemma3:27b', 'gemma4:26b', 'gemma4:31b', 'llama3.3', 'llama3'
 ];
 
-// Priority list for Auto mode when context is small — prefer faster/lighter local models first.
+// Priority list for Auto mode when context is small - prefer faster/lighter local models first.
 const AUTO_MODEL_PRIORITY = [
   'qwen2.5', 'llama3.1', 'gemma3', 'mistral', 'phi4', 'qwen3',
   'deepseek-r1', 'gemma4:e2b', 'gemma4:e4b', 'gemma3:12b', 'gemma3:27b',
@@ -231,6 +234,12 @@ const COST_RATES_PER_1M = {
     'claude-3-5-sonnet': { in: 3.00, out: 15.00 },
     'claude-sonnet': { in: 3.00, out: 15.00 },
     'claude-opus': { in: 15.00, out: 75.00 }
+  },
+  cerebras: {
+    // Free tier is 0; these approximate the paid overage rates so the budget bar
+    // is meaningful past the free allowance.
+    default: { in: 0.60, out: 0.80 },
+    'llama-3.3-70b': { in: 0.60, out: 0.80 }
   }
 };
 
@@ -319,13 +328,13 @@ async function api(path, options = {}) {
 function classifyWebSearch(text) {
   const t = text.toLowerCase();
 
-  // Hard skip — pure generation / writing tasks that gain nothing from web context
+  // Hard skip - pure generation / writing tasks that gain nothing from web context
   const skipPatterns = [
     /\b(write|draft|compose|summarise?|summarize|translate|generate|create|draw|code|fix|debug|refactor|improve|proofread|rewrite|convert|calculate|solve)\b/,
   ];
   const hasSkipVerb = skipPatterns.some((r) => r.test(t));
 
-  // Live / real-time signals — always search regardless of skip verbs
+  // Live / real-time signals - always search regardless of skip verbs
   const liveSignals = [
     /\b(today|tonight|right now|currently|at the moment|this week|this month|this year|yesterday|latest|recent|new|breaking|live|happening)\b/,
     /\b(news|headline|stock|price|weather|forecast|score|result|standings|match|game|election|vote|poll|winner|champion)\b/,
@@ -340,7 +349,7 @@ function classifyWebSearch(text) {
 
   if (hasLiveSignal) return 'search';
   if (hasSkipVerb) return 'skip';
-  // Default to search when www is on — let the AI decide if the context is useful
+  // Default to search when www is on - let the AI decide if the context is useful
   return 'search';
 }
 
@@ -451,7 +460,7 @@ function CopyButton({ text }) {
   );
 }
 
-function CopyMessageButton({ text }) {
+function CopyMessageButton({ text, className }) {
   const [copied, setCopied] = useState(false);
   function handleCopy() {
     navigator.clipboard.writeText(text).then(() => {
@@ -464,7 +473,7 @@ function CopyMessageButton({ text }) {
       type="button"
       onClick={handleCopy}
       title={copied ? 'Copied!' : 'Copy message'}
-      className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
+      className={className || 'rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200'}
     >
       {copied ? (
         <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -485,7 +494,7 @@ function CopyMessageButton({ text }) {
 // which is unreliable for list containers when content is mixed or nested.
 const RTL_CHARS_RE = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
 
-// Syntax highlight theme — CSS-var-driven so it instantly reacts to scheme changes.
+// Syntax highlight theme - CSS-var-driven so it instantly reacts to scheme changes.
 // Defined at module level so it's never recreated per render.
 const SYNTAX_THEME = {
   'code[class*="language-"]': {
@@ -536,7 +545,7 @@ const SYNTAX_THEME = {
   'line-numbers-rows > span:before': { color: 'color-mix(in srgb, var(--code-text) 30%, transparent)' },
 };
 
-// Static markdown component overrides — defined at module level so they're never recreated.
+// Static markdown component overrides - defined at module level so they're never recreated.
 // These elements intentionally carry NO `dir` attribute; they inherit direction from the
 // outer wrapper which is set explicitly in renderMessageContent via RTL_CHARS_RE.
 // `p` and headings keep `dir="auto"` for correct per-paragraph alignment in mixed-lang replies.
@@ -572,11 +581,11 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
   if (message.imageGenerating) {
     return (
       <div
-        className="relative overflow-hidden rounded-xl bg-slate-200"
+        className="relative overflow-hidden rounded-xl bg-[var(--material-thick)]"
         style={{ width: 288, height: 288 }}
         aria-label="Generating image…"
       >
-        {/* Shimmer sweep — pure CSS, GPU-only */}
+        {/* Shimmer sweep - pure CSS, GPU-only */}
         <div
           className="img-shimmer pointer-events-none absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/10"
           style={{ willChange: 'transform' }}
@@ -618,7 +627,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
       const lang = (className || '').replace('language-', '') || '';
       const displayLang = lang || 'code';
       const codeText = String(children).replace(/\n$/, '');
-      // react-markdown v9+ no longer passes `inline` prop — detect it ourselves:
+      // react-markdown v9+ no longer passes `inline` prop - detect it ourselves:
       // inline code has no language class and no newlines inside it.
       const isInline = inline || (!className?.includes('language-') && !codeText.includes('\n'));
       if (isInline) {
@@ -691,8 +700,8 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
     },
   };
 
-  // Detect RTL once from the full text so the entire block — including list
-  // containers — gets a concrete direction that all descendants inherit.
+  // Detect RTL once from the full text so the entire block - including list
+  // containers - gets a concrete direction that all descendants inherit.
   const dir = RTL_CHARS_RE.test(text) ? 'rtl' : 'ltr';
 
   return (
@@ -702,7 +711,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
   );
 }
 
-// Memoised sidebar chat row — comparator ignores callbacks so typing / streaming
+// Memoised sidebar chat row - comparator ignores callbacks so typing / streaming
 // never causes the full chat list to reconcile; only the affected item re-renders.
 const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, onSelect, onToggleMenu, onDelete, onRename, onExport, onTogglePin, onBranch }) {
   const [isRenaming, setIsRenaming] = useState(false);
@@ -854,7 +863,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
   prev.isPinned === next.isPinned
 ));
 
-// Memoised message bubble — only re-renders when its own data or speaking state changes.
+// Memoised message bubble - only re-renders when its own data or speaking state changes.
 // During streaming, only the last message gets a new `message` object reference, so all prior
 // messages are skipped by the custom comparator, preventing O(n) re-renders per token.
 const MessageRow = memo(function MessageRow({
@@ -895,7 +904,7 @@ const MessageRow = memo(function MessageRow({
       {isStreaming && !message.content && message.role === 'assistant' && isLast && !message.imageGenerating
         ? (
           <div className="flex items-center gap-2 py-1" style={{ color: 'var(--accent)' }}>
-            <span className="au-typing"><i /><i /><i /></span>
+            <span className="au-typing" role="status" aria-label="Assistant is typing"><i /><i /><i /></span>
             {streamingLabel && (
               <span className="ml-0.5 text-[length:var(--text-2xs)] font-medium uppercase tracking-[0.1em] text-[color:var(--text-muted)]">{streamingLabel}</span>
             )}
@@ -941,17 +950,10 @@ const MessageRow = memo(function MessageRow({
           <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-[color:var(--text-main)] opacity-70">
             You · ~{(message.tokenEstimate || 0).toLocaleString()} tok
           </span>
-          <button
-            type="button"
-            onClick={() => navigator.clipboard.writeText(message.content || '').catch(() => {})}
-            title="Copy message"
+          <CopyMessageButton
+            text={message.content || ''}
             className="rounded p-1 text-[color:var(--text-main)] opacity-70 transition hover:bg-[var(--material-thin)] hover:opacity-100"
-          >
-            <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="9" y="9" width="13" height="13" rx="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          </button>
+          />
         </div>
       )}
       {message.role === 'assistant' && !message.imageGenerating && (
@@ -963,7 +965,7 @@ const MessageRow = memo(function MessageRow({
                   <span title={message.effectiveModel || message.effectiveProvider}>
                     {{
                       openai: 'OpenAI', grok: 'Grok', groq: 'Groq', openrouter: 'OpenRouter',
-                      gemini: 'Gemini', claude: 'Claude', gpuaas: 'GPUaaS',
+                      gemini: 'Gemini', cerebras: 'Cerebras', claude: 'Claude', gpuaas: 'GPUaaS',
                       'openai-compatible': 'Custom', koboldcpp: 'KoboldCpp', ollama: 'Ollama'
                     }[message.effectiveProvider] || message.effectiveProvider}
                     {message.effectiveModel ? ` / ${message.effectiveModel.length > 28 ? message.effectiveModel.slice(0, 28) + '…' : message.effectiveModel}` : ''}
@@ -1061,6 +1063,7 @@ export default function ChatApp() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingLabel, setStreamingLabel] = useState('');
+  const [isCommittingToLedger, setIsCommittingToLedger] = useState(false);
   const [themeMode, setThemeMode] = useState(() => {
     if (typeof window !== 'undefined') return safeStorageGet('local-ai-theme-mode', 'auto');
     return 'auto';
@@ -1072,7 +1075,11 @@ export default function ChatApp() {
   const [colorScheme, setColorScheme] = useState(() => {
     if (typeof window !== 'undefined') {
       const v = safeStorageGet('mirabilis-color-scheme', 'mirabilis');
-      return ['mirabilis','ember','summit'].includes(v) ? v : 'mirabilis';
+      // 'arctic' is a real scheme (globals.css, lib/theme.js, the Dock picker) -
+      // it was missing here, so picking Arctic worked until reload, then got
+      // silently coerced back to 'mirabilis'. Keep this list in sync with
+      // lib/theme.js SCHEMES.
+      return ['mirabilis','arctic','ember','summit'].includes(v) ? v : 'mirabilis';
     }
     return 'mirabilis';
   });
@@ -1093,6 +1100,7 @@ export default function ChatApp() {
       groq: { baseUrl: 'https://api.groq.com/openai/v1', apiKey: '' },
       openrouter: { baseUrl: 'https://openrouter.ai/api/v1', apiKey: '' },
       gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKey: '' },
+      cerebras: { baseUrl: 'https://api.cerebras.ai/v1', apiKey: '' },
       claude: { baseUrl: 'https://api.anthropic.com', apiKey: '' },
       gpuaas: { baseUrl: '', apiKey: '' },
       'openai-compatible': { baseUrl: 'http://127.0.0.1:8000/v1', apiKey: '' },
@@ -1215,7 +1223,7 @@ export default function ChatApp() {
   const [isTeachPanelOpen, setIsTeachPanelOpen] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
-  const autoScrollRef = useRef(true); // ref mirror — readable synchronously in scroll handler
+  const autoScrollRef = useRef(true); // ref mirror - readable synchronously in scroll handler
   const [memoryItems, setMemoryItems] = useState([]);
   const [memoryInput, setMemoryInput] = useState('');
   // Remote Control
@@ -1308,7 +1316,7 @@ export default function ChatApp() {
 
   const selectedModelRecord = useMemo(() => models.find((item) => item.id === model) || null, [model, models]);
   const shouldShowModelChip = useMemo(
-    () => provider === 'ollama' || provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'koboldcpp' || models.length > 0,
+    () => provider === 'ollama' || provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'koboldcpp' || models.length > 0,
     [provider, models.length]
   );
 
@@ -1448,15 +1456,17 @@ export default function ChatApp() {
       try {
         const cfgBase = String(providerConfigs?.[provider]?.baseUrl || '').trim();
         const cfgKey = String(providerConfigs?.[provider]?.apiKey || '').trim();
-        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas') && !cfgKey) {
-          const p = provider === 'grok' ? 'Grok' : provider === 'groq' ? 'Groq' : provider === 'openrouter' ? 'OpenRouter' : provider === 'gemini' ? 'Gemini' : provider === 'claude' ? 'Claude' : provider === 'gpuaas' ? 'GPUaaS endpoint' : 'OpenAI';
+        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas') && !cfgKey) {
+          const p = provider === 'grok' ? 'Grok' : provider === 'groq' ? 'Groq' : provider === 'openrouter' ? 'OpenRouter' : provider === 'gemini' ? 'Gemini' : provider === 'cerebras' ? 'Cerebras' : provider === 'claude' ? 'Claude' : provider === 'gpuaas' ? 'GPUaaS endpoint' : 'OpenAI';
           setStatusText(`${p} selected. Add API key in Configure endpoint.`);
           return;
         }
         const query = new URLSearchParams({ provider });
         if (cfgBase) query.set('baseUrl', cfgBase);
-        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && cfgKey) query.set('apiKey', cfgKey);
-        const health = await api(`/api/providers/health?${query.toString()}`);
+        // API key travels in a header, never the URL (query strings leak into logs/history).
+        const keyHeader = ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && cfgKey)
+          ? { 'x-provider-key': cfgKey } : undefined;
+        const health = await api(`/api/providers/health?${query.toString()}`, keyHeader ? { headers: keyHeader } : undefined);
         if (cancelled) return;
         if (!health?.reachable) {
           const hint = health?.hint ? ` ${health.hint}` : '';
@@ -1500,6 +1510,10 @@ export default function ChatApp() {
         gemini: {
           baseUrl: normalizeGeminiBaseUrl(prev?.gemini?.baseUrl || 'https://generativelanguage.googleapis.com/v1beta/openai'),
           apiKey: prev?.gemini?.apiKey || ''
+        },
+        cerebras: {
+          baseUrl: prev?.cerebras?.baseUrl || 'https://api.cerebras.ai/v1',
+          apiKey: prev?.cerebras?.apiKey || ''
         },
         claude: {
           baseUrl: prev?.claude?.baseUrl || 'https://api.anthropic.com',
@@ -1787,6 +1801,13 @@ export default function ChatApp() {
     ];
     const timers = phases.map(([delay, label]) => setTimeout(() => setStreamingLabel(label), delay));
     return () => timers.forEach(clearTimeout);
+  }, [isStreaming]);
+
+  // Drive the Aurora StatusOrb's "busy" breathing from the real streaming state.
+  // AuroraChrome listens for these; without them the orb never showed activity.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(isStreaming ? 'mirabilis:stream-start' : 'mirabilis:stream-stop'));
   }, [isStreaming]);
 
   useEffect(() => {
@@ -2343,7 +2364,7 @@ export default function ChatApp() {
       dictationPhaseRef.current = 'idle';
       setIsDictating(false);
       const message = error?.name === 'NotAllowedError'
-        ? 'Microphone access denied — check System Settings → Privacy → Microphone.'
+        ? 'Microphone access denied - check System Settings → Privacy → Microphone.'
         : error.message || 'unknown';
       setStatusText(`Dictation error: ${message}`);
     }
@@ -2397,7 +2418,7 @@ export default function ChatApp() {
   async function refreshChats() {
     const epoch = chatListEpochRef.current;
     const payload = await api('/api/chats');
-    // Bail out if clearAllChats() ran while we were awaiting — would resurrect deleted chats
+    // Bail out if clearAllChats() ran while we were awaiting - would resurrect deleted chats
     if (chatListEpochRef.current !== epoch) return;
     setChats(payload.chats || []);
   }
@@ -2551,22 +2572,22 @@ export default function ChatApp() {
   }
 
   async function clearAllChats() {
-    // Abort stream first — otherwise the post-stream saveChat fires after the
+    // Abort stream first - otherwise the post-stream saveChat fires after the
     // DELETE and immediately re-adds the last chat (intermittent "comes back" bug)
     stopStreaming();
     chatListEpochRef.current++; // invalidate any in-flight refreshChats() calls
-    // Clear UI immediately — don't wait for the network roundtrip
+    // Clear UI immediately - don't wait for the network roundtrip
     setActiveChatId(null);
     setActiveChatMeta(null);
     setSelectedSnapshotId('');
     setMessages([]);
     setChats([]);
     setChatSearch('');
-    // Then flush to backend (fire and forget error — UI is already clear)
+    // Then flush to backend (fire and forget error - UI is already clear)
     try {
       await api('/api/chats', { method: 'DELETE' });
     } catch {
-      // ignore — UI is already empty
+      // ignore - UI is already empty
     }
   }
 
@@ -2722,7 +2743,7 @@ export default function ChatApp() {
       for (const msg of chat.messages || []) {
         const role = msg.role === 'user' ? 'You' : 'Assistant';
         const time = msg.createdAt ? new Date(msg.createdAt).toLocaleString() : '';
-        lines.push(`## ${role}${time ? ` — ${time}` : ''}\n`);
+        lines.push(`## ${role}${time ? ` - ${time}` : ''}\n`);
         lines.push(`${msg.content || ''}\n`);
       }
       const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
@@ -2818,24 +2839,26 @@ export default function ChatApp() {
   async function refreshModels() {
     try {
       const query = new URLSearchParams({ provider: String(provider || '').trim() });
+      let keyHeader;
       if (provider !== 'ollama') {
         const baseUrl = provider === 'gemini'
           ? normalizeGeminiBaseUrl(providerConfigs?.[provider]?.baseUrl || '')
           : String(providerConfigs?.[provider]?.baseUrl || '').trim();
         const apiKey = String(providerConfigs?.[provider]?.apiKey || '').trim();
         if (baseUrl) query.set('baseUrl', baseUrl);
-        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && apiKey) query.set('apiKey', apiKey);
+        // Key in a header, never the URL.
+        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && apiKey) keyHeader = { 'x-provider-key': apiKey };
       }
-      const payload = await api(`/api/models?${query.toString()}`);
+      const payload = await api(`/api/models?${query.toString()}`, keyHeader ? { headers: keyHeader } : undefined);
       const available = payload.models || [];
       setModels(available);
-      // If current model is 'auto', no override needed — it resolves at send time.
+      // If current model is 'auto', no override needed - it resolves at send time.
       // Only fall back if the explicitly chosen model is no longer installed.
       setModel((currentModel) => {
         if (currentModel === 'auto') return 'auto';
         const stillInstalled = available.some((item) => item.id === currentModel && item.available !== false);
         if (stillInstalled) return currentModel;
-        // Model was removed — fall back to auto
+        // Model was removed - fall back to auto
         return 'auto';
       });
     } catch {
@@ -2857,13 +2880,13 @@ export default function ChatApp() {
 
     const firstAvailableModel = (models || []).find((item) => item?.available !== false)?.id || '';
     const effectiveNonOllamaModel = model === 'auto'
-      ? (firstAvailableModel || (provider === 'openai' ? 'gpt-4o-mini' : provider === 'grok' ? 'grok-3-mini' : provider === 'groq' ? 'llama-3.1-8b-instant' : provider === 'openrouter' ? 'openai/gpt-4o-mini' : provider === 'gemini' ? 'gemini-2.0-flash' : provider === 'claude' ? 'claude-3-5-sonnet-latest' : provider === 'gpuaas' ? 'model.gguf' : ''))
+      ? (firstAvailableModel || (provider === 'openai' ? 'gpt-4o-mini' : provider === 'grok' ? 'grok-3-mini' : provider === 'groq' ? 'llama-3.3-70b-versatile' : provider === 'openrouter' ? 'meta-llama/llama-3.3-70b-instruct:free' : provider === 'gemini' ? 'gemini-2.5-flash' : provider === 'cerebras' ? 'llama-3.3-70b' : provider === 'claude' ? 'claude-3-5-sonnet-latest' : provider === 'gpuaas' ? 'model.gguf' : ''))
       : model;
 
     const configuredApiKey = String(providerConfigs[provider]?.apiKey || '').trim();
-    if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas') && !configuredApiKey) {
+    if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas') && !configuredApiKey) {
       setIsProviderConfigOpen(true);
-      const p = provider === 'grok' ? 'xAI' : provider === 'groq' ? 'Groq' : provider === 'openrouter' ? 'OpenRouter' : provider === 'gemini' ? 'Google AI' : provider === 'claude' ? 'Anthropic' : provider === 'gpuaas' ? 'GPUaaS endpoint' : 'OpenAI';
+      const p = provider === 'grok' ? 'xAI' : provider === 'groq' ? 'Groq' : provider === 'openrouter' ? 'OpenRouter' : provider === 'gemini' ? 'Google AI' : provider === 'cerebras' ? 'Cerebras' : provider === 'claude' ? 'Anthropic' : provider === 'gpuaas' ? 'GPUaaS endpoint' : 'OpenAI';
       throw new Error(`${p} API key is required. Open Configure endpoint and paste your key.`);
     }
 
@@ -2874,12 +2897,12 @@ export default function ChatApp() {
     if (configuredBaseUrl) {
       query.set('baseUrl', configuredBaseUrl);
     }
-    if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && configuredApiKey) {
-      query.set('apiKey', configuredApiKey);
-    }
+    // Key in a header, never the URL.
+    const keyHeader = ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && configuredApiKey)
+      ? { 'x-provider-key': configuredApiKey } : undefined;
 
     try {
-      const payload = await api(`/api/providers/health?${query.toString()}`);
+      const payload = await api(`/api/providers/health?${query.toString()}`, keyHeader ? { headers: keyHeader } : undefined);
       if (payload?.reachable) {
         return {
           provider,
@@ -3197,7 +3220,7 @@ export default function ChatApp() {
 
     fetchUtilization();
     // Poll every 30 s so image device chip stays current.
-    // Hardware profile is cached server-side after first call — no need to re-poll.
+    // Hardware profile is cached server-side after first call - no need to re-poll.
     const interval = setInterval(() => {
       checkImageService();
     }, 30000);
@@ -3266,7 +3289,7 @@ export default function ChatApp() {
     safeStorageSet('mirabilis-engine-option', selectedEngine);
   }, [selectedEngine]);
 
-  // Auto-scroll to bottom while streaming new tokens — throttled to one rAF per frame.
+  // Auto-scroll to bottom while streaming new tokens - throttled to one rAF per frame.
   // IMPORTANT: we re-check autoScrollRef.current INSIDE the RAF, not just at effect entry.
   // This closes the race where the effect runs (ref=true), queues a RAF, the user scrolls
   // up (ref→false), then the RAF fires anyway and overrides the user's position.
@@ -3281,7 +3304,7 @@ export default function ChatApp() {
       requestAnimationFrame(() => { isProgrammaticScrollRef.current = false; });
     });
     return () => cancelAnimationFrame(raf);
-  }, [messages, isStreaming]); // ref-based guard — autoScrollEnabled state not needed in deps
+  }, [messages, isStreaming]); // ref-based guard - autoScrollEnabled state not needed in deps
 
   // When switching chats, jump to bottom and re-enable auto-scroll.
   useEffect(() => {
@@ -3350,7 +3373,7 @@ export default function ChatApp() {
   }, [messages, model, systemPromptTokens]);
 
   const remoteUsage = useMemo(() => {
-    const remoteProvider = provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' ? provider : null;
+    const remoteProvider = provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' ? provider : null;
     if (!remoteProvider) {
       return { enabled: false, estUsd: 0, pct: 0, budgetUsd: remoteBudgetUsd, rate: null };
     }
@@ -3400,7 +3423,7 @@ export default function ChatApp() {
     const placeholderId = `local-img-${Date.now()}`;
 
     if (!imageServiceAvailable) {
-      // Service offline — show a helpful local message, do NOT route to LLM
+      // Service offline - show a helpful local message, do NOT route to LLM
       const offlineMsg = {
         id: placeholderId,
         role: 'assistant',
@@ -3500,7 +3523,7 @@ export default function ChatApp() {
     const serverMessages = chat.chat?.messages || [];
     const serverUserIdx = serverMessages.map((m) => m.id).lastIndexOf(lastUserMsg.id);
     if (serverUserIdx < 0) {
-      // Temp ID not on server (e.g. message from a failed/aborted stream) — don't patch
+      // Temp ID not on server (e.g. message from a failed/aborted stream) - don't patch
       setMessages(messages.slice(0, messages.lastIndexOf(lastUserMsg) + 1));
       setInput(lastUserMsg.content);
       setTimeout(() => sendMessageWithContent(lastUserMsg.content), 0);
@@ -3514,6 +3537,47 @@ export default function ChatApp() {
     setMessages(trimmed);
     setInput(lastUserMsg.content);
     setTimeout(() => sendMessageWithContent(lastUserMsg.content), 0);
+  }
+
+  // Chat -> Ledger loop: turn the current conversation into an IntelLedger session,
+  // extracting signals/actions from it, then jump straight to that session. Reuses
+  // the existing create-session + ingest/text endpoints (extraction has a heuristic
+  // fallback, so this works even without a live model).
+  async function commitChatToLedger() {
+    if (isCommittingToLedger) return;
+    const transcript = messages
+      .filter((m) => m.content && (m.role === 'user' || m.role === 'assistant'))
+      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n\n');
+    if (!transcript.trim()) {
+      setStatusText('Nothing to commit - the chat has no text yet.');
+      return;
+    }
+    const userId = safeStorageGet('mirabilis-user-id') || 'user-local';
+    const chatTitle = (chats.find((c) => c.id === activeChatId)?.title || '').trim() || 'Untitled chat';
+    setIsCommittingToLedger(true);
+    setStatusText('Committing chat to Ledger…');
+    try {
+      const created = await api('/api/intelledger/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ userId, title: `Chat: ${chatTitle}` })
+      });
+      const sessionId = created?.session?.id;
+      if (!sessionId) throw new Error('could not create ledger session');
+      await api(`/api/intelledger/sessions/${sessionId}/ingest/text`, {
+        method: 'POST',
+        body: JSON.stringify({ content: transcript, sourceName: 'chat' })
+      });
+      setStatusText('Committed to Ledger - signals extracted.');
+      appStore.toast('Committed to Ledger', { kind: 'success' });
+      playReceive();
+      // Close the loop: open the new session in the Ledger tab.
+      window.dispatchEvent(new CustomEvent('mirabilis:open-session', { detail: { id: sessionId } }));
+    } catch (err) {
+      setStatusText(`Commit to Ledger failed: ${err.message}`);
+    } finally {
+      setIsCommittingToLedger(false);
+    }
   }
 
   async function sendMessage() {
@@ -3531,6 +3595,7 @@ export default function ChatApp() {
     }
 
     setInput('');
+    playSend(); // ICQ send cue (no-ops on mute / reduced-motion)
 
     let outboundContent = content;
 
@@ -3552,13 +3617,19 @@ export default function ChatApp() {
       outboundContent = [content, '', ...behaviorInstructions].join('\n');
     }
 
+    // Canvas: when enabled, fold the user's canvas notes into the message as
+    // working context (previously the canvas text never reached the model).
+    if (canvasEnabled && canvasText.trim()) {
+      outboundContent = `${outboundContent}\n\n[Canvas notes - treat as the user's working context]\n${canvasText.trim()}`;
+    }
+
     // Inject remote control awareness when connected
     if (remoteConnected) {
       const disclaimer = [
         `Remote Control is active. Target: ${remoteTarget}.`,
         'When suggesting shell/terminal commands, wrap them in a fenced code block with language "bash" or "sh".',
         'The user can execute them on the target with a single click.',
-        'Do not auto-execute anything — always present and explain the command first.'
+        'Do not auto-execute anything - always present and explain the command first.'
       ].join(' ');
       outboundContent = `${outboundContent}\n\n[System: ${disclaimer}]`;
     }
@@ -3587,7 +3658,7 @@ export default function ChatApp() {
           ].join('\n');
           setWebSearchStatus('idle');
         } else {
-          // Search succeeded but no results — treat as soft error
+          // Search succeeded but no results - treat as soft error
           setWebSearchStatus('error');
           setTimeout(() => setWebSearchStatus('idle'), 4000);
         }
@@ -3683,10 +3754,40 @@ export default function ChatApp() {
       let buffer = '';
       refreshStallWatchdog();
 
+      // Coalesce streamed tokens: buffer incoming tokens and flush at most once per
+      // animation frame. Previously every token did its own setMessages, which
+      // re-parsed the whole (growing) message through Markdown + Prism on each
+      // token - O(n^2) for long answers. One flush per frame keeps rendering smooth.
+      let pendingTokens = '';
+      let tokenRafId = null;
+      const canRaf = typeof requestAnimationFrame === 'function';
+      const flushTokens = () => {
+        tokenRafId = null;
+        if (!pendingTokens) return;
+        const add = pendingTokens;
+        pendingTokens = '';
+        setMessages((prev) => {
+          if (prev.length === 0) return prev;
+          const next = [...prev];
+          const last = next[next.length - 1];
+          if (last.role === 'assistant') {
+            const nextContent = `${last.content}${add}`;
+            next[next.length - 1] = { ...last, content: nextContent, tokenEstimate: estimateTokens(nextContent) };
+          }
+          return next;
+        });
+      };
+      const cancelTokenFlush = () => {
+        if (tokenRafId != null && canRaf) cancelAnimationFrame(tokenRafId);
+        tokenRafId = null;
+        pendingTokens = '';
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         refreshStallWatchdog();
         if (done) {
+          flushTokens();
           break;
         }
 
@@ -3722,7 +3823,13 @@ export default function ChatApp() {
             continue;
           }
 
-          const payload = JSON.parse(dataText);
+          // A single malformed SSE chunk shouldn't abort the whole stream.
+          let payload;
+          try {
+            payload = JSON.parse(dataText);
+          } catch {
+            continue;
+          }
 
           if (event === 'meta' && payload.provider) {
             setMessages((prev) => {
@@ -3739,29 +3846,24 @@ export default function ChatApp() {
 
           if (event === 'token') {
             refreshStallWatchdog();
-            setMessages((prev) => {
-              const next = [...prev];
-              if (next.length === 0) {
-                return next;
-              }
-              const last = next[next.length - 1];
-              if (last.role === 'assistant') {
-                const nextContent = `${last.content}${payload.token || ''}`;
-                next[next.length - 1] = {
-                  ...last,
-                  content: nextContent,
-                  tokenEstimate: estimateTokens(nextContent)
-                };
-              }
-              return next;
-            });
+            pendingTokens += payload.token || '';
+            if (canRaf) {
+              if (tokenRafId == null) tokenRafId = requestAnimationFrame(flushTokens);
+            } else {
+              flushTokens();
+            }
           }
 
           if (event === 'error') {
+            cancelTokenFlush();
             throw new Error(payload.error || 'Streaming error');
           }
 
           if (event === 'done') {
+            // The full message supersedes any buffered tokens; drop the pending
+            // flush so a late frame can't append stale tokens after finalization.
+            cancelTokenFlush();
+            playReceive(); // ICQ "message received" two-tone cue
             setMessages((prev) => {
               const next = [...prev];
               if (next.length > 0) {
@@ -3823,6 +3925,7 @@ export default function ChatApp() {
         });
       } else {
         setStatusText(`Error: ${error.message}`);
+        playError(); // ICQ error cue
         setMessages((prev) => {
           const next = [...prev];
           if (next.length > 0 && next[next.length - 1].role === 'assistant' && !next[next.length - 1].content) {
@@ -4043,11 +4146,27 @@ export default function ChatApp() {
                     }
                   </svg>
                 </button>
-                <p className="shrink-0 font-mono text-xs text-[color:var(--text-muted)]">{statusText}</p>
+                <p role="status" aria-live="polite" aria-atomic="true" className="shrink-0 font-mono text-xs text-[color:var(--text-muted)]">{statusText}</p>
               </div>
-              <p className="truncate font-mono text-[11px] text-[color:var(--text-muted)]">
-                input {formatTokenCount(chatTokenSummary.input)} · output {formatTokenCount(chatTokenSummary.output)}
-              </p>
+              <div className="flex shrink-0 items-center gap-2">
+                {messages.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={commitChatToLedger}
+                    disabled={isCommittingToLedger}
+                    title="Commit this conversation to IntelLedger - extract signals, actions, and decisions, then open the session"
+                    className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent transition hover:bg-accent/20 disabled:opacity-50 dark:border-accent/30 dark:bg-accent/15 dark:hover:bg-accent/25"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M9 12h6M12 9v6"/>
+                    </svg>
+                    {isCommittingToLedger ? 'Committing…' : 'To Ledger'}
+                  </button>
+                )}
+                <p className="truncate font-mono text-[11px] text-[color:var(--text-muted)]">
+                  input {formatTokenCount(chatTokenSummary.input)} · output {formatTokenCount(chatTokenSummary.output)}
+                </p>
+              </div>
             </div>
 
             {remoteUsage.enabled && (
@@ -4067,7 +4186,7 @@ export default function ChatApp() {
 
             <div className="mt-1.5 flex flex-nowrap items-center gap-1.5">
 
-                {/* hardware chips — left */}
+                {/* hardware chips - left */}
                 {['logic', 'memory', 'compute', 'npu'].map((key) => {
                   const item = hardwareProfile[key];
                   if (!item?.label) return null;
@@ -4116,17 +4235,17 @@ export default function ChatApp() {
                   );
                 })}
 
-                {/* web search chip — fixed width so it never grows when searching */}
+                {/* web search chip - fixed width so it never grows when searching */}
                 <div className="relative">
                 <button
                   type="button"
                   onClick={() => setDeepWebEnabled((v) => !v)}
                   title={
                     webSearchStatus === 'error'
-                      ? 'Web search failed — results unavailable'
+                      ? 'Web search failed - results unavailable'
                       : deepWebEnabled
-                      ? 'Web search on — click to disable'
-                      : 'Web search off — click to enable'
+                      ? 'Web search on - click to disable'
+                      : 'Web search off - click to enable'
                   }
                   className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
                     webSearchStatus === 'searching'
@@ -4142,7 +4261,7 @@ export default function ChatApp() {
                 </button>
                 </div>
 
-                {/* context + engine — right */}
+                {/* context + engine - right */}
                 <div className="ml-auto flex flex-nowrap items-center gap-1.5">
                   <div className="relative">
                   <button
@@ -4274,11 +4393,11 @@ export default function ChatApp() {
               setShowScrollDown(!atBottom);
 
               if (scrollingUp) {
-                // User scrolled up — pause auto-scroll
+                // User scrolled up - pause auto-scroll
                 autoScrollRef.current = false;
                 setAutoScrollEnabled(false);
               } else if (atBottom) {
-                // User reached bottom — resume auto-scroll
+                // User reached bottom - resume auto-scroll
                 autoScrollRef.current = true;
                 setAutoScrollEnabled(true);
               }
@@ -4540,7 +4659,7 @@ export default function ChatApp() {
                                 setProvider(opt.id);
                                 setIsProviderMenuOpen(false);
                                 setStatusText(`Provider: ${opt.label} (${opt.scope})`);
-                                const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'claude', 'gpuaas'];
+                                const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas'];
                                 if (cloudOnlyProviders.includes(opt.id)) {
                                   setModel((m) => (typeof m === 'string' && m.toLowerCase().endsWith('.gguf') ? 'auto' : m));
                                 }
@@ -4677,6 +4796,11 @@ export default function ChatApp() {
                         ℹ Gemini uses Google AI OpenAI endpoint at https://generativelanguage.googleapis.com/v1beta/openai and requires an API key.
                       </p>
                     )}
+                    {provider === 'cerebras' && (
+                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        ℹ Cerebras uses https://api.cerebras.ai/v1 and requires an API key (csk-…). Free tier available.
+                      </p>
+                    )}
                     {provider === 'claude' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                         ℹ Claude uses Anthropic API at https://api.anthropic.com and requires an API key.
@@ -4686,18 +4810,18 @@ export default function ChatApp() {
                     <input
                       type="text"
                       className="mb-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
-                      placeholder={provider === 'koboldcpp' ? 'http://127.0.0.1:5001/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'grok' ? 'https://api.x.ai/v1' : provider === 'groq' ? 'https://api.groq.com/openai/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'claude' ? 'https://api.anthropic.com' : provider === 'gpuaas' ? 'https://your-gpuaas-endpoint.example/v1' : 'http://127.0.0.1:1234/v1'}
+                      placeholder={provider === 'koboldcpp' ? 'http://127.0.0.1:5001/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'grok' ? 'https://api.x.ai/v1' : provider === 'groq' ? 'https://api.groq.com/openai/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'cerebras' ? 'https://api.cerebras.ai/v1' : provider === 'claude' ? 'https://api.anthropic.com' : provider === 'gpuaas' ? 'https://your-gpuaas-endpoint.example/v1' : 'http://127.0.0.1:1234/v1'}
                       value={providerConfigs[provider]?.baseUrl || ''}
                       onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], baseUrl: e.target.value } }))}
                     />
-                    {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && (
+                    {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && (
                       <>
-                        <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">API Key <span className="opacity-60">{provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas' ? '(required)' : '(leave empty for local servers)'}</span></label>
+                        <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">API Key <span className="opacity-60">{provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' ? '(required)' : '(leave empty for local servers)'}</span></label>
                         <div className="mb-2 flex gap-1">
                           <input
                             type="password"
                             className="min-w-0 flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
-                            placeholder={provider === 'openai' ? 'sk-... (required)' : provider === 'grok' ? 'xai-... (required)' : provider === 'groq' ? 'gsk_... (required)' : provider === 'openrouter' ? 'sk-or-... (required)' : provider === 'gemini' ? 'AIza... (required)' : provider === 'claude' ? 'sk-ant-... (required)' : provider === 'gpuaas' ? 'provider key (required)' : 'sk-... (optional for local)'}
+                            placeholder={provider === 'openai' ? 'sk-... (required)' : provider === 'grok' ? 'xai-... (required)' : provider === 'groq' ? 'gsk_... (required)' : provider === 'openrouter' ? 'sk-or-... (required)' : provider === 'gemini' ? 'AIza... (required)' : provider === 'cerebras' ? 'csk-... (required)' : provider === 'claude' ? 'sk-ant-... (required)' : provider === 'gpuaas' ? 'provider key (required)' : 'sk-... (optional for local)'}
                             value={providerConfigs[provider]?.apiKey || ''}
                             onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], apiKey: e.target.value } }))}
                           />
@@ -4714,7 +4838,7 @@ export default function ChatApp() {
                         </div>
                       </>
                     )}
-                    {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'claude' || provider === 'gpuaas') && (
+                    {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas') && (
                       <>
                         <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">Estimated Monthly Budget (USD)</label>
                         <input
@@ -4771,7 +4895,7 @@ export default function ChatApp() {
                   <div data-menu-panel="model" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-96 w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       {models.length > 0 ? (
                         <>
-                        {/* Auto mode entry — no group header, divider separates it from model groups */}
+                        {/* Auto mode entry - no group header, divider separates it from model groups */}
                         <div className="group/row relative flex items-center">
                           <button
                             type="button"
@@ -4858,7 +4982,7 @@ export default function ChatApp() {
                                       <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
                                     )}
                                     {!isInstalled && (
-                                      <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
+                                      <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--presence-offline)]" />
                                     )}
                                     <span className="truncate">
                                       {item.label}
@@ -4917,7 +5041,7 @@ export default function ChatApp() {
                         <div className="px-2 py-2 text-xs text-[color:var(--text-muted)]">No models found</div>
                       )}
 
-                    {/* Pull any model not in the list (Ollama mode) — reuses the
+                    {/* Pull any model not in the list (Ollama mode) - reuses the
                         existing install-job pipeline via installModel(). */}
                     {provider === 'ollama' && (
                       <div className="mt-1 border-t border-black/10 px-2 py-2">
@@ -5340,7 +5464,7 @@ export default function ChatApp() {
                     <span className={`h-2 w-2 rounded-full ${openClawMode ? 'bg-rose-400 shadow-[0_0_6px_2px_rgba(244,63,94,0.5)]' : 'bg-transparent border border-slate-400/40'}`} />
                     OpenClaw
                   </button>
-                  {/* Hover tooltip — no button/state needed */}
+                  {/* Hover tooltip - no button/state needed */}
                   <div className="pointer-events-none absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 text-[11px] text-[color:var(--text-main)] opacity-0 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur transition-all duration-150 group-hover:opacity-100">
                     <div className="mb-1.5 text-[11px] font-semibold text-[color:var(--text-main)]">OpenClaw Profile</div>
                     <ul className="space-y-1 text-[10px] leading-relaxed text-[color:var(--text-muted)]">
@@ -5806,10 +5930,10 @@ export default function ChatApp() {
                     {voiceEngine === 'piper' && (
                       <div className="space-y-2">
                         {!voiceTools?.voices?.localPiper && (
-                          <div className="rounded-lg border border-[var(--hairline)] bg-slate-50/80 p-2 text-[10px]">
+                          <div className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2 text-[10px]">
                             <div className="mb-0.5 font-semibold text-[color:var(--text-main)]">Piper Neural TTS</div>
                             <div className="mb-2 text-[color:var(--text-muted)]">
-                              Free, high-quality local voices that run offline. Runs on your device — no cloud.
+                              Free, high-quality local voices that run offline. Runs on your device - no cloud.
                             </div>
                             <button
                               type="button"
@@ -5876,7 +6000,8 @@ export default function ChatApp() {
 
                 <button
                   onClick={isStreaming ? stopStreaming : sendMessage}
-                  className={`au-focus w-full rounded-[var(--r-lg)] px-2 py-2 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition active:scale-[0.98] hover:brightness-110 ${isStreaming ? 'bg-red-500' : ''}`}
+                  disabled={!isStreaming && !input.trim()}
+                  className={`au-focus w-full rounded-[var(--r-lg)] px-2 py-2 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition active:scale-[0.98] enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${isStreaming ? 'bg-red-500' : ''}`}
                   style={isStreaming ? undefined : { background: 'var(--accent)' }}
                 >
                   {isStreaming ? 'Stop' : 'Send'}
@@ -5910,7 +6035,7 @@ export default function ChatApp() {
           )}
         </section>
       </div>
-      <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-[color:var(--text-main)]/90/90">
+      <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-[color:var(--text-main)]/90">
         {APP_FOOTER_TEXT}
         <span className="mx-1.5 opacity-40">·</span>
         <span className="opacity-55">{APP_VERSION}</span>

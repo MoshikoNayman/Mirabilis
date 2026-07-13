@@ -4,7 +4,7 @@
 // decoupled from the ChatApp monolith.
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Kbd } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
 import {
@@ -66,6 +66,12 @@ export default function CommandPalette({ open, onTab }) {
       .sort((a, b) => b.score - a.score)
       .map((x) => x.c);
   }, [commands, query]);
+
+  // Keep the highlighted command scrolled into view during arrow-key nav
+  // (the input keeps focus, so the browser won't auto-scroll it for us).
+  useEffect(() => {
+    listRef.current?.querySelectorAll('button')[active]?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
 
   function runAt(idx) {
     const cmd = filtered[idx];

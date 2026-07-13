@@ -21,12 +21,12 @@
     'SF Mono', 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
 
   /* ── Tightened type scale (replaces the 10/11/12/13px scatter) ── */
-  --text-2xs: 0.6875rem;  /* 11px — meta, badges */
-  --text-xs:  0.75rem;    /* 12px — secondary */
-  --text-sm:  0.8125rem;  /* 13px — body default */
-  --text-md:  0.9375rem;  /* 15px — emphasis / input */
-  --text-lg:  1.125rem;   /* 18px — section titles */
-  --text-xl:  1.5rem;     /* 24px — display */
+  --text-2xs: 0.6875rem;  /* 11px - meta, badges */
+  --text-xs:  0.75rem;    /* 12px - secondary */
+  --text-sm:  0.8125rem;  /* 13px - body default */
+  --text-md:  0.9375rem;  /* 15px - emphasis / input */
+  --text-lg:  1.125rem;   /* 18px - section titles */
+  --text-xl:  1.5rem;     /* 24px - display */
   --weight-regular: 450;
   --weight-medium:  550;
   --weight-bold:    680;
@@ -116,7 +116,7 @@
 .au-elev-2 { box-shadow: var(--shadow-2); }
 .au-elev-3 { box-shadow: var(--shadow-3); }
 
-/* Focus ring — single consistent treatment */
+/* Focus ring - single consistent treatment */
 .au-focus:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--ring);

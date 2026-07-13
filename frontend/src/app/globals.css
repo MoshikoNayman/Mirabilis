@@ -22,7 +22,7 @@
   --accent:       #1aa86f;
   --accent-soft:  #dcfce7;
   --signal-blue:  #1e65ff;
-  /* code block — Frosted Light: multi-color syntax */
+  /* code block - Frosted Light: multi-color syntax */
   --code-bg:      #f0faf5;
   --code-header:  rgba(228,248,238,0.97);
   --code-border:  rgba(26,168,111,0.18);
@@ -50,7 +50,7 @@
   --accent:       #0ea5e9;
   --accent-soft:  #e0f2fe;
   --signal-blue:  #0ea5e9;
-  /* code block — deep navy ice */
+  /* code block - deep navy ice */
   --code-bg:      #0a1628;
   --code-header:  rgba(6,12,22,0.97);
   --code-border:  rgba(14,165,233,0.25);
@@ -78,7 +78,7 @@
   --accent:       #c2710c;
   --accent-soft:  #fde8c8;
   --signal-blue:  #1e65ff;
-  /* code block — warm dark parchment */
+  /* code block - warm dark parchment */
   --code-bg:      #1e1208;
   --code-header:  rgba(20,10,4,0.97);
   --code-border:  rgba(194,113,12,0.25);
@@ -106,7 +106,7 @@
   --accent:       #007aff;
   --accent-soft:  #dbeafe;
   --signal-blue:  #007aff;
-  /* code block — Xcode Dark */
+  /* code block - Xcode Dark */
   --code-bg:      #1c1c1e;
   --code-header:  rgba(20,20,22,0.98);
   --code-border:  rgba(0,122,255,0.22);
@@ -221,7 +221,7 @@ body {
 /* ── Font overrides via data-font attribute ───────────────────────────── */
 [data-font="system"] body   { font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Avenir Next', sans-serif; }
 [data-font="tahoma"] body   { font-family: Tahoma, Geneva, Verdana, sans-serif; }
-/* data-font="jakarta" is the default — no override needed */
+/* data-font="jakarta" is the default - no override needed */
 
 body {
   margin: 0;

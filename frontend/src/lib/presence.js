@@ -15,6 +15,7 @@ export const PROVIDERS = [
   { id: 'groq', label: 'Groq', scope: 'remote', needsKey: true, baseUrl: 'https://api.groq.com/openai/v1' },
   { id: 'grok', label: 'Grok', scope: 'remote', needsKey: true, baseUrl: 'https://api.x.ai/v1' },
   { id: 'openrouter', label: 'OpenRouter', scope: 'remote', needsKey: true, baseUrl: 'https://openrouter.ai/api/v1' },
+  { id: 'cerebras', label: 'Cerebras', scope: 'remote', needsKey: true, baseUrl: 'https://api.cerebras.ai/v1' },
   { id: 'gpuaas', label: 'GPUaaS', scope: 'remote', needsKey: true, baseUrl: '' }
 ];
 

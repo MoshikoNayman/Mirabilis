@@ -1,6 +1,6 @@
 // frontend/src/components/shell/AuroraChrome.jsx
 // The Aurora shell chrome: floating dock, command palette, omni-search, buddy
-// list, toasts, and the footer — layered over the existing app so every screen
+// list, toasts, and the footer - layered over the existing app so every screen
 // gains the Fusion experience without fighting ChatApp's full-screen layout.
 'use client';
 

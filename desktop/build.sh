@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh — Build Mirabilis AI.app
+# build.sh - Build Mirabilis AI.app
 # Run from:  Mirabilis/desktop/
 # Output:    Mirabilis/desktop/dist/
 
@@ -29,7 +29,7 @@ case "$BUILD_TARGET" in
     ;;
 esac
 
-# Temp staging dir — auto-cleaned on exit (success, failure, or Ctrl+C)
+# Temp staging dir - auto-cleaned on exit (success, failure, or Ctrl+C)
 BUILD_DIR="$(mktemp -d)"
 trap 'echo "==> Cleaning up temp files..."; rm -rf "$BUILD_DIR"; echo "Done."' EXIT
 

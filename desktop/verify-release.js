@@ -115,6 +115,21 @@ if (target === 'win' || target === 'windows' || target === 'win32') {
   process.exit(0);
 }
 
+if (target === 'linux' || target === 'appimage') {
+  const appImages = files.filter((f) => f.toLowerCase().endsWith('.appimage'));
+  const primary = appImages.sort((a, b) => fs.statSync(b).size - fs.statSync(a).size)[0];
+  if (!primary) {
+    fail('No .AppImage found in dist (expected from electron-builder AppImage target).');
+  }
+  const size = fs.statSync(primary).size;
+  if (size < 20 * 1024 * 1024) {
+    fail(`AppImage is unexpectedly small (${formatBytes(size)}): ${primary}`);
+  }
+  console.log(`OK  appimage: ${primary}`);
+  console.log(`OK  appimage size: ${formatBytes(size)}`);
+  process.exit(0);
+}
+
 console.log('INFO Unknown target; running generic checks only.');
 console.log(`INFO exe count: ${exes.length}, app marker count: ${apps.length}`);
 process.exit(0);

@@ -6,15 +6,15 @@
  * Mirabilis AI tools directly from the editor.
  *
  * Exposed tools:
- *   - mirabilis_chat         — Send a prompt and get an AI response
- *   - mirabilis_list_models  — List available providers and models
- *   - mirabilis_health       — Check provider readiness
+ *   - mirabilis_chat         - Send a prompt and get an AI response
+ *   - mirabilis_list_models  - List available providers and models
+ *   - mirabilis_health       - Check provider readiness
  *
  * All requests are logged to mcp-server-audit.jsonl in the data directory.
  */
 
 import { mkdir, appendFile, readFile, writeFile, readdir, stat } from 'node:fs/promises';
-import { dirname, resolve, normalize } from 'node:path';
+import { dirname, resolve, normalize, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -234,8 +234,21 @@ function isSafeCommand(command) {
   return !BLOCKED_COMMAND_PATTERNS.some((re) => re.test(command));
 }
 
+// Optional filesystem jail for the MCP file tools. By default the tools operate
+// system-wide (the advertised "system control" capability, now reachable only
+// with the local MCP token). Setting MIRABILIS_MCP_FS_ROOT confines read/write/
+// list to that subtree - for users who want a locked-down MCP server.
+const MCP_FS_ROOT = process.env.MIRABILIS_MCP_FS_ROOT
+  ? resolve(String(process.env.MIRABILIS_MCP_FS_ROOT))
+  : null;
+
 function safeResolvePath(inputPath) {
-  return resolve(process.cwd(), normalize(String(inputPath || '').replace(/\0/g, '')));
+  const cleaned = normalize(String(inputPath || '').replace(/\0/g, ''));
+  const resolved = resolve(MCP_FS_ROOT || process.cwd(), cleaned);
+  if (MCP_FS_ROOT && resolved !== MCP_FS_ROOT && !resolved.startsWith(MCP_FS_ROOT + sep)) {
+    throw new Error(`Path escapes the configured MCP filesystem root (${MCP_FS_ROOT})`);
+  }
+  return resolved;
 }
 
 async function callSystemInfo() {
@@ -302,7 +315,7 @@ async function callRunCommand({ command, cwd: workDir, confirmed }) {
     });
     return { command: cmd, cwd: execCwd, stdout: stdout || '', stderr: stderr || '', exitCode: 0 };
   } catch (err) {
-    // Non-zero exit — return output rather than throwing so caller can read stderr
+    // Non-zero exit - return output rather than throwing so caller can read stderr
     return {
       command: cmd,
       cwd: execCwd,
@@ -430,7 +443,7 @@ export function createMcpServerHandler({ config, streamWithProvider, getEffectiv
         }));
       } catch (error) {
         const durationMs = Date.now() - startedAt;
-        mcpLog('ERROR', `Tool failed: ${toolName} — ${error.message || 'unknown'}`, { ms: durationMs, client: clientIp });
+        mcpLog('ERROR', `Tool failed: ${toolName} - ${error.message || 'unknown'}`, { ms: durationMs, client: clientIp });
         void appendServerAudit(auditLogPath, 'tool_call_error', {
           toolName, clientIp, error: error.message || 'unknown', durationMs
         });

@@ -239,16 +239,31 @@ function npmArgs(args) {
   return args;
 }
 
-async function endpointReady(url) {
+// `validate` lets a caller require more than HTTP 200 - e.g. the image service
+// returns 200 from /health even while the model failed to load, so its readiness
+// check must inspect the JSON `status` field.
+async function endpointReady(url, validate) {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
+    if (validate) return await validate(res);
     return res.ok;
   } catch {
     return false;
   }
 }
 
-async function waitForEndpoint(url, timeoutMs, label, processObj, logFile) {
+// True only when /health reports status 'ok' (not 'initializing' or 'error').
+async function imageHealthReady(res) {
+  if (!res.ok) return false;
+  try {
+    const body = await res.json();
+    return body?.status === 'ok';
+  } catch {
+    return false;
+  }
+}
+
+async function waitForEndpoint(url, timeoutMs, label, processObj, logFile, validate) {
   const started = Date.now();
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let spinnerIndex = 0;
@@ -261,7 +276,7 @@ async function waitForEndpoint(url, timeoutMs, label, processObj, logFile) {
 
   try {
     while (Date.now() - started < timeoutMs) {
-      if (await endpointReady(url)) {
+      if (await endpointReady(url, validate)) {
         clearInterval(spinnerInterval);
         process.stdout.write('\r');
         return;
@@ -292,14 +307,14 @@ async function waitForEndpoint(url, timeoutMs, label, processObj, logFile) {
   }
 }
 
-async function ensureServiceRunning({ label, url, timeoutMs, spawnService, logFile }) {
-  if (await endpointReady(url)) {
+async function ensureServiceRunning({ label, url, timeoutMs, spawnService, logFile, validate }) {
+  if (await endpointReady(url, validate)) {
     statusLine('INFO', `${label} already running; reusing existing service`);
     return null;
   }
 
   const processObj = spawnService();
-  await waitForEndpoint(url, timeoutMs, label, processObj, logFile);
+  await waitForEndpoint(url, timeoutMs, label, processObj, logFile, validate);
   return processObj;
 }
 
@@ -316,7 +331,9 @@ async function getListeningPidsOnPort(port) {
       if (!line) continue;
       if (!line.includes('LISTENING')) continue;
       // Use word-boundary match to avoid :3000 matching :30001 etc.
-      if (!new RegExp(`:${port}(?:\s|$)`).test(line)) continue;
+      // NOTE: double backslash - inside a template literal `\s` collapses to a
+      // literal "s", so the boundary must be written `\\s` to reach the RegExp.
+      if (!new RegExp(`:${port}(?:\\s|$)`).test(line)) continue;
       const parts = line.split(/\s+/);
       const pid = Number(parts[parts.length - 1]);
       if (Number.isInteger(pid) && pid > 0) pids.add(pid);
@@ -573,7 +590,7 @@ async function ensureOllamaModel() {
     // Continue to pull attempt.
   }
 
-  statusLine('INFO', 'No Ollama models found — pulling qwen2.5:0.5b (one-time, ~400MB)...');
+  statusLine('INFO', 'No Ollama models found - pulling qwen2.5:0.5b (one-time, ~400MB)...');
   const code = await runForeground(ollamaBin, ['pull', 'qwen2.5:0.5b'], ROOT_DIR);
   if (code === 0) statusLine('OK', 'Ollama default model ready');
   return code === 0;
@@ -738,7 +755,7 @@ async function getInstalledOllamaModels() {
 }
 
 async function installOllama() {
-  statusLine('INFO', 'Ollama not found — attempting auto-install...');
+  statusLine('INFO', 'Ollama not found - attempting auto-install...');
   if (process.platform === 'darwin') {
     if (await commandExists('brew')) {
       statusLine('INFO', 'Installing Ollama via Homebrew (this may take a minute)...');
@@ -791,7 +808,7 @@ async function runInstall() {
   }
   statusLine('OK', `Node.js: ${require('child_process').execSync('node -v', { encoding: 'utf8' }).trim()}`);
 
-  // Check Ollama — auto-install if missing
+  // Check Ollama - auto-install if missing
   if (!(await hasOllamaCommand())) {
     await installOllama();
   }
@@ -813,7 +830,7 @@ async function runInstall() {
     }
   }
 
-  // Ensure at least one Ollama model is available — pull default if none
+  // Ensure at least one Ollama model is available - pull default if none
   await ensureOllamaModel();
 
   // Install backend
@@ -898,7 +915,11 @@ async function runInstall() {
     if (!fs.existsSync(path.join(PROVIDERS_DIR, 'koboldcpp'))) {
       if (arch === 'arm64') {
         statusLine('INFO', 'Installing KoboldCpp...');
-        const releaseUrl = 'https://api.github.com/repos/LostRuins/koboldcpp/releases/latest';
+        // Pin to a known release rather than `latest`, so an install is reproducible
+        // and users don't silently run whatever gets published upstream tomorrow.
+        // Override with MIRABILIS_KOBOLDCPP_TAG to move to a newer build.
+        const koboldTag = process.env.MIRABILIS_KOBOLDCPP_TAG || 'v1.117.1';
+        const releaseUrl = `https://api.github.com/repos/LostRuins/koboldcpp/releases/tags/${koboldTag}`;
         const releaseRes = await fetch(releaseUrl);
         const release = await releaseRes.json();
         const asset = release.assets?.find(a => a.name === 'koboldcpp-mac-arm64');
@@ -1220,15 +1241,23 @@ async function stopAll() {
   }
 
   if (!stoppedAny) {
-    process.stdout.write('No active PID state found; using fallback pattern stop.\n');
-    if (process.platform === 'win32') {
-      await runForeground('taskkill', ['/F', '/IM', 'llama-server.exe'], ROOT_DIR);
-      await runForeground('taskkill', ['/F', '/IM', 'koboldcpp.exe'], ROOT_DIR);
-      await runForeground('taskkill', ['/F', '/IM', 'ollama.exe'], ROOT_DIR);
-      await runForeground('taskkill', ['/F', '/IM', 'python.exe'], ROOT_DIR);
-      await runForeground('taskkill', ['/F', '/IM', 'node.exe'], ROOT_DIR);
-    } else {
-      await runForeground('pkill', ['-f', 'node --watch src/server.js|next dev|python server.py|llama-server|koboldcpp|ollama serve'], ROOT_DIR);
+    // No recorded PID state. We deliberately do NOT fall back to broad
+    // `taskkill /IM node.exe` / `pkill -f` here: those match unrelated processes
+    // (the user's editor, another project's `next dev`, an unrelated Ollama) and
+    // would kill them with unsaved work. Instead, target only the processes that
+    // are actually listening on Mirabilis's own ports.
+    process.stdout.write('No active PID state found; stopping only processes on Mirabilis ports (3000, 4000, 7860).\n');
+    for (const port of [3000, 4000, 7860]) {
+      const pids = await getListeningPidsOnPort(port);
+      for (const pid of pids) {
+        if (Number.isInteger(pid) && pid > 1 && pid !== process.pid) {
+          const stopped = await terminatePid(pid);
+          stoppedAny = stoppedAny || stopped;
+        }
+      }
+    }
+    if (!stoppedAny) {
+      process.stdout.write('Nothing to stop. If a service is still running, close its terminal or reboot; Mirabilis will not force-kill unrelated processes by name.\n');
     }
   }
 
@@ -1258,7 +1287,7 @@ async function runDoctor() {
 
   add('backend endpoint', await endpointReady('http://127.0.0.1:4000/health'), 'http://127.0.0.1:4000/health');
   add('frontend endpoint', await endpointReady('http://127.0.0.1:3000'), 'http://127.0.0.1:3000');
-  add('image endpoint', await endpointReady('http://127.0.0.1:7860/health'), 'http://127.0.0.1:7860/health');
+  add('image endpoint', await endpointReady('http://127.0.0.1:7860/health', imageHealthReady), 'http://127.0.0.1:7860/health');
 
   process.stdout.write('Mirabilis doctor report:\n');
   for (const c of checks) {
@@ -1572,6 +1601,7 @@ async function main() {
       url: 'http://127.0.0.1:7860/health',
       timeoutMs: imageStartupTimeoutMs,
       logFile: imageLogFile,
+      validate: imageHealthReady,
       spawnService: () => spawnLogged(imagePythonPath(), ['-u', 'server.py'], IMAGE_SERVICE_DIR, imageEnv, imageLogFile, false)
     });
     statusLine('OK', 'Image service: http://127.0.0.1:7860');

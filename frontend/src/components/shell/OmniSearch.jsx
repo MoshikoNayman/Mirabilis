@@ -129,13 +129,32 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
     }
   }
 
+  // Flat, ordered view of all results so ↑/↓ can move a single highlight across
+  // the Chats / IntelLedger / Providers groups (mirrors CommandPalette).
+  const flat = useMemo(() => [
+    ...chatResults.map((c) => ({ type: 'chat', item: c })),
+    ...ledger.map((s) => ({ type: 'session', item: s })),
+    ...providerResults.map((p) => ({ type: 'provider', item: p })),
+  ], [chatResults, ledger, providerResults]);
+  const [active, setActive] = useState(0);
+  const listRef = useRef(null);
+  useEffect(() => { setActive(0); }, [flat]);
+  useEffect(() => {
+    listRef.current?.querySelectorAll('button')[active]?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+
+  function openFlat(i) {
+    const f = flat[i];
+    if (!f) return;
+    if (f.type === 'chat') openChat(f.item);
+    else if (f.type === 'session') openSession(f.item);
+    else openProvider(f.item);
+  }
+
   function onKeyDown(e) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (chatResults[0]) openChat(chatResults[0]);
-      else if (ledger[0]) openSession(ledger[0]);
-      else if (providerResults[0]) openProvider(providerResults[0]);
-    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, flat.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); openFlat(active); }
   }
 
   return (
@@ -154,29 +173,30 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
           />
           {loading ? <Spinner /> : <Kbd>Esc</Kbd>}
         </div>
-        <div className="au-scroll max-h-[56vh] overflow-y-auto p-1.5">
+        <div ref={listRef} className="au-scroll max-h-[56vh] overflow-y-auto p-1.5">
           {chatResults.length > 0 && (
             <Section title="Chats">
-              {chatResults.map((c) => (
-                <Row key={c.id} icon="💬" title={c.title} sub={c.preview} onClick={() => openChat(c)} />
+              {chatResults.map((c, i) => (
+                <Row key={c.id} icon="💬" title={c.title} sub={c.preview} active={active === i} onClick={() => openChat(c)} />
               ))}
             </Section>
           )}
           {ledger.length > 0 && (
             <Section title="IntelLedger">
-              {ledger.map((s) => (
-                <Row key={s.id} icon="🗂" title={s.title} sub={s.preview} onClick={() => openSession(s)} />
+              {ledger.map((s, i) => (
+                <Row key={s.id} icon="🗂" title={s.title} sub={s.preview} active={active === chatResults.length + i} onClick={() => openSession(s)} />
               ))}
             </Section>
           )}
           {providerResults.length > 0 && (
             <Section title="Providers">
-              {providerResults.map((p) => (
+              {providerResults.map((p, i) => (
                 <Row
                   key={p.id}
                   leading={<PresenceDot presence={(presence?.[p.id] === 'unknown' ? 'offline' : presence?.[p.id]) || 'offline'} />}
                   title={p.label}
                   sub={`${p.scope} provider`}
+                  active={active === chatResults.length + ledger.length + i}
                   onClick={() => openProvider(p)}
                 />
               ))}
@@ -204,12 +224,12 @@ function Section({ title, children }) {
   );
 }
 
-function Row({ icon, leading, title, sub, onClick }) {
+function Row({ icon, leading, title, sub, onClick, active }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="au-focus flex w-full items-center gap-3 rounded-[var(--r-md)] px-3 py-2 text-left transition hover:bg-[color:var(--hairline)]"
+      className={`au-focus flex w-full items-center gap-3 rounded-[var(--r-md)] px-3 py-2 text-left transition hover:bg-[color:var(--hairline)] ${active ? 'bg-[color:var(--hairline)]' : ''}`}
     >
       {leading || <span className="text-[length:var(--text-md)]">{icon}</span>}
       <span className="flex min-w-0 flex-1 flex-col">

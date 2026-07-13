@@ -62,7 +62,7 @@ if (process.platform === 'darwin') {
     applicationName: 'Mirabilis AI',
     applicationVersion: app.getVersion(),
     version: '',
-    copyright: '\u00a9 2025 Moshiko Nayman',
+    copyright: '\u00a9 2026 Moshiko Nayman',
     credits: 'Privacy-first local AI assistant',
     iconPath: path.join(__dirname, 'icons', 'icon.png')
   });
@@ -132,19 +132,71 @@ function buildStartupDiagnostics(err) {
 }
 
 // ── Port cleanup ───────────────────────────────────────────────────────────
-// Kill any process occupying a port before we try to bind it.
-function freePort(port) {
-  const { exec } = require('node:child_process');
+// Reclaim a port ONLY from a stale Mirabilis server - never from a foreign app.
+// The previous version blindly `kill -9`'d whatever held ports 3000/4000, which
+// would silently kill an unrelated dev server the user had running. We now look
+// up the owning PID, inspect its command line, and stop it only if it is clearly
+// one of our own processes (server.js or the Next standalone server we ship).
+const { execFile } = require('node:child_process');
+
+function execFileP(cmd, args) {
   return new Promise((resolve) => {
-    if (process.platform === 'win32') {
-      exec(
-        `for /f "tokens=5" %p in ('netstat -ano ^| findstr LISTENING ^| findstr :${port}') do taskkill /F /PID %p`,
-        () => resolve()
-      );
-    } else {
-      exec(`lsof -ti tcp:${port} | xargs kill -9 2>/dev/null; true`, () => resolve());
-    }
+    execFile(cmd, args, { timeout: 4000 }, (err, stdout = '') => resolve(err ? '' : String(stdout)));
   });
+}
+
+async function pidsOnPort(port) {
+  if (process.platform === 'win32') {
+    const out = await execFileP('netstat', ['-ano', '-p', 'tcp']);
+    const pids = new Set();
+    for (const line of out.split('\n')) {
+      if (!line.includes('LISTENING')) continue;
+      if (!new RegExp(`:${port}(?:\\s|$)`).test(line.trim())) continue;
+      const pid = Number(line.trim().split(/\s+/).pop());
+      if (Number.isInteger(pid) && pid > 1) pids.add(pid);
+    }
+    return [...pids];
+  }
+  const out = await execFileP('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']);
+  return out.split('\n').map((s) => Number(s.trim())).filter((p) => Number.isInteger(p) && p > 1);
+}
+
+async function pidCommandLine(pid) {
+  if (process.platform === 'win32') {
+    const out = await execFileP('powershell.exe', ['-NoProfile', '-Command',
+      `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").CommandLine`]);
+    return out.trim();
+  }
+  return (await execFileP('ps', ['-p', String(pid), '-o', 'command='])).trim();
+}
+
+function looksLikeMirabilis(cmdline) {
+  const c = cmdline.toLowerCase();
+  // Our backend runs `server.js`; our packaged frontend runs the Next standalone
+  // `server.js` from inside a Mirabilis resources path. Require a Mirabilis marker
+  // so a generic `node server.js` in some other project is never matched.
+  const isOurs = c.includes('mirabilis') || c.includes(app.getPath('userData').toLowerCase());
+  return isOurs && (c.includes('server.js') || c.includes('next'));
+}
+
+function killPid(pid) {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') execFile('taskkill', ['/F', '/T', '/PID', String(pid)], () => resolve());
+    else { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } setTimeout(resolve, 300); }
+  });
+}
+
+async function freePort(port) {
+  for (const pid of await pidsOnPort(port)) {
+    if (pid === process.pid) continue;
+    const cmd = await pidCommandLine(pid);
+    if (looksLikeMirabilis(cmd)) {
+      console.log(`[port] reclaiming :${port} from stale Mirabilis pid ${pid}`);
+      await killPid(pid);
+    } else {
+      console.warn(`[port] :${port} held by a non-Mirabilis process (pid ${pid}); leaving it alone`);
+    }
+  }
 }
 
 // ── Start backend (Express) ────────────────────────────────────────────────
@@ -177,14 +229,14 @@ function startBackend() {
     backendProc.on('exit', (code) => {
       if (code !== 0 && code !== null) {
         clearInterval(check);
-        reject(new Error(`Backend exited with code ${code} — check ${path.join(LOG_DIR, 'backend.log')}`));
+        reject(new Error(`Backend exited with code ${code} - check ${path.join(LOG_DIR, 'backend.log')}`));
       }
     });
   }).then(() => {
-    // Runtime crash handler — fires if backend dies after successful startup
+    // Runtime crash handler - fires if backend dies after successful startup
     backendProc.once('exit', (code) => {
       if (code !== 0 && code !== null && !app.isQuiting) {
-        dialog.showErrorBox('Mirabilis — backend crashed',
+        dialog.showErrorBox('Mirabilis - backend crashed',
           `Backend exited unexpectedly (code ${code}).\nCheck ${path.join(LOG_DIR, 'backend.log')}`);
         app.quit();
       }
@@ -236,14 +288,14 @@ function startFrontend() {
     frontendProc.on('exit', (code) => {
       if (code !== 0 && code !== null) {
         clearInterval(check);
-        reject(new Error(`Frontend exited with code ${code} — check ${path.join(LOG_DIR, 'frontend.log')}`));
+        reject(new Error(`Frontend exited with code ${code} - check ${path.join(LOG_DIR, 'frontend.log')}`));
       }
     });
   }).then(() => {
-    // Runtime crash handler — fires if frontend dies after successful startup
+    // Runtime crash handler - fires if frontend dies after successful startup
     frontendProc.once('exit', (code) => {
       if (code !== 0 && code !== null && !app.isQuiting) {
-        dialog.showErrorBox('Mirabilis — frontend crashed',
+        dialog.showErrorBox('Mirabilis - frontend crashed',
           `Frontend exited unexpectedly (code ${code}).\nCheck ${path.join(LOG_DIR, 'frontend.log')}`);
         app.quit();
       }
@@ -351,12 +403,12 @@ app.whenReady().then(async () => {
     ]);
     Menu.setApplicationMenu(appMenu);
   } else {
-    // Windows/Linux: no menu bar — cleaner UI for a chat app.
+    // Windows/Linux: no menu bar - cleaner UI for a chat app.
     // Users can still right-click the tray icon to quit.
     Menu.setApplicationMenu(null);
   }
 
-  // Tray on all platforms — lets the app run in the background
+  // Tray on all platforms - lets the app run in the background
   createTray();
 
   if (process.platform === 'darwin') {

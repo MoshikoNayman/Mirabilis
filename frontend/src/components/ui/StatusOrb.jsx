@@ -13,7 +13,7 @@ const STATE_COLOR = {
 };
 
 export function FlowerMark({ size = 22 }) {
-  // Six-petal flower — simple, crisp, scalable.
+  // Six-petal flower - simple, crisp, scalable.
   const petals = [0, 60, 120, 180, 240, 300];
   return (
     <svg width={size} height={size} viewBox="0 0 48 48" className="icq-mark-svg" aria-hidden="true">

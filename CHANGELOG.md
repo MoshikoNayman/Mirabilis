@@ -2,6 +2,20 @@
 
 Versioning follows Junos-style tags.
 
+## [26.2R1-S29] - 2026-07-12
+
+### Hardening, Providers, and Polish
+
+- **Security hardening**: bind backend to loopback by default (`MIRABILIS_BIND_HOST`); Host-header guard (anti-DNS-rebinding); local bearer token on the `/mcp` system-tools endpoint; SSRF guard blocking cloud-metadata hosts across models/health/streaming; provider API keys moved out of URLs into an `x-provider-key` header.
+- **Data safety**: atomic store writes (temp + fsync + rename) with a rolling `.bak`, recover-from-backup, and fail-loud quarantine on corruption.
+- **Providers**: added **Cerebras** (free tier, OpenAI-compatible); refreshed auto-default models to current free options (Groq `llama-3.3-70b-versatile`, OpenRouter `meta-llama/llama-3.3-70b-instruct:free`, Gemini `gemini-2.5-flash`).
+- **IntelLedger**: "To Ledger" - commit a chat conversation into a tracked IntelLedger session with extracted signals/actions.
+- **UX/Aurora**: command palette folded into the dock pill (no more overlap); ICQ send/receive/error sound cues wired; `role="status"` live region for the status line; Send-button disabled affordance; Esc-to-close on the buddy list; scheme-aware tokenized surfaces (fixed dark-mode contrast); consistent copy-with-checkmark; canvas notes now reach the model.
+- **Streaming**: tokens coalesced per animation frame (removes O(n^2) markdown re-parse); crash-resilient SSE parse.
+- **Release**: CI test gate before builds; per-OS `SHA256SUMS`; pinned KoboldCpp download; real AppImage verification.
+- **Models**: refreshed the curated Ollama list (verified against the registry) with current free models (GPT-OSS 20B/120B, Qwen3-Coder, DeepSeek-R1 14B, Phi-4 Mini, Llama 3.2, Qwen3 32B) grouped by use case; removed dead entries.
+- **Fixes**: image model default set to `sd-legacy/stable-diffusion-v1-5`; image readiness inspects `/health` status; single-source version tooling; "IntelLedger" spelling corrected throughout.
+
 ## [26.2R1-S28] - 2026-04-25
 
 ### Security Hardening + Local Desktop Deployment
@@ -378,7 +392,7 @@ Versioning follows Junos-style tags.
 ### Uncensored Mode Hardening
 
 - `UNCENSORED_DIRECTIVE` is now `unshift`-ed to array position 0 in the system-prompt chain, overriding any earlier instructions.
-- Platform-context confidentiality rules 3–5 are excluded when `chatUncensoredMode` is `true`, preventing them from silently suppressing the uncensored directive.
+- Platform-context confidentiality rules 3-5 are excluded when `chatUncensoredMode` is `true`, preventing them from silently suppressing the uncensored directive.
 - `isUncensoredModelRecord` pattern in `server.js` extended to match the `mcq-raw` model ID.
 
 ### Web Search (www Chip)
@@ -431,7 +445,7 @@ Versioning follows Junos-style tags.
 
 ### Generation Parameters Panel
 
-- **Temperature slider** (0–2.0) and **Max tokens** number input added to the model dropdown.
+- **Temperature slider** (0-2.0) and **Max tokens** number input added to the model dropdown.
 - Settings persist across sessions via `localStorage`.
 - Both parameters are sent end-to-end through the stream request to all providers:
   - Ollama: `options.temperature` + `options.num_predict`

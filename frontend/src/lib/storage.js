@@ -18,7 +18,7 @@ export function safeStorageSet(key, value) {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(key, value);
   } catch {
-    /* storage may be unavailable (private mode, quota) — fail silently */
+    /* storage may be unavailable (private mode, quota) - fail silently */
   }
 }
 

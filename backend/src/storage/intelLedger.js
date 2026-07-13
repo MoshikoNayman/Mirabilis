@@ -1,5 +1,5 @@
 // backend/src/storage/intelLedger.js
-// InteLedger persistence layer — JSON file-based (no database required)
+// IntelLedger persistence layer - JSON file-based (no database required)
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -362,12 +362,49 @@ async function readStore(filePath) {
     _cachePath = filePath;
     return _cache;
   }
-  catch { return empty(); }
+  catch (parseError) {
+    // Corrupt primary file: recover from the last-known-good backup rather than
+    // returning empty (which the next write would persist, destroying every
+    // session permanently).
+    try {
+      const backupRaw = await fs.readFile(`${filePath}.bak`, 'utf8');
+      _cache = normalizeStoreShape(JSON.parse(backupRaw));
+      _cachePath = filePath;
+      // Heal the corrupt primary now (temp + rename, .bak untouched) so a later
+      // write doesn't roll the corrupt file into the backup.
+      try {
+        const healTmp = `${filePath}.heal-${process.pid}`;
+        await fs.writeFile(healTmp, backupRaw, 'utf8');
+        await fs.rename(healTmp, filePath);
+      } catch { /* best effort - cache already holds good data */ }
+      console.warn(`[intelLedger] ${filePath} was corrupt; recovered from ${filePath}.bak and healed the primary`);
+      return _cache;
+    } catch {
+      const quarantine = `${filePath}.corrupt-${Date.now()}`;
+      try { await fs.rename(filePath, quarantine); } catch { /* best effort */ }
+      throw new Error(
+        `IntelLedger store at ${filePath} is corrupt and no usable backup exists. ` +
+        `The unreadable file was moved to ${quarantine}. Original error: ${parseError.message}`
+      );
+    }
+  }
 }
 
+// Atomic write (temp file + fsync + rename) with a rolling .bak of the prior
+// good copy, so a crash mid-write can never truncate the store.
 async function writeStore(filePath, data) {
   invalidateCache();
-  await fs.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+  const serialized = JSON.stringify(data, null, 2);
+  const tmpPath = `${filePath}.tmp-${process.pid}`;
+  const handle = await fs.open(tmpPath, 'w');
+  try {
+    await handle.writeFile(serialized, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write */ }
+  await fs.rename(tmpPath, filePath);
   _cache = data;
   _cachePath = filePath;
 }

@@ -1,5 +1,5 @@
 @echo off
-REM build.bat — Build Mirabilis AI Setup.exe on Windows
+REM build.bat - Build Mirabilis AI Setup.exe on Windows
 REM Run from:  Mirabilis\desktop\
 REM Output:    Mirabilis\desktop\dist\
 

@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import StatusOrb from '../ui/StatusOrb';
-import { SegmentedControl, IconButton, Kbd, Panel } from '../ui/primitives';
+import { SegmentedControl, IconButton, Panel } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
 import {
   SCHEMES, SCHEME_META, FONTS, FONT_META, MODES,
@@ -128,23 +128,15 @@ export default function Dock({ activeTab, onTab, orbState }) {
           ]}
         />
 
-        <IconButton label="Search (⌘K)" onClick={() => appStore.openSearch()}>🔍</IconButton>
+        <IconButton label="Search (⌘/)" onClick={() => appStore.openSearch()}>🔍</IconButton>
+
+        <IconButton label="Commands (⌘K)" onClick={() => appStore.openCommand()}>⌘</IconButton>
 
         <div className="relative">
           <IconButton label="Appearance" onClick={() => setMenuOpen((v) => !v)}>◐</IconButton>
           {menuOpen ? <AppearanceMenu onClose={() => setMenuOpen(false)} /> : null}
         </div>
       </Panel>
-
-      <div className="mt-1 flex justify-end pr-2">
-        <button
-          type="button"
-          onClick={() => appStore.openCommand()}
-          className="au-focus inline-flex items-center gap-1 text-[length:var(--text-2xs)] text-[color:var(--text-muted)] transition hover:text-[color:var(--text-main)]"
-        >
-          <Kbd>⌘K</Kbd> commands
-        </button>
-      </div>
     </div>
   );
 }

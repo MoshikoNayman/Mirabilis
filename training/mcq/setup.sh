@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-#  MCQ Model Setup — Mirabilis AI
+#  MCQ Model Setup - Mirabilis AI
 #  Registers MCQ-Pro-12B, MCQ-Ultra-31B, and MCQ-Raw-8B into your local Ollama instance.
 #  Run once. Re-run anytime to rebuild after editing a Modelfile.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ create() {
 }
 
 echo ""
-echo "  MCQ Model Setup — Mirabilis AI"
+echo "  MCQ Model Setup - Mirabilis AI"
 echo "  ═════════════════════════════════"
 
 create "mcq-pro-12b"   "Modelfile.mcq-pro-12b"   "gemma3:12b"      "8.1 GB"
@@ -94,7 +94,7 @@ create "mcq-pro-12b"   "Modelfile.mcq-pro-12b"   "gemma3:12b"      "8.1 GB"
 if [[ "$SKIP_ULTRA" -eq 1 ]]; then
   echo ""
   echo "  ┌─ mcq-ultra-31b"
-  echo "  │  Base : gemma4:31b  (~20 GB)"
+  echo "  │  Base : gemma4:31b (~20 GB)"
   echo "  │  Status : skipped (--skip-ultra/--lite)"
   echo "  └─ done"
 else

@@ -13,6 +13,11 @@ const resolvedDataDir = process.env.MIRABILIS_DATA_DIR
 
 export const config = {
   port: Number(process.env.PORT || 4000),
+  // Bind to loopback by default so the API (including /mcp, /api/remote/*, and the
+  // process-spawning endpoints) is never reachable from the LAN. Set
+  // MIRABILIS_BIND_HOST=0.0.0.0 ONLY when you deliberately place an authenticating
+  // reverse proxy in front of Mirabilis.
+  bindHost: process.env.MIRABILIS_BIND_HOST || '127.0.0.1',
   frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:3000',
   corsAllowLocalhost: String(process.env.CORS_ALLOW_LOCALHOST ?? '1') !== '0',
   trustProxy: process.env.TRUST_PROXY || 'loopback',
@@ -30,5 +35,20 @@ export const config = {
   tavilySearchDepth: process.env.TAVILY_SEARCH_DEPTH || 'advanced',
   dataDir: resolvedDataDir,
   chatStorePath: path.join(resolvedDataDir, 'chats.json'),
-  intelLedgerStorePath: path.join(resolvedDataDir, 'intelledger.json')
+  intelLedgerStorePath: path.join(resolvedDataDir, 'intelledger.json'),
+  // Host-header allowlist (anti-DNS-rebinding). Defaults to loopback names plus
+  // whatever bindHost resolves to. Extend via MIRABILIS_ALLOWED_HOSTS (comma-sep)
+  // when serving through a named reverse proxy.
+  allowedHosts: [
+    ...new Set([
+      'localhost', '127.0.0.1', '::1', '[::1]', '0.0.0.0',
+      process.env.MIRABILIS_BIND_HOST || '127.0.0.1',
+      ...String(process.env.MIRABILIS_ALLOWED_HOSTS || '')
+        .split(',').map((h) => h.trim().toLowerCase()).filter(Boolean),
+    ]),
+  ],
+  // Bearer token for the machine-facing /mcp endpoint. Generated + persisted if
+  // unset. Override with MIRABILIS_MCP_TOKEN.
+  mcpToken: process.env.MIRABILIS_MCP_TOKEN || '',
+  mcpTokenPath: path.join(resolvedDataDir, 'mcp-token')
 };

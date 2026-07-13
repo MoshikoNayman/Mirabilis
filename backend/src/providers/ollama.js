@@ -69,6 +69,11 @@ export async function streamOllamaChat({ baseUrl, model, messages, signal, onTok
       }
     }
   } catch (error) {
-    if (error.name !== 'AbortError') onToken(`\n[Ollama error: ${error.message}]`);
+    // Aborts are user-initiated (stop button / navigation) - swallow them.
+    // Real failures must propagate so the stream handler emits an `error` event
+    // and rolls back the empty assistant message, instead of persisting the
+    // error text as if the model had said it.
+    if (error.name === 'AbortError') return;
+    throw error;
   }
 }

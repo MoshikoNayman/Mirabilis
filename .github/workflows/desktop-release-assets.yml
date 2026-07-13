@@ -14,8 +14,19 @@ on:
 permissions:
   contents: write
 
+# Don't let a re-tag or a manual dispatch race another run for the same release.
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
+  # Gate: backend tests + frontend build + version-sync check must pass before we
+  # build or upload any installer. A tag on a broken commit now fails here.
+  test:
+    uses: ./.github/workflows/test.yml
+
   macos:
+    needs: test
     runs-on: macos-14
     env:
       RELEASE_REF: ${{ github.event.inputs.tag || github.ref_name }}
@@ -40,6 +51,12 @@ jobs:
           cd desktop
           ./build.sh dmg
 
+      - name: Generate checksums
+        run: |
+          cd desktop/dist
+          shasum -a 256 *.dmg > SHA256SUMS-macos.txt
+          cat SHA256SUMS-macos.txt
+
       - name: Upload macOS assets to release
         uses: softprops/action-gh-release@v2
         with:
@@ -47,8 +64,10 @@ jobs:
           files: |
             desktop/dist/*.dmg
             desktop/dist/*.blockmap
+            desktop/dist/SHA256SUMS-macos.txt
 
   windows:
+    needs: test
     runs-on: windows-2022
     env:
       RELEASE_REF: ${{ github.event.inputs.tag || github.ref_name }}
@@ -74,16 +93,25 @@ jobs:
           cd desktop
           call build.bat
 
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          cd desktop/dist
+          Get-FileHash *.exe -Algorithm SHA256 | ForEach-Object { "{0}  {1}" -f $_.Hash.ToLower(), (Split-Path $_.Path -Leaf) } | Out-File -Encoding ascii SHA256SUMS-windows.txt
+          Get-Content SHA256SUMS-windows.txt
+
       - name: Upload Windows assets to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_REF }}
           files: |
             desktop/dist/*.exe
-            desktop/dist/*.yml
+            desktop/dist/latest*.yml
             desktop/dist/*.blockmap
+            desktop/dist/SHA256SUMS-windows.txt
 
   linux:
+    needs: test
     runs-on: ubuntu-22.04
     env:
       RELEASE_REF: ${{ github.event.inputs.tag || github.ref_name }}
@@ -108,10 +136,17 @@ jobs:
           cd desktop
           ./build.sh appimage
 
+      - name: Generate checksums
+        run: |
+          cd desktop/dist
+          sha256sum *.AppImage > SHA256SUMS-linux.txt
+          cat SHA256SUMS-linux.txt
+
       - name: Upload Linux assets to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_REF }}
           files: |
             desktop/dist/*.AppImage
-            desktop/dist/*.yml
+            desktop/dist/latest*.yml
+            desktop/dist/SHA256SUMS-linux.txt

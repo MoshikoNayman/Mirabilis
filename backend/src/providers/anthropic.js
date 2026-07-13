@@ -89,6 +89,9 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
 
     throw new Error(`${providerLabel} returned no text content.`);
   } catch (error) {
-    if (error.name !== 'AbortError') onToken(`\n[${providerLabel} error: ${error.message}]`);
+    // Propagate real failures (aborts are user-initiated) so the stream handler
+    // sends an `error` event and rolls back instead of saving the error as reply.
+    if (error.name === 'AbortError') return;
+    throw error;
   }
 }

@@ -501,7 +501,7 @@ async function getWindowsProfile() {
   const rawCpuMHz = Number(cpuInfo.MaxClockSpeed) || 0;
   const cpuClock = rawCpuMHz > 0 ? `${(rawCpuMHz / 1000).toFixed(1)} GHz` : null;
 
-  // CPU caches — wmic reports L2/L3 in KB
+  // CPU caches - wmic reports L2/L3 in KB
   const l2Kb = Number(cpuInfo.L2CacheSize) || 0;
   const l3Kb = Number(cpuInfo.L3CacheSize) || 0;
   const cpuCaches = {
