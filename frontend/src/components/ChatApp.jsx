@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
+import { FlowerMark } from './ui/StatusOrb';
 import { playSend, playReceive, playError } from '../lib/sounds';
 import { appStore } from '../store/useAppStore';
 
@@ -4499,15 +4500,7 @@ export default function ChatApp() {
                   className="au-orb-ring icq-mark flex h-20 w-20 items-center justify-center"
                   style={{ boxShadow: 'inset 0 0 0 1px var(--hairline), 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow-3)' }}
                 >
-                  <svg width="44" height="44" viewBox="0 0 48 48" aria-hidden="true">
-                    <g transform="translate(24 24)">
-                      {[0, 60, 120, 180, 240, 300].map((deg) => (
-                        <ellipse key={deg} rx="7" ry="13" cx="0" cy="-9" transform={`rotate(${deg})`} fill="var(--accent)" opacity="0.92" />
-                      ))}
-                      <circle r="6.5" fill="#fff" opacity="0.95" />
-                      <circle r="4" fill="var(--accent)" />
-                    </g>
-                  </svg>
+                  <FlowerMark size={46} />
                 </span>
                 <h2 className="text-[length:var(--text-xl)] font-[650] tracking-tight text-[color:var(--text-main)]">
                   {activeChatId ? 'New Conversation' : 'Welcome to Mirabilis AI'}
