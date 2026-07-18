@@ -43,6 +43,7 @@ let state = {
   searchOpen: false,
   buddyOpen: false,
   recallOpen: false,
+  voiceChatOpen: false,
   homelabOpen: false,
   wywaOpen: false,
   workspaceOpen: false,
@@ -132,6 +133,24 @@ export const appStore = {
     }
     emit();
   },
+  openVoiceChat() {
+    state.voiceChatOpen = true;
+    state.commandOpen = false;
+    state.searchOpen = false;
+    emit();
+  },
+  closeVoiceChat() {
+    state.voiceChatOpen = false;
+    emit();
+  },
+  toggleVoiceChat() {
+    state.voiceChatOpen = !state.voiceChatOpen;
+    if (state.voiceChatOpen) {
+      state.commandOpen = false;
+      state.searchOpen = false;
+    }
+    emit();
+  },
   openHomelab() {
     state.homelabOpen = true;
     state.commandOpen = false;
@@ -215,6 +234,7 @@ export const appStore = {
     state.searchOpen = false;
     state.buddyOpen = false;
     state.recallOpen = false;
+    state.voiceChatOpen = false;
     state.homelabOpen = false;
     state.wywaOpen = false;
     state.workspaceOpen = false;

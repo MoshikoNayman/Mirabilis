@@ -12,9 +12,10 @@ const STATE_COLOR = {
   unknown: 'var(--presence-offline)'
 };
 
-// The ICQ mascot flower, duotone: accent spiral petals with a lighter-accent
-// pair and the signature yellow heart. Petals use the authentic ICQ path data,
-// so it recolors with the active theme accent while keeping the ICQ silhouette.
+// The ICQ mascot flower, duotone: accent spiral petals with a single
+// lighter-accent petal and the signature yellow heart. Petals use the authentic
+// ICQ path data, so it recolors with the active theme accent while keeping the
+// ICQ silhouette (one standout petal, exactly like the original red one).
 const ICQ_PETALS = [
   'm106.61 110.23s-42.218-47.933-48.752-62.93c-6.534-14.998-4.4796-30.925 7.3807-35.35 11.86-4.4252 29.058 10.284 32.436 29.134 3.3782 18.85 8.9346 69.146 8.9346 69.146z',
   'm104.24 108.08s-3.4772-58.275 0-77.208c3.4772-18.933 21.955-27.771 36.631-23.482 14.676 4.2897 26.361 23.591 15.968 42.267-10.394 18.676-52.599 58.422-52.599 58.422z',
@@ -52,7 +53,7 @@ export function FlowerMark({ size = 22, variant = 'accent' }) {
         <path key={i} d={d} fill="var(--accent)" />
       ))}
       <path d={ICQ_PETAL_A} fill={light} />
-      <path d={ICQ_PETAL_B} fill={light} />
+      <path d={ICQ_PETAL_B} fill="var(--accent)" />
       <circle cx="103.56" cy="104.51" r="22.852" fill="#f8ee3e" />
     </svg>
   );

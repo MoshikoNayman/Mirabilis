@@ -167,6 +167,30 @@
 @keyframes icq-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .icq-spin { animation: none; } }
 
+/* ── Voice chat talk orb ────────────────────────────────────────────────────
+   The pulsing flower in Voice chat. It beats fast while LISTENING, holds a calm
+   swell while SPEAKING, dims gently while THINKING, and rests when idle. Pure
+   transform/opacity/filter so it stays GPU-cheap. */
+.vc-orb { animation: au-breathe 6s var(--ease-out) infinite; will-change: transform, filter; }
+.vc-orb[data-phase='listening'] { animation: vc-listen 1s var(--ease-out) infinite; }
+.vc-orb[data-phase='speaking']  { animation: vc-speak 2.4s var(--ease-out) infinite; }
+.vc-orb[data-phase='thinking']  { animation: vc-think 1.5s var(--ease-out) infinite; }
+@keyframes vc-listen {
+  0%, 100% { transform: scale(1);    filter: saturate(1.1); }
+  50%      { transform: scale(1.09); filter: saturate(1.4); }
+}
+@keyframes vc-speak {
+  0%, 100% { transform: scale(1.01); filter: saturate(1.15); }
+  50%      { transform: scale(1.05); filter: saturate(1.32); }
+}
+@keyframes vc-think {
+  0%, 100% { transform: scale(1); opacity: 0.7; }
+  50%      { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vc-orb, .vc-orb[data-phase] { animation: none; }
+}
+
 /* ── Typing dots ────────────────────────────────────────────────────────── */
 .au-typing { display: inline-flex; gap: 3px; align-items: center; }
 .au-typing > i {

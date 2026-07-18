@@ -2,6 +2,16 @@
 
 Versioning follows Junos-style tags.
 
+## [26.2R1-S33] - 2026-07-18
+
+### Config Vault, Inference Cockpit, Performance Receipt, Voice Chat
+
+- **Config Vault**: cited local retrieval over your own folder of network and homelab config files. Mirabilis indexes and embeds them on-device (reusing the Recall Orb embedding path, not a second vector stack) and each chat pulls the most relevant excerpts as grounding, with exact file:line citations. Fully offline, allowed under Go Dark, and jailed to the folder you choose. The index is skipped and a re-index is requested if the embedding model changes, and indexing is capped so a large tree can never run away.
+- **Inference Cockpit**: generation controls for local Ollama models under the model menu: temperature, top-p, top-k, repeat penalty, context window (num_ctx), GPU layers (num_gpu), and a fixed seed for reproducible output. Persisted, and applied only to local models.
+- **Performance Receipt**: every reply shows real tokens/sec and time-to-first-token, taken from Ollama's exact eval metrics (cloud providers fall back to measured timing). The model picker also shows a pre-pull Fits / Tight / Will-swap estimate sized against your device memory, so you can judge a model before downloading gigabytes.
+- **Voice Chat**: a hands-free spoken conversation mode with a pulsing flower orb and a male or female local voice (Piper).
+- **Quick toggles**: the two controls you flip most, Uncensored and web search (www), are now one-click toggles in the composer toolbar instead of options buried in a menu. Web search stays enabled by default; Uncensored is off by default.
+
 ## [26.2R1-S32] - 2026-07-13
 
 ### Chat status line: Effort control + running token total

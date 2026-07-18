@@ -499,5 +499,12 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     return { ok: true, model: judgeModel, embedModel: chosenModel, conflicts };
   }
 
-  return { query, findContradictions };
+  // embedText/ensureModel are exposed so the Config Vault reuses this exact
+  // embedding path (same Ollama model pick and the same in-process cache) rather
+  // than standing up a second, parallel vector stack.
+  return { query, findContradictions, embedText, ensureModel, getEmbedModel: () => chosenModel };
 }
+
+// Module-level similarity + chunking, shared with the Config Vault so there is
+// one canonical implementation of each.
+export { cosine, chunkText };

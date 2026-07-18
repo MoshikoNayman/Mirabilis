@@ -197,6 +197,32 @@ export function BellIcon(props) {
     </Svg>
   );
 }
+// Horizontal sliders - reads as "settings / options".
+export function SlidersIcon(props) {
+  return (
+    <Svg {...props}>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+      <circle cx="9" cy="7" r="2.1" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="2.1" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="17" r="2.1" fill="currentColor" stroke="none" />
+    </Svg>
+  );
+}
+// Soundwave bars: reads as "voice / spoken conversation". Used for the
+// hands-free Voice chat entry point in the composer.
+export function WaveIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M4 11v2" />
+      <path d="M8 8v8" />
+      <path d="M12 4v16" />
+      <path d="M16 8v8" />
+      <path d="M20 11v2" />
+    </Svg>
+  );
+}
 // Two opposed arrows: reads as "then vs now", a reversed or superseded decision.
 export function ContradictionIcon(props) {
   return (

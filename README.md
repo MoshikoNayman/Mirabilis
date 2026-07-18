@@ -200,6 +200,9 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **Chat** | Chat branching and restore snapshots for safe experimentation |
 | **Chat** | File attachments and image messages per conversation |
 | **Chat** | Canvas mode, Deep Thinking mode, Guided Learning mode |
+| **Config Vault** | Cited local retrieval (RAG) over your own config folder; on-device embeddings, jailed reads, `file:line` citations |
+| **Inference Cockpit** | Per-model Ollama controls: temperature, top-p, top-k, repeat penalty, context window, GPU layers, fixed seed |
+| **Performance Receipt** | Real tokens/sec and time-to-first-token per reply; pre-pull Fits / Tight / Will-swap model-fit estimate vs device memory |
 | **IntelLedger** | Session-based memory workspace for context capture and structured follow-through |
 | **IntelLedger** | Signal extraction for risks, asks, commitments, opportunities, and decisions |
 | **IntelLedger** | Session synthesis, cross-session synthesis, and action-oriented next-step tracking |
@@ -209,7 +212,7 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **Providers** | Pull, delete, and monitor Ollama models from the UI |
 | **Providers** | Estimated remote spend tracker with configurable monthly budget |
 | **Image Generation** | Local image generation via image-service (Stable Diffusion, port 7860) |
-| **Voice / TTS** | Text-to-speech with Piper neural voices; download models from the UI |
+| **Voice / TTS** | Hands-free Voice Chat mode (male/female local Piper voice); text-to-speech with Piper neural voices; download models from the UI |
 | **Voice / TTS** | Browser speech synthesis fallback; rate and pitch controls |
 | **Web Search** | Automatic web search classification; enriches answers with live results |
 | **Remote Execution** | SSH or local remote control - run commands and read files from the UI |

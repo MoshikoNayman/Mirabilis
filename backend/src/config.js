@@ -36,6 +36,7 @@ export const config = {
   dataDir: resolvedDataDir,
   chatStorePath: path.join(resolvedDataDir, 'chats.json'),
   intelLedgerStorePath: path.join(resolvedDataDir, 'intelledger.json'),
+  configVaultStorePath: path.join(resolvedDataDir, 'config-vault.json'),
   // Host-header allowlist (anti-DNS-rebinding). Defaults to loopback names plus
   // whatever bindHost resolves to. Extend via MIRABILIS_ALLOWED_HOSTS (comma-sep)
   // when serving through a named reverse proxy.

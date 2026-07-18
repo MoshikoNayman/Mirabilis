@@ -32,6 +32,7 @@ import { McpConnectorService } from './mcp/mcpConnectorService.js';
 import { createMcpServerHandler } from './mcp/mcpServer.js';
 import { createIntelLedgerStorage } from './storage/intelLedger.js';
 import { createRecall } from './recall.js';
+import { createConfigVault } from './configVault.js';
 import { makeHostGuard, makeMcpAuthGuard, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
 import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
 import { shouldSuppressReminder, buildReminderWebhookHeaders } from './intelLedgerReminderUtils.js';
@@ -234,6 +235,70 @@ function estimateTokens(text) {
     return 0;
   }
   return Math.max(1, Math.ceil(normalized.length / 4));
+}
+
+// Ollama inference options that the Inference Cockpit is allowed to set. Anything
+// outside this allow-list is dropped so a stray/hostile field can never reach the
+// model runtime. Values are coerced to safe numeric ranges.
+const OLLAMA_OPTION_SPEC = {
+  temperature: { min: 0, max: 2 },
+  top_p: { min: 0, max: 1 },
+  top_k: { min: 0, max: 500, int: true },
+  repeat_penalty: { min: 0, max: 4 },
+  num_ctx: { min: 256, max: 131072, int: true },
+  num_predict: { min: -1, max: 32768, int: true },
+  num_gpu: { min: 0, max: 512, int: true },
+  seed: { min: 0, max: 2147483647, int: true }
+};
+
+function sanitizeOllamaOptions(raw) {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const out = {};
+  for (const [key, spec] of Object.entries(OLLAMA_OPTION_SPEC)) {
+    const value = raw[key];
+    if (value == null || value === '') continue;
+    let num = Number(value);
+    if (!isFinite(num)) continue;
+    if (spec.int) num = Math.round(num);
+    num = Math.min(spec.max, Math.max(spec.min, num));
+    out[key] = num;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+// Build the Performance Receipt attached to each assistant message. Ollama's
+// final chunk gives exact eval metrics; every other provider falls back to
+// wall-clock timing over the token estimate. Kept small and serializable so it
+// persists straight into chats.json.
+function buildPerformanceReceipt({ streamStartedAt, firstTokenAt, endedAt, completionTokenEstimate, ollamaStats }) {
+  const receipt = { source: 'timing' };
+  if (firstTokenAt && streamStartedAt) {
+    receipt.ttftMs = Math.max(0, firstTokenAt - streamStartedAt);
+  }
+  const wallSeconds = streamStartedAt && endedAt ? (endedAt - streamStartedAt) / 1000 : null;
+  // Generation-only window (excludes time-to-first-token) so the estimated rate
+  // reflects throughput, not network + prompt-processing latency.
+  const genSeconds = firstTokenAt && endedAt ? (endedAt - firstTokenAt) / 1000 : wallSeconds;
+  if (ollamaStats && ollamaStats.evalCount && ollamaStats.evalDurationNs) {
+    // Exact: tokens generated divided by generation time (nanoseconds).
+    receipt.source = 'ollama';
+    receipt.tokens = ollamaStats.evalCount;
+    receipt.tokensPerSec = Math.round((ollamaStats.evalCount / (ollamaStats.evalDurationNs / 1e9)) * 10) / 10;
+    if (ollamaStats.promptEvalCount != null) receipt.promptTokens = ollamaStats.promptEvalCount;
+    if (ollamaStats.promptEvalDurationNs != null && ollamaStats.loadDurationNs != null) {
+      receipt.ttftMs = Math.round((ollamaStats.loadDurationNs + ollamaStats.promptEvalDurationNs) / 1e6);
+    }
+    if (ollamaStats.loadDurationNs != null) {
+      receipt.loadMs = Math.round(ollamaStats.loadDurationNs / 1e6);
+    }
+  } else if (genSeconds && genSeconds > 0 && completionTokenEstimate > 0) {
+    // Approximate: estimated tokens over generation time (TTFT excluded).
+    receipt.tokens = completionTokenEstimate;
+    receipt.tokensPerSec = Math.round((completionTokenEstimate / genSeconds) * 10) / 10;
+    receipt.isEstimate = true;
+  }
+  if (wallSeconds != null) receipt.wallMs = Math.round(wallSeconds * 1000);
+  return receipt;
 }
 
 const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL || 'http://127.0.0.1:7860';
@@ -2432,7 +2497,7 @@ app.delete('/api/chats', async (_req, res) => {
 });
 
 app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
-  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens, localOnly } = req.body || {};
+  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens, localOnly, ollamaOptions } = req.body || {};
   const chatId = req.params.chatId;
 
   if (!content || typeof content !== 'string') {
@@ -2584,6 +2649,12 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   const promptTokenEstimate = outgoingMessages.reduce((total, message) => total + estimateTokens(message.content), 0);
 
   let assistantText = '';
+  // Performance Receipt timing: wall-clock start, time-to-first-token, and (for
+  // Ollama) the exact eval metrics from the final chunk. Cloud providers have no
+  // eval counts, so they fall back to wall-clock over the completion estimate.
+  const streamStartedAt = Date.now();
+  let firstTokenAt = null;
+  let ollamaStats = null;
 
   try {
     sendSSE(res, 'meta', {
@@ -2603,10 +2674,21 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       overrideApiKey: typeof providerApiKey === 'string' ? providerApiKey.trim() : undefined,
       temperature: typeof temperature === 'number' && isFinite(temperature) ? temperature : undefined,
       maxTokens: typeof maxTokens === 'number' && isFinite(maxTokens) && maxTokens > 0 ? Math.round(maxTokens) : undefined,
+      ollamaOptions: sanitizeOllamaOptions(ollamaOptions),
       onToken: (token) => {
+        if (firstTokenAt === null) firstTokenAt = Date.now();
         assistantText += token;
         sendSSE(res, 'token', { token });
-      }
+      },
+      onStats: (stats) => { ollamaStats = stats; }
+    });
+
+    const perfReceipt = buildPerformanceReceipt({
+      streamStartedAt,
+      firstTokenAt,
+      endedAt: Date.now(),
+      completionTokenEstimate: estimateTokens(assistantText),
+      ollamaStats
     });
 
     const assistantMessage = {
@@ -2622,7 +2704,8 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
         isEstimate: true
       },
       model: effectiveModel,
-      provider: effectiveProvider
+      provider: effectiveProvider,
+      performance: perfReceipt
     };
 
     chat.messages.push(assistantMessage);
@@ -2997,6 +3080,59 @@ const recall = createRecall({
   config,
   chatStorePath: config.chatStorePath,
   intelLedgerStorePath: config.intelLedgerStorePath
+});
+
+// Config Vault: cited RAG over a local folder of config files. Shares the recall
+// embedding path so there is one vector stack, not two.
+const configVault = createConfigVault({ recall, vaultStorePath: config.configVaultStorePath });
+
+app.get('/api/vault/status', async (req, res) => {
+  try {
+    res.json(await configVault.status());
+  } catch (error) {
+    res.status(500).json({ ok: false, error: `Vault status failed: ${error.message}` });
+  }
+});
+
+app.post('/api/vault/index', async (req, res) => {
+  const folder = String(req.body?.path || '').trim();
+  if (!folder) {
+    res.status(400).json({ ok: false, error: 'path is required' });
+    return;
+  }
+  try {
+    const outcome = await configVault.index(folder);
+    res.json(outcome);
+  } catch (error) {
+    res.status(400).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/api/vault/query', async (req, res) => {
+  const query = String(req.body?.query || '').trim();
+  const limit = Number(req.body?.limit) || undefined;
+  if (!query) {
+    res.status(400).json({ ok: false, error: 'query is required', results: [] });
+    return;
+  }
+  try {
+    const outcome = await configVault.query(query, limit);
+    if (!outcome.ok) {
+      res.status(503).json({ ok: false, error: outcome.error, results: [] });
+      return;
+    }
+    res.json(outcome);
+  } catch (error) {
+    res.status(500).json({ ok: false, error: `Vault query failed: ${error.message}`, results: [] });
+  }
+});
+
+app.delete('/api/vault/index', async (req, res) => {
+  try {
+    res.json(await configVault.clear());
+  } catch (error) {
+    res.status(500).json({ ok: false, error: `Vault clear failed: ${error.message}` });
+  }
 });
 
 app.post('/api/recall', async (req, res) => {

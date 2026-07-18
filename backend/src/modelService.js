@@ -400,10 +400,20 @@ export async function listModels(config, provider = config.aiProvider, options =
   // Two param maps: exact full name (e.g. 'gemma3:latest') and base name (e.g. 'gemma3')
   const paramSizeExact = {};
   const paramSizeBase = {};
+  // Parallel maps of on-disk size (bytes) and quant level, so the UI can show a
+  // pre-pull Fits/Tight/Will-swap pill against available memory.
+  const sizeBytesExact = {};
+  const sizeBytesBase = {};
+  const quantExact = {};
+  const quantBase = {};
   for (const m of discoveredModels) {
     paramSizeExact[m.name] = m.paramSize;
+    sizeBytesExact[m.name] = m.sizeBytes;
+    quantExact[m.name] = m.quant;
     const base = normalizeModelId(m.name);
     if (!paramSizeBase[base]) paramSizeBase[base] = m.paramSize;
+    if (!sizeBytesBase[base]) sizeBytesBase[base] = m.sizeBytes;
+    if (!quantBase[base]) quantBase[base] = m.quant;
   }
   const curatedBaseSet = new Set(
     CURATED_OLLAMA_MODELS.flatMap((m) => [
@@ -435,29 +445,41 @@ export async function listModels(config, provider = config.aiProvider, options =
         paramSizeBase[normalizeModelId(pullId)] ||
         null;
     }
+    const sizeBytes = hasSpecificTag
+      ? (sizeBytesExact[pullId] ?? sizeBytesExact[model.id] ?? null)
+      : (sizeBytesExact[model.id] ?? sizeBytesExact[pullId]
+          ?? sizeBytesBase[normalizeModelId(model.id)] ?? sizeBytesBase[normalizeModelId(pullId)] ?? null);
+    const quant = hasSpecificTag
+      ? (quantExact[pullId] || quantExact[model.id] || null)
+      : (quantExact[model.id] || quantExact[pullId]
+          || quantBase[normalizeModelId(model.id)] || quantBase[normalizeModelId(pullId)] || null);
     return {
       ...model,
       available: isAvailable,
       selected: normalizeModelId(model.id) === normalizeModelId(selectedOllamaModel),
-      paramSize
+      paramSize,
+      sizeBytes,
+      quant
     };
   });
 
   const extraModels = discoveredModels
     .filter(({ name }) => !curatedBaseSet.has(normalizeModelId(name)))
-    .map(({ name, paramSize }) => ({
+    .map(({ name, paramSize, sizeBytes, quant }) => ({
       id: name,
       label: name,
       group: 'Installed locally',
       available: true,
       selected: name === selectedOllamaModel,
-      paramSize: paramSize || null
+      paramSize: paramSize || null,
+      sizeBytes: sizeBytes ?? null,
+      quant: quant || null
     }));
 
   return [...curated, ...extraModels];
 }
 
-export async function streamWithProvider({ provider, model, messages, config, signal, onToken, overrideBaseUrl, overrideApiKey, temperature, maxTokens }) {
+export async function streamWithProvider({ provider, model, messages, config, signal, onToken, onStats, overrideBaseUrl, overrideApiKey, temperature, maxTokens, ollamaOptions }) {
   // Central SSRF guard for the streaming path too (not just /api/models and
   // /api/providers/health): this is the one outbound call that echoes the
   // provider response body back to the caller, so a metadata-endpoint baseUrl
@@ -541,7 +563,9 @@ export async function streamWithProvider({ provider, model, messages, config, si
     messages,
     signal,
     onToken,
+    onStats,
     temperature,
     maxTokens,
+    options: ollamaOptions,
   });
 }

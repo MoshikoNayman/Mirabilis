@@ -6,14 +6,28 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 import { FlowerMark } from './ui/StatusOrb';
-import { IncognitoIcon, RadarIcon, SegmentedControl } from './ui/primitives';
+import { IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon } from './ui/primitives';
 import TabSwitch from './shell/TabSwitch';
 import CommitmentRadar from './shell/CommitmentRadar';
+import VoiceChat from './shell/VoiceChat';
 import { playSend, playReceive, playError } from '../lib/sounds';
 import { postJSON } from '../lib/api';
 import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+
+// Voice chat: map the male/female toggle to local Piper voices. When a model is
+// not installed we still speak instantly via a browser voice and fetch the
+// Piper model in the background for higher-quality local TTS next time.
+const VOICE_GENDER_PIPER = { male: 'en_US-ryan-medium', female: 'en_US-amy-medium' };
+// Best-effort name hints for picking a male/female browser voice fallback.
+const BROWSER_VOICE_HINTS = {
+  female: ['female', 'samantha', 'victoria', 'karen', 'moira', 'tessa', 'fiona', 'amelie', 'anna', 'zira', 'susan', 'allison', 'ava', 'zoe', 'serena', 'kate'],
+  male: ['male', 'daniel', 'alex', 'fred', 'thomas', 'oliver', 'george', 'david', 'mark', 'rishi', 'aaron', 'arthur', 'gordon', 'lee']
+};
+
+// Effort levels shown in the composer toolbar dropdown (least to most effort).
+const EFFORT_LABELS = { instant: 'Instant', fast: 'Fast', balanced: 'Balanced', thorough: 'Thorough', deep: 'Deep' };
 
 function safeStorageGet(key, fallback = null) {
   try {
@@ -385,6 +399,28 @@ function estimateTokens(text) {
 function formatTokenCount(value) {
   const amount = Number(value || 0);
   return `~${amount.toLocaleString()} tok`;
+}
+
+// Pre-pull model-fit estimate: compare a model's on-disk weight size against
+// total device memory, leaving headroom for KV cache and the OS. Returns a small
+// verdict {tier,label,title} or null when we lack the numbers. Deliberately a
+// rough guide, not a promise: quantization and context length shift the real cost.
+function computeModelFit(item, ramGb) {
+  if (!Number.isFinite(ramGb) || ramGb <= 0) return null;
+  let weightsGb = null;
+  if (Number.isFinite(item?.sizeBytes) && item.sizeBytes > 0) {
+    weightsGb = item.sizeBytes / 1e9;
+  } else if (typeof item?.size === 'string') {
+    const m = item.size.match(/([\d.]+)\s*(GB|MB)/i);
+    if (m) weightsGb = /mb/i.test(m[2]) ? parseFloat(m[1]) / 1024 : parseFloat(m[1]);
+  }
+  if (!Number.isFinite(weightsGb) || weightsGb <= 0) return null;
+  // Runtime footprint runs above raw weights (KV cache, activations, overhead).
+  const required = weightsGb * 1.2;
+  const detail = `~${weightsGb.toFixed(1)} GB weights vs ${ramGb} GB memory (estimate; excludes long-context KV cache)`;
+  if (required <= ramGb * 0.6) return { tier: 'fits', label: 'Fits', title: `Comfortable fit: ${detail}` };
+  if (required <= ramGb * 0.82) return { tier: 'tight', label: 'Tight', title: `Tight fit, close other apps: ${detail}` };
+  return { tier: 'swap', label: 'Will swap', title: `Likely too large, expect swapping or slow load: ${detail}` };
 }
 
 function formatFileSize(bytes) {
@@ -997,6 +1033,26 @@ const MessageRow = memo(function MessageRow({
                   );
                 })() : null}
                 ~{(message.tokenEstimate || 0).toLocaleString()} tok
+                {message.performance && message.performance.tokensPerSec != null ? (() => {
+                  const perf = message.performance;
+                  const exact = perf.source === 'ollama' && !perf.isEstimate;
+                  const parts = [];
+                  parts.push(`${exact ? '' : 'approx '}${perf.tokensPerSec} tokens/sec${exact ? ' (exact, from Ollama)' : ' (estimated)'}`);
+                  if (perf.ttftMs != null) parts.push(`first token in ${perf.ttftMs >= 1000 ? (perf.ttftMs / 1000).toFixed(1) + 's' : perf.ttftMs + 'ms'}`);
+                  if (perf.promptTokens != null) parts.push(`${perf.promptTokens.toLocaleString()} prompt tokens`);
+                  if (perf.wallMs != null) parts.push(`${(perf.wallMs / 1000).toFixed(1)}s total`);
+                  return (
+                    <span
+                      title={parts.join(' · ')}
+                      className="ml-1.5 inline-flex items-center gap-1 rounded-[var(--r-pill)] bg-black/[0.05] px-1.5 py-[2px] align-middle text-[9px] font-semibold normal-case tracking-normal text-[color:var(--text-muted)] dark:bg-white/[0.06]"
+                    >
+                      {exact ? '' : '~'}{perf.tokensPerSec} tok/s
+                      {perf.ttftMs != null ? (
+                        <span className="opacity-70">{` ${perf.ttftMs >= 1000 ? (perf.ttftMs / 1000).toFixed(1) + 's' : perf.ttftMs + 'ms'} ttft`}</span>
+                      ) : null}
+                    </span>
+                  );
+                })() : null}
               </>
             ) : 'AI'}
           </span>
@@ -1062,6 +1118,7 @@ export default function ChatApp() {
   const dictationChunksRef = useRef([]);
   const dictationPhaseRef = useRef('idle');
   const dictationBaseRef = useRef('');
+  const dictationRecognitionRef = useRef(null);
   const dragCounterRef = useRef(0);
   const messagesScrollRef = useRef(null);
   const lastScrollTopRef = useRef(0);
@@ -1120,6 +1177,8 @@ export default function ChatApp() {
   });
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
   const [models, setModels] = useState([]);
+  // Total device memory (GB) for the pre-pull model-fit pill. Fetched once.
+  const [deviceRamGb, setDeviceRamGb] = useState(null);
   const [provider, setProvider] = useState(() => {
     if (typeof window !== 'undefined') return safeStorageGet('mirabilis-provider', 'ollama');
     return 'ollama';
@@ -1192,6 +1251,8 @@ export default function ChatApp() {
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   const [isTrainingMenuOpen, setIsTrainingMenuOpen] = useState(false);
+  const [isEffortMenuOpen, setIsEffortMenuOpen] = useState(false);
+  const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
   const [canvasEnabled, setCanvasEnabled] = useState(false);
   const [canvasText, setCanvasText] = useState('');
   const [guidedLearningEnabled, setGuidedLearningEnabled] = useState(false);
@@ -1241,6 +1302,39 @@ export default function ChatApp() {
   });
   const [piperModels, setPiperModels] = useState([]);
   const [downloadingPiperModelId, setDownloadingPiperModelId] = useState(null);
+
+  // ── Voice chat (hands-free spoken conversation) ─────────────────────────────
+  // The overlay is a dumb view; the whole listen -> send -> speak -> listen loop
+  // is driven from here because speech recognition, the streaming send, and TTS
+  // all live in this component.
+  const voiceChatOpen = useAppStore((s) => s.voiceChatOpen);
+  const [voicePhase, setVoicePhase] = useState('idle'); // idle | listening | thinking | speaking
+  const [voiceInterim, setVoiceInterim] = useState('');
+  const [voiceReply, setVoiceReply] = useState('');
+  const [voiceLoopSupported, setVoiceLoopSupported] = useState(false);
+  const [voiceNote, setVoiceNote] = useState('');
+  const [voiceGender, setVoiceGender] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = safeStorageGet('mirabilis-voice-gender', 'female');
+      return saved === 'male' ? 'male' : 'female';
+    }
+    return 'female';
+  });
+  const voiceRecognitionRef = useRef(null);
+  const voiceActiveRef = useRef(false);        // overlay open + loop should run
+  const voicePhaseRef = useRef('idle');        // synchronous mirror of voicePhase
+  const voiceFinalRef = useRef('');            // final transcript accumulated this turn
+  const voiceAwaitingReplyRef = useRef(false); // sent, waiting for the stream to finish
+  const voiceSawStreamingRef = useRef(false);  // saw isStreaming flip true after send
+  const voiceSawSpeakingRef = useRef(false);   // saw isSpeaking flip true after speak
+  const voiceRestartTimerRef = useRef(null);   // debounce re-listen after empty turn
+  const voiceSpeakWatchdogRef = useRef(null);  // fallback if TTS never starts
+  // Always-fresh handles so the loop never calls a stale send/speak closure.
+  const voiceSendRef = useRef(null);
+  const voiceSpeakRef = useRef(null);
+  const voiceStopSpeakRef = useRef(null);
+  const messagesRef = useRef([]);
+
   const [isDragOverChat, setIsDragOverChat] = useState(false);
   const [deepWebEnabled, setDeepWebEnabled] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -1250,6 +1344,18 @@ export default function ChatApp() {
     return true;
   });
   const [webSearchStatus, setWebSearchStatus] = useState('idle'); // 'idle' | 'searching' | 'error'
+  // Config Vault: cited local RAG over a folder of config files. When enabled and
+  // indexed, each send retrieves the most relevant config chunks (fully offline
+  // via local embeddings) and folds them in as grounding context.
+  const [configVaultEnabled, setConfigVaultEnabled] = useState(() => {
+    if (typeof window !== 'undefined') return safeStorageGet('mirabilis-config-vault-enabled') === 'true';
+    return false;
+  });
+  const [configVaultStatus, setConfigVaultStatus] = useState(null); // { root, builtAt, embedModel, fileCount, chunkCount }
+  const [configVaultFolder, setConfigVaultFolder] = useState(() => (typeof window !== 'undefined' ? safeStorageGet('mirabilis-config-vault-folder', '') || '' : ''));
+  const [configVaultBusy, setConfigVaultBusy] = useState(false);
+  const [configVaultMsg, setConfigVaultMsg] = useState('');
+  const [isVaultPanelOpen, setIsVaultPanelOpen] = useState(false);
   // modelId → { pct: number|null, status: string, ctrl: AbortController } while pulling
   const [pullingModels, setPullingModels] = useState({});
   // Free-text "pull any Ollama model" field in the model menu.
@@ -1302,6 +1408,15 @@ export default function ChatApp() {
       return v === null ? null : Number(v);
     }
     return null;
+  });
+  // Inference Cockpit: advanced Ollama sampling/load knobs (null = provider default).
+  // Persisted as one object so power users can tune local generation the way LM
+  // Studio / Jan allow. Only sent to Ollama; cloud providers ignore these.
+  const [ollamaParams, setOllamaParams] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try { const v = safeStorageGet('mirabilis-ollama-params'); return v ? JSON.parse(v) : {}; } catch { return {}; }
+    }
+    return {};
   });
   const [remoteBudgetUsd, setRemoteBudgetUsd] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -1606,6 +1721,30 @@ export default function ChatApp() {
   }, [pinnedChatIds]);
 
   useEffect(() => {
+    safeStorageSet('mirabilis-config-vault-enabled', configVaultEnabled ? 'true' : 'false');
+  }, [configVaultEnabled]);
+
+  useEffect(() => {
+    if (configVaultFolder) safeStorageSet('mirabilis-config-vault-folder', configVaultFolder);
+    else safeStorageRemove('mirabilis-config-vault-folder');
+  }, [configVaultFolder]);
+
+  // Fetch the persisted Config Vault index status once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await api('/api/vault/status');
+        if (!cancelled && s?.ok) {
+          setConfigVaultStatus(s);
+          if (s.root && !configVaultFolder) setConfigVaultFolder(s.root);
+        }
+      } catch { /* vault status is best-effort */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     if (temperature === null) safeStorageRemove('mirabilis-temperature');
     else safeStorageSet('mirabilis-temperature', String(temperature));
   }, [temperature]);
@@ -1614,6 +1753,12 @@ export default function ChatApp() {
     if (maxTokens === null) safeStorageRemove('mirabilis-max-tokens');
     else safeStorageSet('mirabilis-max-tokens', String(maxTokens));
   }, [maxTokens]);
+
+  useEffect(() => {
+    const keys = Object.keys(ollamaParams || {}).filter((k) => ollamaParams[k] != null);
+    if (keys.length === 0) safeStorageRemove('mirabilis-ollama-params');
+    else safeStorageSet('mirabilis-ollama-params', JSON.stringify(ollamaParams));
+  }, [ollamaParams]);
 
   useEffect(() => {
     if (Number.isFinite(remoteBudgetUsd) && remoteBudgetUsd > 0) {
@@ -1773,6 +1918,308 @@ export default function ChatApp() {
     }
   }
 
+  /* ── Voice chat loop ──────────────────────────────────────────────────────
+     listen (SR) -> send (stream) -> speak (TTS) -> listen, hands-free, until the
+     user taps End. State lives in refs so the recognition callbacks never read a
+     stale phase, and send/speak are invoked through refs kept fresh every render
+     (see the effect just below) so a mid-conversation provider/voice switch is
+     always honoured. */
+
+  function setVoicePhaseBoth(next) {
+    voicePhaseRef.current = next;
+    setVoicePhase(next);
+  }
+
+  // Keep the loop's send/speak handles pointing at the latest closures.
+  useEffect(() => {
+    voiceSendRef.current = sendMessageWithContent;
+    voiceSpeakRef.current = speakText;
+    voiceStopSpeakRef.current = stopSpeaking;
+    messagesRef.current = messages;
+  });
+
+  // Does this browser expose the Web Speech API we need for the live loop?
+  useEffect(() => {
+    const supported = typeof window !== 'undefined'
+      && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+    setVoiceLoopSupported(supported);
+  }, []);
+
+  function stopVoiceRecognition() {
+    const rec = voiceRecognitionRef.current;
+    if (rec) {
+      try {
+        rec.onresult = null;
+        rec.onend = null;
+        rec.onerror = null;
+        rec.onstart = null;
+        rec.stop();
+      } catch { /* already stopped */ }
+      voiceRecognitionRef.current = null;
+    }
+  }
+
+  // Pick the closest male/female browser voice by name (best effort - the Web
+  // Speech API does not expose gender). Also flips the engine to 'browser'.
+  function pickBrowserVoiceForGender(gender) {
+    setVoiceEngine('browser');
+    const voices = availableVoices || [];
+    if (voices.length === 0) return; // synth default is fine
+    const want = BROWSER_VOICE_HINTS[gender] || [];
+    const avoid = BROWSER_VOICE_HINTS[gender === 'male' ? 'female' : 'male'] || [];
+    const lc = (s) => String(s || '').toLowerCase();
+    const enFirst = voices.filter((v) => lc(v.lang).startsWith('en'));
+    const pool = enFirst.length ? enFirst : voices;
+    let pick = pool.find((v) => want.some((h) => lc(v.name).includes(h)));
+    if (!pick) pick = pool.find((v) => !avoid.some((h) => lc(v.name).includes(h)));
+    if (!pick) pick = pool[0];
+    if (pick) setSelectedVoiceUri(pick.voiceURI);
+  }
+
+  // Route the chosen gender to a local Piper voice when installed; otherwise
+  // speak instantly with a browser voice and fetch Piper in the background.
+  function ensureVoiceForGender(gender) {
+    const modelId = VOICE_GENDER_PIPER[gender];
+    const model = (piperModels || []).find((m) => m.id === modelId);
+    if (model?.installed) {
+      setVoiceEngine('piper');
+      setSelectedPiperModelId(modelId);
+      setVoiceNote('');
+      return;
+    }
+    // Not installed yet: use a browser voice now so the loop never blocks.
+    pickBrowserVoiceForGender(gender);
+    if (model && downloadingPiperModelId !== modelId) {
+      setVoiceNote(`Preparing the ${gender} voice (first-time download)...`);
+      downloadPiperModel(modelId)
+        .then(() => {
+          setVoiceEngine('piper');
+          setSelectedPiperModelId(modelId);
+          setVoiceNote('');
+        })
+        .catch(() => {
+          // Stay on the browser voice - never crash the loop over a download.
+          setVoiceNote('');
+        });
+    }
+  }
+
+  function startVoiceListening() {
+    if (!voiceActiveRef.current || !voiceLoopSupported) return;
+    if (voiceRestartTimerRef.current) {
+      clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = null;
+    }
+    stopVoiceRecognition();
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+
+    let recognition;
+    try {
+      recognition = new SR();
+    } catch {
+      return;
+    }
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-US';
+    voiceFinalRef.current = '';
+    voiceRecognitionRef.current = recognition;
+
+    recognition.onstart = () => {
+      setVoicePhaseBoth('listening');
+      setVoiceInterim('');
+    };
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      let final = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const res = event.results[i];
+        if (res.isFinal) final += res[0].transcript;
+        else interim += res[0].transcript;
+      }
+      if (final) {
+        voiceFinalRef.current = `${voiceFinalRef.current} ${final}`.trim();
+        setVoiceInterim(voiceFinalRef.current);
+      } else if (interim) {
+        setVoiceInterim(`${voiceFinalRef.current} ${interim}`.trim());
+      }
+    };
+
+    recognition.onerror = (event) => {
+      const code = event?.error || 'unknown';
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        // No mic permission - stop the loop and tell the user in the overlay.
+        voiceActiveRef.current = false;
+        setVoiceNote('Microphone access denied. Allow the mic, then tap the orb to retry.');
+        setVoicePhaseBoth('idle');
+      }
+      // no-speech / aborted / network errors fall through to onend, which
+      // re-listens while the loop is still active.
+    };
+
+    recognition.onend = () => {
+      voiceRecognitionRef.current = null;
+      if (!voiceActiveRef.current) return;
+      const finalText = voiceFinalRef.current.trim();
+      voiceFinalRef.current = '';
+      if (finalText) {
+        submitVoiceTurn(finalText);
+      } else if (voicePhaseRef.current === 'listening') {
+        // Nothing captured (silence / no-speech) - keep listening hands-free.
+        voiceRestartTimerRef.current = setTimeout(() => {
+          if (voiceActiveRef.current) startVoiceListening();
+        }, 350);
+      }
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      voiceRecognitionRef.current = null;
+    }
+  }
+
+  function submitVoiceTurn(text) {
+    stopVoiceRecognition();
+    setVoiceInterim(text);
+    setVoiceReply('');
+    setVoicePhaseBoth('thinking');
+    voiceAwaitingReplyRef.current = true;
+    voiceSawStreamingRef.current = false;
+    const send = voiceSendRef.current;
+    if (send) {
+      Promise.resolve(send(text)).catch(() => {
+        // Send failed to even start - drop back to listening so we're not stuck.
+        voiceAwaitingReplyRef.current = false;
+        if (voiceActiveRef.current) startVoiceListening();
+      });
+    }
+  }
+
+  function startVoiceLoop() {
+    voiceActiveRef.current = true;
+    voiceFinalRef.current = '';
+    voiceAwaitingReplyRef.current = false;
+    voiceSawStreamingRef.current = false;
+    voiceSawSpeakingRef.current = false;
+    setVoiceInterim('');
+    setVoiceReply('');
+    setVoiceNote('');
+    // Refresh the Piper catalog so an installed ryan/amy is picked up even if the
+    // voice menu was never opened; the piperModels effect re-applies on arrival.
+    fetchPiperModels();
+    ensureVoiceForGender(voiceGender);
+    if (voiceLoopSupported) {
+      startVoiceListening();
+    } else {
+      setVoicePhaseBoth('idle');
+    }
+  }
+
+  function stopVoiceLoop() {
+    voiceActiveRef.current = false;
+    voiceAwaitingReplyRef.current = false;
+    voiceSawStreamingRef.current = false;
+    voiceSawSpeakingRef.current = false;
+    if (voiceRestartTimerRef.current) {
+      clearTimeout(voiceRestartTimerRef.current);
+      voiceRestartTimerRef.current = null;
+    }
+    if (voiceSpeakWatchdogRef.current) {
+      clearTimeout(voiceSpeakWatchdogRef.current);
+      voiceSpeakWatchdogRef.current = null;
+    }
+    stopVoiceRecognition();
+    voiceStopSpeakRef.current?.();
+    setVoicePhaseBoth('idle');
+    setVoiceInterim('');
+  }
+
+  function onVoiceOrbTap() {
+    if (!voiceLoopSupported || !voiceActiveRef.current) return;
+    if (voicePhaseRef.current === 'speaking') {
+      // Barge-in: cut the reply short and start listening immediately.
+      voiceStopSpeakRef.current?.();
+      startVoiceListening();
+    } else if (voicePhaseRef.current !== 'thinking') {
+      startVoiceListening();
+    }
+  }
+
+  function onVoiceGenderChange(gender) {
+    const next = gender === 'male' ? 'male' : 'female';
+    setVoiceGender(next);
+    safeStorageSet('mirabilis-voice-gender', next);
+    ensureVoiceForGender(next);
+  }
+
+  // Open/close: start or tear down the loop. Also cleans up on unmount.
+  useEffect(() => {
+    if (voiceChatOpen) startVoiceLoop();
+    else stopVoiceLoop();
+    return () => {
+      if (voiceChatOpen) stopVoiceLoop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceChatOpen]);
+
+  // When the Piper catalog arrives/updates while the overlay is open, re-apply
+  // the chosen voice (upgrades a browser fallback to local Piper once installed).
+  useEffect(() => {
+    if (voiceChatOpen) ensureVoiceForGender(voiceGender);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [piperModels]);
+
+  // Reply completion: when the stream we kicked off finishes, speak the last
+  // assistant message and enter the speaking phase.
+  useEffect(() => {
+    if (!voiceActiveRef.current || !voiceAwaitingReplyRef.current) return;
+    if (isStreaming) { voiceSawStreamingRef.current = true; return; }
+    if (!voiceSawStreamingRef.current) return; // stream not started yet
+    voiceSawStreamingRef.current = false;
+    voiceAwaitingReplyRef.current = false;
+    const last = [...(messagesRef.current || [])]
+      .reverse()
+      .find((m) => m.role === 'assistant' && m.content && !m.imageGenerating);
+    const content = String(last?.content || '').trim();
+    if (!content) {
+      if (voiceActiveRef.current) startVoiceListening();
+      return;
+    }
+    setVoiceReply(content);
+    setVoicePhaseBoth('speaking');
+    voiceSawSpeakingRef.current = false;
+    voiceSpeakRef.current?.(content, last.id || null);
+    // Watchdog: if TTS never signals start, fall back to listening.
+    if (voiceSpeakWatchdogRef.current) clearTimeout(voiceSpeakWatchdogRef.current);
+    voiceSpeakWatchdogRef.current = setTimeout(() => {
+      if (voiceActiveRef.current && voicePhaseRef.current === 'speaking' && !voiceSawSpeakingRef.current) {
+        startVoiceListening();
+      }
+    }, 2500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStreaming]);
+
+  // Speech completion: when TTS we started finishes, listen for the next turn.
+  useEffect(() => {
+    if (!voiceActiveRef.current || voicePhaseRef.current !== 'speaking') return;
+    if (isSpeaking) {
+      voiceSawSpeakingRef.current = true;
+      if (voiceSpeakWatchdogRef.current) {
+        clearTimeout(voiceSpeakWatchdogRef.current);
+        voiceSpeakWatchdogRef.current = null;
+      }
+      return;
+    }
+    if (!voiceSawSpeakingRef.current) return; // TTS not started yet
+    voiceSawSpeakingRef.current = false;
+    if (voiceActiveRef.current) startVoiceListening();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSpeaking]);
+
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (event) => setSystemPrefersDark(event.matches);
@@ -1781,9 +2228,22 @@ export default function ChatApp() {
   }, []);
 
   useEffect(() => {
-    setDictationSupported(Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder));
+    const speechRecognitionSupported = typeof window !== 'undefined'
+      && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+    const mediaRecorderSupported = Boolean(navigator.mediaDevices?.getUserMedia && window.MediaRecorder);
+    setDictationSupported(speechRecognitionSupported || mediaRecorderSupported);
 
     return () => {
+      if (dictationRecognitionRef.current) {
+        try {
+          dictationRecognitionRef.current.onresult = null;
+          dictationRecognitionRef.current.onend = null;
+          dictationRecognitionRef.current.onerror = null;
+          dictationRecognitionRef.current.stop();
+        } catch {}
+        dictationRecognitionRef.current = null;
+      }
+
       if (dictationRecorderRef.current) {
         try {
           dictationRecorderRef.current.ondataavailable = null;
@@ -2333,6 +2793,83 @@ export default function ChatApp() {
       return;
     }
 
+    const SR = typeof window !== 'undefined'
+      ? (window.SpeechRecognition || window.webkitSpeechRecognition)
+      : null;
+
+    // Preferred path: browser Web Speech API - no server or Whisper needed.
+    if (SR) {
+      // Already listening: stop and let onend clean up.
+      if (dictationRecognitionRef.current) {
+        try {
+          dictationRecognitionRef.current.stop();
+        } catch {
+          dictationRecognitionRef.current = null;
+          dictationPhaseRef.current = 'idle';
+          setIsDictating(false);
+        }
+        return;
+      }
+
+      try {
+        const recognition = new SR();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-US';
+
+        dictationBaseRef.current = input && !input.endsWith(' ') ? `${input} ` : input;
+        dictationRecognitionRef.current = recognition;
+        dictationPhaseRef.current = 'listening';
+
+        recognition.onstart = () => {
+          setIsDictating(true);
+          setStatusText('Listening...');
+        };
+
+        recognition.onresult = (event) => {
+          let transcript = '';
+          for (let i = 0; i < event.results.length; i += 1) {
+            transcript += event.results[i][0].transcript;
+          }
+          setInput(`${dictationBaseRef.current}${transcript.trim()}`);
+        };
+
+        recognition.onerror = (event) => {
+          const code = event?.error || 'unknown';
+          dictationRecognitionRef.current = null;
+          dictationPhaseRef.current = 'idle';
+          setIsDictating(false);
+          if (code === 'no-speech') {
+            setStatusText('No speech detected.');
+          } else if (code === 'aborted') {
+            setStatusText('Ready');
+          } else if (code === 'not-allowed' || code === 'service-not-allowed') {
+            setStatusText('Microphone access denied.');
+            appStore.toast('Could not transcribe - microphone permission was denied.', { kind: 'error' });
+          } else {
+            setStatusText('Dictation error.');
+            appStore.toast('Could not transcribe - speech recognition failed. Please try again.', { kind: 'error' });
+          }
+        };
+
+        recognition.onend = () => {
+          dictationRecognitionRef.current = null;
+          dictationPhaseRef.current = 'idle';
+          setIsDictating(false);
+          setStatusText((prev) => (prev === 'Listening...' ? 'Ready' : prev));
+        };
+
+        recognition.start();
+      } catch (error) {
+        dictationRecognitionRef.current = null;
+        dictationPhaseRef.current = 'idle';
+        setIsDictating(false);
+        setStatusText(`Dictation error: ${error?.message || 'unknown'}`);
+        appStore.toast('Could not transcribe - speech recognition failed to start.', { kind: 'error' });
+      }
+      return;
+    }
+
     if (dictationPhaseRef.current === 'transcribing') {
       setStatusText('Dictation is still transcribing...');
       return;
@@ -2401,6 +2938,7 @@ export default function ChatApp() {
           }
         } catch (error) {
           setStatusText(`Dictation error: ${error.message}`);
+          appStore.toast('Could not transcribe - your browser lacks speech recognition and no local Whisper is installed.', { kind: 'error', ttl: 5200 });
         } finally {
           clearDictationResources();
           dictationPhaseRef.current = 'idle';
@@ -2907,6 +3445,14 @@ export default function ChatApp() {
       const payload = await api(`/api/models?${query.toString()}`, keyHeader ? { headers: keyHeader } : undefined);
       const available = payload.models || [];
       setModels(available);
+      // Fetch total device RAM once, to size the model-fit pill against it.
+      if (deviceRamGb === null) {
+        try {
+          const specs = await api('/api/system/specs');
+          const ram = Number(specs?.ramGb);
+          if (Number.isFinite(ram) && ram > 0) setDeviceRamGb(ram);
+        } catch { /* fit pill just won't show */ }
+      }
       // If current model is 'auto', no override needed - it resolves at send time.
       // Only fall back if the explicitly chosen model is no longer installed.
       setModel((currentModel) => {
@@ -2918,6 +3464,46 @@ export default function ChatApp() {
       });
     } catch {
       setModels([]);
+    }
+  }
+
+  async function refreshVaultStatus() {
+    try {
+      const s = await api('/api/vault/status');
+      if (s?.ok) setConfigVaultStatus(s);
+    } catch { /* best effort */ }
+  }
+
+  async function indexConfigVault() {
+    const folder = String(configVaultFolder || '').trim();
+    if (!folder) { setConfigVaultMsg('Enter a folder path first.'); return; }
+    setConfigVaultBusy(true);
+    setConfigVaultMsg('Indexing (embedding locally)...');
+    try {
+      const r = await api('/api/vault/index', { method: 'POST', body: JSON.stringify({ path: folder }) });
+      if (r?.ok) {
+        setConfigVaultStatus({ ok: true, root: r.root, builtAt: new Date().toISOString(), embedModel: r.embedModel, fileCount: r.fileCount, chunkCount: r.chunkCount });
+        setConfigVaultMsg(`Indexed ${r.fileCount} file(s), ${r.chunkCount} chunk(s) via ${r.embedModel}.${r.truncated ? ' Reached the chunk cap; narrow the folder for full coverage.' : ''}`);
+      } else {
+        setConfigVaultMsg(r?.error || 'Indexing failed.');
+      }
+    } catch (error) {
+      setConfigVaultMsg(`Indexing failed: ${error.message}`);
+    } finally {
+      setConfigVaultBusy(false);
+    }
+  }
+
+  async function clearConfigVault() {
+    setConfigVaultBusy(true);
+    try {
+      await api('/api/vault/index', { method: 'DELETE' });
+      setConfigVaultStatus({ ok: true, root: '', builtAt: null, embedModel: null, fileCount: 0, chunkCount: 0 });
+      setConfigVaultMsg('Index cleared.');
+    } catch (error) {
+      setConfigVaultMsg(`Clear failed: ${error.message}`);
+    } finally {
+      setConfigVaultBusy(false);
     }
   }
 
@@ -3121,17 +3707,44 @@ export default function ChatApp() {
       setIsControlPanelOpen(false);
       setIsMcpPanelOpen(false);
       setIsParamsPanelOpen(false);
+      setIsEffortMenuOpen(false);
+      setIsOptionsMenuOpen(false);
       setOpenChatMenuId(null);
     }
 
+    // Count of options/modes that are currently on - drives the Options badge.
+    // OpenClaw stays here; Uncensored also has a direct toolbar toggle but is still
+    // counted here since it lives in the Options Modes list too.
+    const optionsActiveCount =
+      (uncensoredMode ? 1 : 0) +
+      (openClawMode ? 1 : 0) +
+      (remoteConnected ? 1 : 0) +
+      (selectedMcpServer ? 1 : 0) +
+      (guidedLearningEnabled ? 1 : 0) +
+      (deepThinkingEnabled ? 1 : 0) +
+      (canvasEnabled ? 1 : 0) +
+      (configVaultEnabled ? 1 : 0) +
+      (trainingMode !== 'off' ? 1 : 0);
+
     const anyDropdownOpen = isProviderMenuOpen || isProviderConfigOpen || isModelMenuOpen || isTrainingMenuOpen || isToolsMenuOpen ||
       isVoiceMenuOpen || isContextPanelOpen || isEngineMenuOpen ||
-      openHardwarePopover !== null || isControlPanelOpen || isMcpPanelOpen || isParamsPanelOpen;
+      openHardwarePopover !== null || isControlPanelOpen || isMcpPanelOpen || isParamsPanelOpen ||
+      isEffortMenuOpen || isOptionsMenuOpen;
 
     const activeMenuKey = isProviderMenuOpen
       ? 'provider'
       : isModelMenuOpen
       ? 'model'
+      : isEffortMenuOpen
+      ? 'effort'
+      : isVoiceMenuOpen
+      ? 'voice'
+      : isControlPanelOpen
+      ? 'control'
+      : isMcpPanelOpen
+      ? 'mcp'
+      : isOptionsMenuOpen
+      ? 'options'
       : isTrainingMenuOpen
       ? 'training'
       : isToolsMenuOpen
@@ -3727,11 +4340,22 @@ export default function ChatApp() {
         'Use examples and a tiny recap at the end.'
       );
     }
-    if (effortLevel === 'fast') {
+    if (effortLevel === 'instant') {
       behaviorInstructions.push(
-        'Effort level: fast. Answer concisely and directly, shortest correct answer, skip preamble.'
+        'Effort: instant. Give the shortest possible correct answer, one line if you can, no preamble.'
       );
     }
+    if (effortLevel === 'fast') {
+      behaviorInstructions.push(
+        'Effort: fast. Answer concisely and directly, skip preamble.'
+      );
+    }
+    if (effortLevel === 'thorough') {
+      behaviorInstructions.push(
+        'Effort: thorough. Work through the key considerations and give a complete, well-structured answer.'
+      );
+    }
+    // balanced: no extra instruction.
     // Treat effort "deep" as equivalent to the deep-thinking toggle so the two do not
     // double up: push the deep lines once if either is set.
     if (deepThinkingEnabled || effortLevel === 'deep') {
@@ -3829,6 +4453,34 @@ export default function ChatApp() {
       }
     }
 
+    // Config Vault: cited RAG over the user's own config folder. Fully local
+    // (Ollama embeddings), so it is allowed even under Go Dark. Retrieves the
+    // most relevant config chunks for this message and folds them in with their
+    // file:line citations so the model can ground its answer and cite sources.
+    if (configVaultEnabled && configVaultStatus && configVaultStatus.chunkCount > 0) {
+      try {
+        setStatusText('Searching your config vault...');
+        const vr = await api('/api/vault/query', { method: 'POST', body: JSON.stringify({ query: content, limit: 4 }) });
+        const results = Array.isArray(vr?.results) ? vr.results : [];
+        if (results.length > 0) {
+          const context = results
+            .map((r) => `[${r.citation}]\n${r.snippet}`)
+            .join('\n\n');
+          outboundContent = [
+            '[Config Vault - cited excerpts retrieved locally from your own config files. Treat as authoritative; cite the exact file:line label in square brackets when you use one.]',
+            '',
+            context,
+            '',
+            outboundContent
+          ].join('\n');
+        }
+      } catch {
+        /* vault retrieval is best-effort - never block a send */
+      } finally {
+        setStatusText('Streaming response...');
+      }
+    }
+
     const resolvedProvider = await resolveProviderForSend();
 
     setStatusText('Streaming response...');
@@ -3899,6 +4551,9 @@ export default function ChatApp() {
           localOnly: appStore.getGoDark(),
           ...(temperature !== null && isFinite(temperature) ? { temperature } : {}),
           ...(maxTokens !== null && isFinite(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
+          ...(resolvedProvider.provider === 'ollama' && ollamaParams && Object.values(ollamaParams).some((v) => v != null)
+            ? { ollamaOptions: ollamaParams }
+            : {}),
         }),
         signal: ctrl.signal
       });
@@ -4030,7 +4685,9 @@ export default function ChatApp() {
               }
               return next;
             });
-            if (autoSpeakEnabled && payload?.message?.role === 'assistant') {
+            // Voice chat drives its own TTS via the loop; skip auto-speak there
+            // so the reply is not spoken twice.
+            if (autoSpeakEnabled && !voiceActiveRef.current && payload?.message?.role === 'assistant') {
               speakText(payload.message.content || '', payload.message.id || null);
             }
           }
@@ -4291,13 +4948,14 @@ export default function ChatApp() {
             </div>
           )}
           <header className="mb-3 border-b border-black/10 pb-3">
-            <div className="flex items-baseline justify-between gap-2">
-              <div className="flex items-center gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              {/* LEFT zone: sidebar toggle + status + hardware chips + web-search */}
+              <div className="flex min-w-0 items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setSidebarOpen((v) => { const next = !v; safeStorageSet('mirabilis-sidebar-open', String(next)); return next; })}
                   title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-                  className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
+                  className="shrink-0 rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
                 >
                   <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     {sidebarOpen
@@ -4307,8 +4965,72 @@ export default function ChatApp() {
                   </svg>
                 </button>
                 <p role="status" aria-live="polite" aria-atomic="true" className="shrink-0 font-mono text-xs text-[color:var(--text-muted)]">{statusText}</p>
+
+                {/* hardware chips - one per logic/memory/compute/npu, live utilization + per-chip popover.
+                    No overflow wrapper: it would clip each chip's absolute popover. The chips are
+                    compact (CPU % / RAM % / GPU / NPU) so they fit the row without scrolling. */}
+                <div className="flex min-w-0 items-center gap-1.5">
+                  {['logic', 'memory', 'compute', 'npu'].map((key) => {
+                    const item = hardwareProfile[key];
+                    if (!item?.label) return null;
+                    const isActive = isStreaming && (key === 'compute' || key === 'npu');
+                    const fillPct = key === 'logic' ? utilization.cpuPct : key === 'memory' ? utilization.memPct : 0;
+                    const fillColor = fillPct >= 80
+                      ? 'bg-red-400/25 dark:bg-red-500/20'
+                      : fillPct >= 60
+                      ? 'bg-amber-400/25 dark:bg-amber-500/20'
+                      : 'bg-green-400/20 dark:bg-green-500/15';
+                    const shortLabel = key === 'logic'
+                      ? `CPU ${utilization.cpuPct}%`
+                      : key === 'memory'
+                      ? `RAM ${utilization.memPct}%`
+                      : key === 'compute'
+                      ? 'GPU'
+                      : 'NPU';
+                    return (
+                      <div key={key} data-menu-container="true" className="relative shrink-0">
+                        <button
+                          type="button"
+                          data-menu-trigger={`hardware-${key}`}
+                          onClick={() => {
+                            setIsContextPanelOpen(false);
+                            setIsEngineMenuOpen(false);
+                            setIsVoiceMenuOpen(false);
+                            setOpenHardwarePopover((current) => (current === key ? null : key));
+                          }}
+                          className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
+                            isActive
+                              ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
+                              : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)]'
+                          }`}
+                          title={item.label}
+                        >
+                          {fillPct > 0 && !isActive && (
+                            <span
+                              aria-hidden="true"
+                              className={`pointer-events-none absolute inset-y-0 left-0 rounded-full transition-all duration-700 ${fillColor}`}
+                              style={{ width: `${fillPct}%` }}
+                            />
+                          )}
+                          <span className="relative whitespace-nowrap">{shortLabel}</span>
+                        </button>
+                        {openHardwarePopover === key ? (
+                          <div data-menu-panel={`hardware-${key}`} role="menu" tabIndex={-1} className="absolute left-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] au-chrome au-elev-2 p-2 text-[11px] text-[color:var(--text-muted)]">
+                            <div className="font-semibold text-[color:var(--text-main)] mb-1">{item.label}</div>
+                            {item.expanded ? item.expanded.split('\n').map((line, i) => (
+                              <div key={i} className="text-[color:var(--text-muted)]">{line}</div>
+                            )) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+
               </div>
-              <div className="flex shrink-0 items-center gap-2">
+
+              {/* RIGHT zone: contextual actions + Prompt + Context */}
+              <div className="flex shrink-0 items-center gap-1.5">
                 {messages.length > 0 && (
                   <button
                     type="button"
@@ -4335,9 +5057,71 @@ export default function ChatApp() {
                     {isCommittingToLedger ? 'Committing…' : 'To Ledger'}
                   </button>
                 )}
-                <p className="truncate font-mono text-[11px] text-[color:var(--text-muted)]">
-                  input {formatTokenCount(chatTokenSummary.input)} · output {formatTokenCount(chatTokenSummary.output)}
-                </p>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setIsSystemPromptVisible((v) => !v)}
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition ${
+                      isSystemPromptVisible
+                        ? 'border-accent/60 bg-accentSoft text-ink dark:border-accent/40 dark:bg-accent/20 dark:text-green-300'
+                        : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                    }`}
+                    title="Toggle instructions visibility"
+                  >
+                    <span>Prompt</span>
+                  </button>
+                </div>
+                <div data-menu-container="true" className="relative">
+                  <button
+                    type="button"
+                    data-menu-trigger="context"
+                    onClick={() => {
+                      setIsEngineMenuOpen(false);
+                      setOpenHardwarePopover(null);
+                      setIsVoiceMenuOpen(false);
+                      setIsContextPanelOpen((prev) => !prev);
+                    }}
+                    className="inline-flex items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium tracking-wide text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    title={`Context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens`}
+                  >
+                    Context {contextUsage.usedPct}%
+                  </button>
+
+                  {isContextPanelOpen && (
+                    <div data-menu-panel="context" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Token Limit</span>
+                        <span className="text-[10px] text-[color:var(--text-muted)]">{contextUsage.usedPct}% used</span>
+                      </div>
+
+                      <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-[var(--material-thin)]">
+                        <div
+                          className="h-full rounded-full bg-accent transition-all duration-300"
+                          style={{ width: `${Math.min(contextUsage.usedPct, 100)}%` }}
+                        />
+                      </div>
+
+                      <div className="space-y-1 text-[11px] text-[color:var(--text-main)]">
+                        <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
+                          <span>System instructions</span>
+                          <span>{contextUsage.systemPct}% · {contextUsage.systemTokens.toLocaleString()} tok</span>
+                        </div>
+                        <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
+                          <span>User content</span>
+                          <span>{contextUsage.userPct}% · {contextUsage.userTokens.toLocaleString()} tok</span>
+                        </div>
+                        <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
+                          <span>Assistant</span>
+                          <span>{contextUsage.uncategorizedPct}% · {contextUsage.uncategorizedTokens.toLocaleString()} tok</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 text-[10px] text-[color:var(--text-muted)]">
+                        {contextUsage.totalTokens.toLocaleString()} / {contextUsage.windowTokens.toLocaleString()} tokens
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -4355,154 +5139,6 @@ export default function ChatApp() {
                 </div>
               </div>
             )}
-
-            <div className="mt-1.5 flex flex-nowrap items-center gap-1.5">
-
-                {/* hardware chips - left */}
-                {['logic', 'memory', 'compute', 'npu'].map((key) => {
-                  const item = hardwareProfile[key];
-                  if (!item?.label) return null;
-                  const isActive = isStreaming && (key === 'compute' || key === 'npu');
-                  const fillPct = key === 'logic' ? utilization.cpuPct : key === 'memory' ? utilization.memPct : 0;
-                  const fillColor = fillPct >= 80
-                    ? 'bg-red-400/25 dark:bg-red-500/20'
-                    : fillPct >= 60
-                    ? 'bg-amber-400/25 dark:bg-amber-500/20'
-                    : 'bg-green-400/20 dark:bg-green-500/15';
-                  return (
-                    <div key={key} data-menu-container="true" className="relative">
-                      <button
-                        type="button"
-                        data-menu-trigger={`hardware-${key}`}
-                        onClick={() => {
-                          setIsContextPanelOpen(false);
-                          setIsEngineMenuOpen(false);
-                          setIsVoiceMenuOpen(false);
-                          setOpenHardwarePopover((current) => (current === key ? null : key));
-                        }}
-                        className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
-                          isActive
-                            ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
-                            : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)]'
-                        }`}
-                        title={item.expanded || item.label}
-                      >
-                        {fillPct > 0 && !isActive && (
-                          <span
-                            aria-hidden="true"
-                            className={`pointer-events-none absolute inset-y-0 left-0 rounded-full transition-all duration-700 ${fillColor}`}
-                            style={{ width: `${fillPct}%` }}
-                          />
-                        )}
-                        <span className="relative">{item.label}</span>
-                      </button>
-                      {openHardwarePopover === key && item.expanded ? (
-                        <div data-menu-panel={`hardware-${key}`} role="menu" tabIndex={-1} className="absolute left-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] au-chrome au-elev-2 p-2 text-[11px] text-[color:var(--text-muted)]">
-                          {item.expanded.split('\n').map((line, i) => (
-                            <div key={i} className={i === 0 ? 'font-semibold text-[color:var(--text-main)] mb-1' : 'text-[color:var(--text-muted)]'}>{line}</div>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-
-                {/* web search chip - fixed width so it never grows when searching */}
-                <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setDeepWebEnabled((v) => !v)}
-                  title={
-                    webSearchStatus === 'error'
-                      ? 'Web search failed - results unavailable'
-                      : deepWebEnabled
-                      ? 'Web search on - click to disable'
-                      : 'Web search off - click to enable'
-                  }
-                  className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
-                    webSearchStatus === 'searching'
-                      ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
-                      : webSearchStatus === 'error'
-                      ? 'border-red-400/60 bg-red-50/80 text-red-600 dark:border-red-500/40 dark:bg-red-900/20 dark:text-red-400'
-                      : deepWebEnabled
-                      ? 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)]'
-                      : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)] opacity-50 dark:text-[color:var(--text-muted)]'
-                  }`}
-                >
-                  <span className="relative">www</span>
-                </button>
-                </div>
-
-                {/* context + engine - right */}
-                <div className="ml-auto flex flex-nowrap items-center gap-1.5">
-                  <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setIsSystemPromptVisible((v) => !v)}
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition ${
-                      isSystemPromptVisible
-                        ? 'border-accent/60 bg-accentSoft text-ink dark:border-accent/40 dark:bg-accent/20 dark:text-green-300'
-                        : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                    }`}
-                    title="Toggle instructions visibility"
-                  >
-                    <span>Prompt</span>
-                  </button>
-                  </div>
-                  <div data-menu-container="true" className="relative">
-                    <button
-                      type="button"
-                      data-menu-trigger="context"
-                      onClick={() => {
-                        setIsEngineMenuOpen(false);
-                        setOpenHardwarePopover(null);
-                        setIsVoiceMenuOpen(false);
-                        setIsContextPanelOpen((prev) => !prev);
-                      }}
-                      className="inline-flex items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium tracking-wide text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                      title={`Context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens`}
-                    >
-                      Context {contextUsage.usedPct}%
-                    </button>
-
-                    {isContextPanelOpen && (
-                      <div data-menu-panel="context" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                        <div className="mb-2 flex items-center justify-between">
-                          <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Token Limit</span>
-                          <span className="text-[10px] text-[color:var(--text-muted)]">{contextUsage.usedPct}% used</span>
-                        </div>
-
-                        <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-[var(--material-thin)]">
-                          <div
-                            className="h-full rounded-full bg-accent transition-all duration-300"
-                            style={{ width: `${Math.min(contextUsage.usedPct, 100)}%` }}
-                          />
-                        </div>
-
-                        <div className="space-y-1 text-[11px] text-[color:var(--text-main)]">
-                          <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
-                            <span>System instructions</span>
-                            <span>{contextUsage.systemPct}% · {contextUsage.systemTokens.toLocaleString()} tok</span>
-                          </div>
-                          <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
-                            <span>User content</span>
-                            <span>{contextUsage.userPct}% · {contextUsage.userTokens.toLocaleString()} tok</span>
-                          </div>
-                          <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
-                            <span>Assistant</span>
-                            <span>{contextUsage.uncategorizedPct}% · {contextUsage.uncategorizedTokens.toLocaleString()} tok</span>
-                          </div>
-                        </div>
-
-                        <div className="mt-2 text-[10px] text-[color:var(--text-muted)]">
-                          {contextUsage.totalTokens.toLocaleString()} / {contextUsage.windowTokens.toLocaleString()} tokens
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                </div>
-            </div>
           </header>
 
           <div
@@ -4739,8 +5375,11 @@ export default function ChatApp() {
           )}
 
           <footer className="mt-3 border-t border-black/10 pt-3">
-            <div className="mb-2 flex items-start justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
+            {/* ROW 1: slim toolbar. Left: model, effort, options. Right: status + tokens. */}
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {/* Model unit: provider and model triggers read as one pill */}
+                <div className="flex items-center gap-0.5 rounded-[var(--r-md)] au-hairline au-material px-0.5">
                 <div data-menu-container="true" className="relative flex items-center gap-1">
                 <div data-menu-container="true" className="relative">
                   <button
@@ -4760,7 +5399,7 @@ export default function ChatApp() {
                       setIsProviderConfigOpen(false);
                       if (installingBinary?.done) setInstallingBinary(null);
                     }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
                     title="Choose provider"
                   >
                     <span className="max-w-[9rem] truncate">{PROVIDER_OPTIONS.find((opt) => opt.id === provider)?.label || provider}</span>
@@ -4998,14 +5637,16 @@ export default function ChatApp() {
                   </div>
                 )}
                 </div>{/* end relative provider wrapper */}
-
+                  {shouldShowModelChip && (
+                    <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-[var(--hairline)]" />
+                  )}
                 {shouldShowModelChip && (
                 <div data-menu-container="true" className="relative">
                   <button
                     type="button"
                     data-menu-trigger="model"
                     onClick={() => { setIsProviderMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsModelMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
                     title="Choose model"
                   >
                     <span className="max-w-[9rem] truncate">
@@ -5136,12 +5777,28 @@ export default function ChatApp() {
                                       >✕</span>
                                     </div>
                                   ) : (
-                                    <span className="ml-2 shrink-0 text-[10px] text-[color:var(--text-muted)]">
-                                      {isInstalled
-                                        ? (item.paramSize || '')
-                                        : provider === 'ollama'
-                                          ? (item.size || '+ install')
-                                          : 'load externally'}
+                                    <span className="ml-2 flex shrink-0 items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
+                                      {provider === 'ollama' ? (() => {
+                                        const fit = computeModelFit(item, deviceRamGb);
+                                        if (!fit) return null;
+                                        const tone = fit.tier === 'fits'
+                                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
+                                          : fit.tier === 'tight'
+                                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300'
+                                            : 'bg-rose-500/15 text-rose-600 dark:text-rose-300';
+                                        return (
+                                          <span title={fit.title} className={`inline-flex items-center rounded-[var(--r-pill)] px-1.5 py-[1px] font-semibold ${tone}`}>
+                                            {fit.label}
+                                          </span>
+                                        );
+                                      })() : null}
+                                      <span>
+                                        {isInstalled
+                                          ? (item.paramSize || '')
+                                          : provider === 'ollama'
+                                            ? (item.size || '+ install')
+                                            : 'load externally'}
+                                      </span>
                                     </span>
                                   )}
                                 </button>
@@ -5229,7 +5886,7 @@ export default function ChatApp() {
                           step="0.05"
                           value={temperature ?? 0.7}
                           onChange={(e) => setTemperature(Number(e.target.value))}
-                          className="mt-0.5 w-full accent-[var(--color-accent)]"
+                          className="mt-0.5 w-full accent-[var(--accent)]"
                         />
                         {temperature !== null && (
                           <button
@@ -5256,28 +5913,300 @@ export default function ChatApp() {
                           className="w-full rounded border border-[var(--hairline)] bg-[var(--material-thick)] px-1.5 py-0.5 text-[10px] outline-none focus:border-accent"
                         />
                       </div>
+                      {/* Inference Cockpit: advanced Ollama load/sampling knobs. Local only. */}
+                      {provider === 'ollama' && (
+                        <div className="mt-2 border-t border-black/10 pt-2 dark:border-white/10">
+                          <div className="mb-1 flex items-center justify-between">
+                            <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Advanced</span>
+                            {Object.values(ollamaParams).some((v) => v != null) && (
+                              <button
+                                type="button"
+                                onClick={() => setOllamaParams({})}
+                                className="text-[9px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)] dark:hover:text-slate-300"
+                              >
+                                Reset all
+                              </button>
+                            )}
+                          </div>
+                          <div className="mb-1.5">
+                            <div className="flex items-center justify-between text-[10px] text-[color:var(--text-muted)]">
+                              <span className="flex items-center gap-1">Top-p<span title="Nucleus sampling. Lower keeps word choice focused; 1 considers all. Leave default unless you know you need it." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none dark:border-slate-600">?</span></span>
+                              <span>{ollamaParams.top_p == null ? 'default' : Number(ollamaParams.top_p).toFixed(2)}</span>
+                            </div>
+                            <input type="range" min="0" max="1" step="0.05" value={ollamaParams.top_p ?? 0.9} onChange={(e) => setOllamaParams((p) => ({ ...p, top_p: Number(e.target.value) }))} className="mt-0.5 w-full accent-[var(--accent)]" />
+                          </div>
+                          <div className="mb-1.5">
+                            <div className="flex items-center justify-between text-[10px] text-[color:var(--text-muted)]">
+                              <span className="flex items-center gap-1">Repeat penalty<span title="Discourages repetition. 1.0 = off; 1.1 to 1.3 reduces loops. Too high hurts fluency." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none dark:border-slate-600">?</span></span>
+                              <span>{ollamaParams.repeat_penalty == null ? 'default' : Number(ollamaParams.repeat_penalty).toFixed(2)}</span>
+                            </div>
+                            <input type="range" min="0.8" max="2" step="0.05" value={ollamaParams.repeat_penalty ?? 1.1} onChange={(e) => setOllamaParams((p) => ({ ...p, repeat_penalty: Number(e.target.value) }))} className="mt-0.5 w-full accent-[var(--accent)]" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { key: 'top_k', label: 'Top-k', placeholder: 'default', title: 'Limits choices to the K most likely tokens. Blank = off.', min: 0, max: 500 },
+                              { key: 'num_ctx', label: 'Context', placeholder: 'model default', title: 'Context window size in tokens (num_ctx). Larger uses more memory.', min: 256, max: 131072 },
+                              { key: 'num_gpu', label: 'GPU layers', placeholder: 'auto', title: 'Layers offloaded to GPU (num_gpu). 0 = CPU only; higher is faster if it fits.', min: 0, max: 512 },
+                              { key: 'seed', label: 'Seed', placeholder: 'random', title: 'Fixes the random seed for reproducible output. Blank = random each run.', min: 0, max: 2147483647 }
+                            ].map((f) => (
+                              <div key={f.key}>
+                                <div className="mb-0.5 flex items-center gap-1 text-[10px] text-[color:var(--text-muted)]">{f.label}<span title={f.title} className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none dark:border-slate-600">?</span></div>
+                                <input
+                                  type="number"
+                                  min={f.min}
+                                  max={f.max}
+                                  placeholder={f.placeholder}
+                                  value={ollamaParams[f.key] ?? ''}
+                                  onChange={(e) => setOllamaParams((p) => ({ ...p, [f.key]: e.target.value === '' ? null : Math.round(Number(e.target.value)) }))}
+                                  className="w-full rounded border border-[var(--hairline)] bg-[var(--material-thick)] px-1.5 py-0.5 text-[10px] outline-none focus:border-accent"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <p className="mt-1.5 text-[9px] leading-tight text-[color:var(--text-muted)]">Applied to local Ollama models only. KV-cache quant is set on the Ollama server, not here.</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                   )}
                 </div>
                 )}
-
-                  <div data-menu-container="true" className="relative order-3">
+                </div>
+                {/* Effort dropdown: 5 levels, compact */}
+                <div data-menu-container="true" className="relative">
                   <button
                     type="button"
-                      data-menu-trigger="training"
-                    onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsTrainingMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                    title="Training options"
+                    data-menu-trigger="effort"
+                    onClick={() => { const open = !isEffortMenuOpen; closeAllDropdowns(); setIsEffortMenuOpen(open); }}
+                    className="inline-flex h-7 items-center gap-1 rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
+                    title="Answer effort level"
                   >
-                    Training
+                    Effort: {EFFORT_LABELS[effortLevel] || EFFORT_LABELS.balanced}
                     <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
                       <path d="M5.25 7.5L10 12.25 14.75 7.5" />
                     </svg>
                   </button>
+                  {isEffortMenuOpen && (
+                    <div data-menu-panel="effort" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-44 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                      {[
+                        { value: 'instant', label: 'Instant', hint: 'one line' },
+                        { value: 'fast', label: 'Fast', hint: 'concise' },
+                        { value: 'balanced', label: 'Balanced', hint: 'default' },
+                        { value: 'thorough', label: 'Thorough', hint: 'complete' },
+                        { value: 'deep', label: 'Deep', hint: 'reason first' }
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => { setEffortLevel(opt.value); setIsEffortMenuOpen(false); }}
+                          className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                            effortLevel === opt.value
+                              ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                              : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                          }`}
+                        >
+                          <span>{opt.label}</span>
+                          <span className="text-[10px] opacity-60">{opt.hint}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Direct one-click Uncensored toggle. No menu: a single click flips it.
+                    Uncensored is a pure on/off, so it earns a top-level toggle; the
+                    other modes stay in Options (MCP needs a server pick, not a toggle). */}
+                <button
+                  type="button"
+                  onClick={toggleUncensoredMode}
+                  aria-pressed={uncensoredMode}
+                  title={uncensoredMode ? 'Uncensored is on for this chat. Click to turn off.' : 'Uncensored is off. Click to turn on for this chat.'}
+                  className={`inline-flex h-7 items-center rounded-[var(--r-md)] px-2.5 text-[length:var(--text-2xs)] font-medium transition hover:brightness-105 ${
+                    uncensoredMode
+                      ? 'border text-[color:var(--accent)]'
+                      : 'au-hairline au-material text-[color:var(--text-main)]'
+                  }`}
+                  style={uncensoredMode ? { borderColor: 'color-mix(in srgb, var(--accent) 55%, var(--hairline))', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' } : undefined}
+                >
+                  Uncensored
+                </button>
+                {/* Direct one-click web-search toggle (the "www" chip). Same chip template
+                    as its siblings; on is the default so it stays neutral, and only the
+                    off state tints (our danger-rose), matching the Aurora chip look. */}
+                <button
+                  type="button"
+                  onClick={() => setDeepWebEnabled((prev) => !prev)}
+                  aria-pressed={deepWebEnabled}
+                  title={webSearchStatus === 'error'
+                    ? 'Web search failed last time. Click to toggle.'
+                    : deepWebEnabled ? 'Web search (www) is on by default. Click to turn it off.' : 'Web search (www) is off. Click to turn it back on.'}
+                  className={`inline-flex h-7 items-center rounded-[var(--r-md)] px-2.5 text-[length:var(--text-2xs)] font-medium transition hover:brightness-105 ${
+                    webSearchStatus === 'searching'
+                      ? 'border text-[color:var(--presence-away)] animate-pulse'
+                      : (!deepWebEnabled || webSearchStatus === 'error')
+                      ? 'border text-rose-600 dark:text-rose-300'
+                      : 'au-hairline au-material text-[color:var(--text-main)]'
+                  }`}
+                  style={
+                    webSearchStatus === 'searching'
+                      ? { borderColor: 'color-mix(in srgb, var(--presence-away) 55%, var(--hairline))', background: 'color-mix(in srgb, var(--presence-away) 12%, transparent)' }
+                      : (!deepWebEnabled || webSearchStatus === 'error')
+                      ? { borderColor: 'rgba(244,63,94,0.45)', background: 'rgba(244,63,94,0.12)' }
+                      : undefined
+                  }
+                >
+                  www
+                </button>
+                {/* Options dropdown: relocated tools, training, modes, and voice */}
+                <div data-menu-container="true" className="relative">
+                  <button
+                    type="button"
+                    data-menu-trigger="options"
+                    onClick={() => { const open = !isOptionsMenuOpen; closeAllDropdowns(); setIsOptionsMenuOpen(open); }}
+                    className="inline-flex h-7 items-center gap-1.5 rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
+                    title="Tools, training, modes, and voice"
+                  >
+                    <SlidersIcon size={13} />
+                    Options
+                    {optionsActiveCount > 0 && (
+                      <span className="ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-medium text-white" style={{ background: 'var(--accent)' }}>{optionsActiveCount}</span>
+                    )}
+                    <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
+                      <path d="M5.25 7.5L10 12.25 14.75 7.5" />
+                    </svg>
+                  </button>
+                  {isOptionsMenuOpen && (
+                    <div data-menu-panel="options" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                      <div className="px-1 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Tools</div>
+                      <button
+                        type="button"
+                        onClick={handleCreateImageTool}
+                        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                      >
+                        <span>Create Image</span>
+                        <span className="text-[10px] opacity-70">{imageServiceAvailable ? imageServiceDevice || 'ready' : 'offline'}</span>
+                      </button>
 
-                  {isTrainingMenuOpen && (
-                  <div data-menu-panel="training" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                      <button
+                        type="button"
+                        onClick={() => setDeepWebEnabled((prev) => !prev)}
+                        title={webSearchStatus === 'error' ? 'Web search failed - results unavailable' : deepWebEnabled ? 'Web search on' : 'Web search off'}
+                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
+                          deepWebEnabled
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                        }`}
+                      >
+                        <span>Web search</span>
+                        <span className="text-[10px] opacity-70">{webSearchStatus === 'searching' ? 'searching' : webSearchStatus === 'error' ? 'error' : deepWebEnabled ? 'on' : 'off'}</span>
+                      </button>
+
+                      <div className="rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => setConfigVaultEnabled((prev) => !prev)}
+                          title="Config Vault: cited local RAG over your own config files. Fully offline, allowed under Go Dark."
+                          className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
+                            configVaultEnabled
+                              ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                              : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                          }`}
+                        >
+                          <span>Config Vault</span>
+                          <span className="text-[10px] opacity-70">{(configVaultStatus?.chunkCount || 0) > 0 ? `${configVaultStatus.fileCount} files · ${configVaultEnabled ? 'on' : 'off'}` : (configVaultEnabled ? 'on · not indexed' : 'off')}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsVaultPanelOpen((v) => !v)}
+                          className="px-2 pb-1 text-[10px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]"
+                        >
+                          {isVaultPanelOpen ? 'Hide setup' : 'Setup / index a folder'}
+                        </button>
+                        {isVaultPanelOpen && (
+                          <div className="px-2 pb-2">
+                            <input
+                              type="text"
+                              value={configVaultFolder}
+                              onChange={(e) => setConfigVaultFolder(e.target.value)}
+                              placeholder="/path/to/your/configs"
+                              spellCheck={false}
+                              className="w-full rounded border border-[var(--hairline)] bg-[var(--material-thick)] px-1.5 py-1 text-[10px] outline-none focus:border-accent"
+                            />
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                disabled={configVaultBusy}
+                                onClick={indexConfigVault}
+                                className="rounded-[var(--r-md)] px-2 py-1 text-[10px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
+                                style={{ background: 'var(--accent)' }}
+                              >
+                                {configVaultBusy ? 'Working...' : 'Index'}
+                              </button>
+                              {(configVaultStatus?.chunkCount || 0) > 0 && (
+                                <button
+                                  type="button"
+                                  disabled={configVaultBusy}
+                                  onClick={clearConfigVault}
+                                  className="au-hairline rounded-[var(--r-md)] px-2 py-1 text-[10px] text-[color:var(--text-muted)] transition hover:text-[color:var(--text-main)] disabled:opacity-40"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                            {(configVaultStatus?.chunkCount || 0) > 0 && (
+                              <p className="mt-1 text-[9px] leading-tight text-[color:var(--text-muted)]">{configVaultStatus.fileCount} files, {configVaultStatus.chunkCount} chunks via {configVaultStatus.embedModel}</p>
+                            )}
+                            {configVaultMsg && <p className="mt-1 text-[9px] leading-tight text-[color:var(--text-muted)]">{configVaultMsg}</p>}
+                            <p className="mt-1 text-[9px] leading-tight text-[color:var(--text-muted)]">Embeds locally. Pull nomic-embed-text for sharper retrieval.</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCanvasEnabled((prev) => !prev);
+                          setIsToolsMenuOpen(false);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
+                          canvasEnabled
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                        }`}
+                      >
+                        <span>Canvas</span>
+                        <span className="text-[10px] opacity-70">{canvasEnabled ? 'on' : 'off'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setGuidedLearningEnabled((prev) => !prev);
+                          setIsToolsMenuOpen(false);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
+                          guidedLearningEnabled
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                        }`}
+                      >
+                        <span>Guided Learning</span>
+                        <span className="text-[10px] opacity-70">{guidedLearningEnabled ? 'on' : 'off'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeepThinkingEnabled((prev) => !prev);
+                          setIsToolsMenuOpen(false);
+                        }}
+                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
+                          deepThinkingEnabled
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                        }`}
+                      >
+                        <span>Deep Thinking</span>
+                        <span className="text-[10px] opacity-70">{deepThinkingEnabled ? 'on' : 'off'}</span>
+                      </button>
+                      <div className="mt-2 border-t border-[var(--hairline)] px-1 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Training</div>
                       <button
                         type="button"
                         onClick={() => {
@@ -5348,7 +6277,7 @@ export default function ChatApp() {
                         <button
                           type="button"
                           onClick={() => {
-                            setIsTeachPanelOpen(true);
+                            setIsTeachPanelOpen(true); setIsOptionsMenuOpen(false);
                             setIsTrainingMenuOpen(false);
                             loadMemoryItems();
                           }}
@@ -5364,100 +6293,58 @@ export default function ChatApp() {
                           Export
                         </button>
                       </div>
-                    </div>
-                  )}
-                </div>
-
-                  <div data-menu-container="true" className="relative">
-                  <button
-                    type="button"
-                      data-menu-trigger="tools"
-                    onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsToolsMenuOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                    title="Open tools"
-                  >
-                    Tools
-                    <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
-                      <path d="M5.25 7.5L10 12.25 14.75 7.5" />
-                    </svg>
-                  </button>
-
-                  {isToolsMenuOpen && (
-                    <div data-menu-panel="tools" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-56 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                      <div className="mt-2 border-t border-[var(--hairline)] px-1 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Modes</div>
                       <button
                         type="button"
-                        onClick={handleCreateImageTool}
-                        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                      >
-                        <span>Create Image</span>
-                        <span className="text-[10px] opacity-70">{imageServiceAvailable ? imageServiceDevice || 'ready' : 'offline'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCanvasEnabled((prev) => !prev);
-                          setIsToolsMenuOpen(false);
-                        }}
+                        onClick={toggleUncensoredMode}
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          canvasEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                          uncensoredMode
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
                             : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         }`}
+                        title="Toggle uncensored mode for this chat"
                       >
-                        <span>Canvas</span>
-                        <span className="text-[10px] opacity-70">{canvasEnabled ? 'on' : 'off'}</span>
+                        <span className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full ${uncensoredMode ? 'bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.55)]' : 'bg-transparent border border-slate-400/40'}`} />
+                          Uncensored
+                        </span>
+                        <span className="text-[10px] opacity-60">{uncensoredMode ? 'on' : 'off'}</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setGuidedLearningEnabled((prev) => !prev);
-                          setIsToolsMenuOpen(false);
-                        }}
+                        onClick={toggleOpenClawMode}
                         className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          guidedLearningEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                          openClawMode
+                            ? 'bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300'
                             : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         }`}
+                        title="OpenClaw preset: uncensored mode, no personal memory, empty app system prompt"
                       >
-                        <span>Guided Learning</span>
-                        <span className="text-[10px] opacity-70">{guidedLearningEnabled ? 'on' : 'off'}</span>
+                        <span className="flex min-w-0 flex-col">
+                          <span className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${openClawMode ? 'bg-rose-400 shadow-[0_0_6px_2px_rgba(244,63,94,0.5)]' : 'bg-transparent border border-slate-400/40'}`} />
+                            OpenClaw
+                          </span>
+                          <span className="mt-0.5 pl-4 text-[10px] leading-tight text-[color:var(--text-muted)]">Uncensored, no personal memory, empty system prompt</span>
+                        </span>
+                        <span className="text-[10px] opacity-60">{openClawMode ? 'on' : 'off'}</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDeepThinkingEnabled((prev) => !prev);
-                          setIsToolsMenuOpen(false);
-                        }}
-                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          deepThinkingEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        <span>Deep Thinking</span>
-                        <span className="text-[10px] opacity-70">{deepThinkingEnabled ? 'on' : 'off'}</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* ── Remote Control button ───────────────────────── */}
-                <div data-menu-container="true" className="relative order-3">
-                  <button
-                    type="button"
-                    data-menu-trigger="control"
-                    onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsControlPanelOpen((prev) => !prev); }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                    title="Remote Control"
-                  >
-                    {/* Green dot indicator */}
-                    <span className={`h-1.5 w-1.5 rounded-full ${remoteConnected ? 'bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.55)]' : 'bg-transparent border border-slate-400/40'}`} />
-                    Control
-                  </button>
-
+                      <div data-menu-container="true" className="relative">
+                        <button
+                          type="button"
+                          data-menu-trigger="control"
+                          onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsControlPanelOpen((prev) => !prev); }}
+                          className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                          title="Remote Control"
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className={`h-1.5 w-1.5 rounded-full ${remoteConnected ? 'bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.55)]' : 'bg-transparent border border-slate-400/40'}`} />
+                            Remote Control
+                          </span>
+                          <span className="text-[10px] opacity-60">{remoteConnected ? 'connected' : 'off'}</span>
+                        </button>
                   {isControlPanelOpen && (
-                    <div data-menu-panel="control" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 w-80 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="control" role="menu" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="mb-2 flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Remote Control</span>
                         {remoteConnected && (
@@ -5557,73 +6444,23 @@ export default function ChatApp() {
                       )}
                     </div>
                   )}
-                </div>
-
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={toggleUncensoredMode}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
-                      uncensoredMode
-                        ? 'border-emerald-300/60 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-400/40 dark:bg-emerald-900/20 dark:text-emerald-300 dark:hover:bg-emerald-900/30'
-                        : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                    }`}
-                    title="Toggle uncensored mode for this chat"
-                  >
-                    <span className={`h-2 w-2 rounded-full ${uncensoredMode ? 'bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.55)]' : 'bg-transparent border border-slate-400/40'}`} />
-                    Uncensored
-                  </button>
-                </div>
-
-                <div className="group relative order-5">
-                  <button
-                    type="button"
-                    onClick={toggleOpenClawMode}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${
-                      openClawMode
-                        ? 'border-rose-300/60 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-400/40 dark:bg-rose-900/20 dark:text-rose-300 dark:hover:bg-rose-900/30'
-                        : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                    }`}
-                    title="OpenClaw preset: uncensored mode, no personal memory, empty app system prompt"
-                  >
-                    <span className={`h-2 w-2 rounded-full ${openClawMode ? 'bg-rose-400 shadow-[0_0_6px_2px_rgba(244,63,94,0.5)]' : 'bg-transparent border border-slate-400/40'}`} />
-                    OpenClaw
-                  </button>
-                  {/* Hover tooltip - no button/state needed */}
-                  <div className="pointer-events-none absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 text-[11px] text-[color:var(--text-main)] opacity-0 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur transition-all duration-150 group-hover:opacity-100">
-                    <div className="mb-1.5 text-[11px] font-semibold text-[color:var(--text-main)]">OpenClaw Profile</div>
-                    <ul className="space-y-1 text-[10px] leading-relaxed text-[color:var(--text-muted)]">
-                      <li>Turns on Uncensored mode.</li>
-                      <li>Disables Personal Memory injection.</li>
-                      <li>Clears the app System Prompt field.</li>
-                      <li>Leaves model-level behavior untouched.</li>
-                    </ul>
-                  </div>
-                </div>
-
-                <div data-menu-container="true" className="relative order-4">
-                  <button
-                    type="button"
-                    data-menu-trigger="mcp"
-                    onClick={() => {
-                      setIsModelMenuOpen(false);
-                      setIsTrainingMenuOpen(false);
-                      setIsToolsMenuOpen(false);
-                      setIsControlPanelOpen(false);
-                      setOpenHardwarePopover(null);
-                      setIsEngineMenuOpen(false);
-                      setIsVoiceMenuOpen(false);
-                      setIsMcpPanelOpen((prev) => !prev);
-                    }}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                    title="MCP Connector"
-                  >
-                    <span className={`h-2 w-2 rounded-full ${selectedMcpServer ? 'bg-cyan-400 shadow-[0_0_6px_2px_rgba(34,211,238,0.45)]' : 'bg-transparent border border-slate-400/40'}`} />
-                    MCP
-                  </button>
-
+                      </div>
+                      <div data-menu-container="true" className="relative">
+                        <button
+                          type="button"
+                          data-menu-trigger="mcp"
+                          onClick={() => { setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsMcpPanelOpen((prev) => !prev); }}
+                          className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                          title="MCP Connector"
+                        >
+                          <span className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${selectedMcpServer ? 'bg-cyan-400 shadow-[0_0_6px_2px_rgba(34,211,238,0.45)]' : 'bg-transparent border border-slate-400/40'}`} />
+                            MCP Connector
+                          </span>
+                          <span className="text-[10px] opacity-60">{selectedMcpServer ? selectedMcpServer.id : 'off'}</span>
+                        </button>
                   {isMcpPanelOpen && (
-                    <div data-menu-panel="mcp" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 w-[27rem] rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="mcp" role="menu" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="mb-2 flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-[color:var(--text-main)]">MCP Connector</span>
                         <button
@@ -5826,159 +6663,26 @@ export default function ChatApp() {
                       )}
                     </div>
                   )}
-                </div>
-              </div>
-
-              <div className="flex flex-wrap justify-end gap-1.5">
-                {deepThinkingEnabled && (
-                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
-                    Deep Thinking
-                  </span>
-                )}
-                {guidedLearningEnabled && (
-                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
-                    Guided
-                  </span>
-                )}
-                {trainingMode === 'fine-tuning' && (
-                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
-                    Quick Learning
-                  </span>
-                )}
-                {trainingMode === 'full-training' && (
-                  <span className="rounded-full border border-amber-300/60 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-400/40 dark:bg-amber-900/30 dark:text-amber-200">
-                    Deep Training
-                  </span>
-                )}
-                {canvasEnabled && (
-                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
-                    Canvas
-                  </span>
-                )}
-                {remoteConnected && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/50 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-900/20 dark:text-emerald-300">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                    {remoteTarget}
-                  </span>
-                )}
-                {workspacePins.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => appStore.openWorkspace()}
-                    title="Pinned workspace files - read fresh from disk on send"
-                    className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
-                    {workspacePins.length} workspace file{workspacePins.length === 1 ? '' : 's'}
-                  </button>
-                )}
-                {selectedMcpServer && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/60 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:border-cyan-400/40 dark:bg-cyan-900/20 dark:text-cyan-300">
-                    <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
-                    MCP {selectedMcpServer.id}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-stretch gap-2">
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleAttachFiles}
-              />
-              <div className="relative flex shrink-0 flex-col items-center justify-between">
-                <button
-                  type="button"
-                  onClick={toggleDictation}
-                  disabled={!dictationSupported || isStreaming}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] border transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                    isDictating
-                      ? 'border-accent/50 bg-accentSoft text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
-                      : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)] hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-[color:var(--text-main)]'
-                  }`}
-                  title={dictationSupported ? (isDictating ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported in this browser'}
-                >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <rect x="9" y="3" width="6" height="11" rx="3" />
-                    <path d="M5 10.5a7 7 0 0014 0" />
-                    <path d="M12 17.5v3.5" />
-                    <path d="M8.5 21h7" />
-                  </svg>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isStreaming || isUploadingFiles}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[var(--material-thin)] dark:hover:text-[color:var(--text-main)]"
-                  title="Attach files"
-                >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M21.44 11.05l-8.49 8.49a5 5 0 11-7.07-7.07l9.19-9.19a3.5 3.5 0 114.95 4.95l-9.2 9.2a2 2 0 01-2.82-2.83l8.48-8.48" />
-                  </svg>
-                </button>
-              </div>
-              <textarea
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onFocus={() => {
-                  setIsModelMenuOpen(false);
-                  setIsTrainingMenuOpen(false);
-                  setIsToolsMenuOpen(false);
-                  setIsControlPanelOpen(false);
-                  setIsMcpPanelOpen(false);
-                  setOpenHardwarePopover(null);
-                  setIsEngineMenuOpen(false);
-                  setIsContextPanelOpen(false);
-                  setIsVoiceMenuOpen(false);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    sendMessage();
-                  }
-                }}
-                placeholder="Type your message..."
-                rows={3}
-                className="au-focus w-full resize-none rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-3.5 py-2.5 text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none transition placeholder:text-[color:var(--text-muted)] focus:border-transparent"
-              />
-              <div className="flex w-[4.25rem] shrink-0 flex-col items-stretch justify-between">
-                <div data-menu-container="true" className="relative">
-                <button
-                  type="button"
-                  data-menu-trigger="voice"
-                  onClick={() => {
-                    setIsContextPanelOpen(false);
-                    setOpenHardwarePopover(null);
-                    setIsEngineMenuOpen(false);
-                    setIsControlPanelOpen(false);
-                    setIsMcpPanelOpen(false);
-                    checkVoiceTools();
-                    fetchPiperModels();
-                    setIsVoiceMenuOpen((prev) => !prev);
-                  }}
-                  className={`inline-flex h-8 w-full items-center justify-center rounded-full border text-[10px] font-semibold tracking-wide transition ${
-                    isSpeaking
-                      ? 'border-accent/50 bg-accentSoft text-ink dark:border-accent/60 dark:bg-accent/20 dark:text-accent'
-                      : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                  }`}
-                  title="Voice settings"
-                >
-                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M4 12h1" />
-                    <path d="M8 9v6" />
-                    <path d="M12 7v10" />
-                    <path d="M16 9v6" />
-                    <path d="M20 11v2" />
-                  </svg>
-                  <span className="text-[8px] font-bold leading-none opacity-70">{voiceEngine === 'piper' ? 'P' : 'B'}</span>
-                </button>
-
+                      </div>
+                      <div className="mt-2 border-t border-[var(--hairline)] px-1 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Voice</div>
+                      <div data-menu-container="true" className="relative">
+                        <button
+                          type="button"
+                          data-menu-trigger="voice"
+                          onClick={() => { setIsContextPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); checkVoiceTools(); fetchPiperModels(); setIsVoiceMenuOpen((prev) => !prev); }}
+                          className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                          title="Voice settings"
+                        >
+                          <span className="flex items-center gap-2">
+                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M4 12h1" /><path d="M8 9v6" /><path d="M12 7v10" /><path d="M16 9v6" /><path d="M20 11v2" />
+                            </svg>
+                            Voice settings
+                          </span>
+                          <span className="text-[10px] opacity-60">{voiceEngine === 'piper' ? 'Piper' : 'Browser'}</span>
+                        </button>
                 {isVoiceMenuOpen && (
-                  <div data-menu-panel="voice" role="menu" tabIndex={-1} className="absolute bottom-full right-0 mb-2 z-20 w-80 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                  <div data-menu-panel="voice" role="menu" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Voice Settings</span>
                       <span className="text-[10px] text-[color:var(--text-muted)]">{voiceSupported ? 'TTS ready' : 'Unavailable'}</span>
@@ -6132,41 +6836,154 @@ export default function ChatApp() {
                     )}
                   </div>
                 )}
+                      </div>
+                    </div>
+                  )}
                 </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap justify-end gap-1.5">
+                {deepThinkingEnabled && (
+                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
+                    Deep Thinking
+                  </span>
+                )}
+                {guidedLearningEnabled && (
+                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
+                    Guided
+                  </span>
+                )}
+                {trainingMode === 'fine-tuning' && (
+                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
+                    Quick Learning
+                  </span>
+                )}
+                {trainingMode === 'full-training' && (
+                  <span className="rounded-full border border-amber-300/60 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-400/40 dark:bg-amber-900/30 dark:text-amber-200">
+                    Deep Training
+                  </span>
+                )}
+                {canvasEnabled && (
+                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
+                    Canvas
+                  </span>
+                )}
+                {remoteConnected && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/50 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-900/20 dark:text-emerald-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    {remoteTarget}
+                  </span>
+                )}
+                {workspacePins.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => appStore.openWorkspace()}
+                    title="Pinned workspace files - read fresh from disk on send"
+                    className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
+                    {workspacePins.length} workspace file{workspacePins.length === 1 ? '' : 's'}
+                  </button>
+                )}
+                {selectedMcpServer && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/60 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:border-cyan-400/40 dark:bg-cyan-900/20 dark:text-cyan-300">
+                    <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+                    MCP {selectedMcpServer.id}
+                  </span>
+                )}
+              </div>
+                <span
+                  className="shrink-0 font-medium tabular-nums text-[length:var(--text-2xs)] text-[color:var(--text-muted)]"
+                  title={`in ${chatTokenSummary.input.toLocaleString()} / out ${chatTokenSummary.output.toLocaleString()}`}
+                >
+                  {(chatTokenSummary.input + chatTokenSummary.output).toLocaleString()} tokens
+                </span>
+              </div>
+            </div>
 
+            {/* ROW 2: input bar - single-container composer. textarea on top, then one action row: [attach mic voice] ... [Send]. */}
+            <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] focus-within:border-[color:var(--accent)] transition">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={handleAttachFiles}
+              />
+              <textarea
+                value={input}
+                onChange={(event) => setInput(event.target.value)}
+                onFocus={() => {
+                  setIsModelMenuOpen(false);
+                  setIsTrainingMenuOpen(false);
+                  setIsToolsMenuOpen(false);
+                  setIsControlPanelOpen(false);
+                  setIsMcpPanelOpen(false);
+                  setOpenHardwarePopover(null);
+                  setIsEngineMenuOpen(false);
+                  setIsContextPanelOpen(false);
+                  setIsVoiceMenuOpen(false);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    sendMessage();
+                  }
+                }}
+                placeholder="Type your message..."
+                rows={3}
+                className="w-full resize-none bg-transparent border-0 px-3.5 pt-2.5 pb-1 text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
+              />
+              <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
+                <div className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isStreaming || isUploadingFiles}
+                    className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
+                    title="Attach files"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M21.44 11.05l-8.49 8.49a5 5 0 11-7.07-7.07l9.19-9.19a3.5 3.5 0 114.95 4.95l-9.2 9.2a2 2 0 01-2.82-2.83l8.48-8.48" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleDictation}
+                    disabled={!dictationSupported || isStreaming}
+                    className={`rounded p-1 transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                      isDictating
+                        ? 'text-[color:var(--accent)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                        : 'text-[color:var(--text-muted)] hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200'
+                    }`}
+                    title={dictationSupported ? (isDictating ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported in this browser'}
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="9" y="3" width="6" height="11" rx="3" />
+                      <path d="M5 10.5a7 7 0 0014 0" />
+                      <path d="M12 17.5v3.5" />
+                      <path d="M8.5 21h7" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => appStore.openVoiceChat()}
+                    disabled={isStreaming}
+                    className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
+                    title="Voice chat - hands-free spoken conversation"
+                  >
+                    <WaveIcon size={16} className="h-4 w-4" />
+                  </button>
+                </div>
                 <button
                   onClick={isStreaming ? stopStreaming : sendMessage}
                   disabled={!isStreaming && !input.trim()}
-                  className={`au-focus w-full rounded-[var(--r-lg)] px-2 h-8 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition active:scale-[0.98] enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${isStreaming ? 'bg-red-500' : ''}`}
+                  className={`au-focus shrink-0 rounded-[var(--r-md)] px-4 h-8 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition active:scale-[0.98] enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${isStreaming ? 'bg-red-500' : ''}`}
                   style={isStreaming ? undefined : { background: 'var(--accent)' }}
                 >
                   {isStreaming ? 'Stop' : 'Send'}
                 </button>
               </div>
-            </div>
-
-            {/* Status line: compact strip under the composer, understated meta row.
-                Left: effort control. Right: running token total for this conversation. */}
-            <div className="mt-2 flex items-center justify-between gap-3 border-t border-[var(--hairline)] pt-1.5 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
-              <div className="flex items-center gap-2">
-                <span className="font-medium">Effort</span>
-                <SegmentedControl
-                  size="sm"
-                  value={effortLevel}
-                  onChange={setEffortLevel}
-                  options={[
-                    { value: 'fast', label: 'Fast' },
-                    { value: 'balanced', label: 'Balanced' },
-                    { value: 'deep', label: 'Deep' }
-                  ]}
-                />
-              </div>
-              <span
-                className="font-medium tabular-nums"
-                title={`in ${chatTokenSummary.input.toLocaleString()} / out ${chatTokenSummary.output.toLocaleString()}`}
-              >
-                {(chatTokenSummary.input + chatTokenSummary.output).toLocaleString()} tokens
-              </span>
             </div>
           </footer>
 
@@ -6214,6 +7031,18 @@ export default function ChatApp() {
           await commitChatToLedger();
           setRadarOpen(false);
         }}
+      />
+      <VoiceChat
+        open={voiceChatOpen}
+        onClose={() => appStore.closeVoiceChat()}
+        phase={voicePhase}
+        interimText={voiceInterim}
+        replyText={voiceReply}
+        gender={voiceGender}
+        onGenderChange={onVoiceGenderChange}
+        onOrbTap={onVoiceOrbTap}
+        srSupported={voiceLoopSupported}
+        note={voiceNote}
       />
     </main>
   );
