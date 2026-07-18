@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 import { FlowerMark } from './ui/StatusOrb';
-import { IncognitoIcon, RadarIcon } from './ui/primitives';
+import { IncognitoIcon, RadarIcon, SegmentedControl } from './ui/primitives';
 import TabSwitch from './shell/TabSwitch';
 import CommitmentRadar from './shell/CommitmentRadar';
 import { playSend, playReceive, playError } from '../lib/sounds';
@@ -1196,6 +1196,7 @@ export default function ChatApp() {
   const [canvasText, setCanvasText] = useState('');
   const [guidedLearningEnabled, setGuidedLearningEnabled] = useState(false);
   const [deepThinkingEnabled, setDeepThinkingEnabled] = useState(false);
+  const [effortLevel, setEffortLevel] = useState(() => safeStorageGet('mirabilis-effort-level', 'balanced'));
   const [trainingMode, setTrainingMode] = useState('off');
   const [usePersonalMemory, setUsePersonalMemory] = useState(true);
   const [openClawMode, setOpenClawMode] = useState(() => {
@@ -1913,6 +1914,10 @@ export default function ChatApp() {
   useEffect(() => {
     safeStorageSet('local-ai-deep-thinking-enabled', String(deepThinkingEnabled));
   }, [deepThinkingEnabled]);
+
+  useEffect(() => {
+    safeStorageSet('mirabilis-effort-level', effortLevel);
+  }, [effortLevel]);
 
   useEffect(() => {
     safeStorageSet('local-ai-training-mode', trainingMode);
@@ -3722,7 +3727,14 @@ export default function ChatApp() {
         'Use examples and a tiny recap at the end.'
       );
     }
-    if (deepThinkingEnabled) {
+    if (effortLevel === 'fast') {
+      behaviorInstructions.push(
+        'Effort level: fast. Answer concisely and directly, shortest correct answer, skip preamble.'
+      );
+    }
+    // Treat effort "deep" as equivalent to the deep-thinking toggle so the two do not
+    // double up: push the deep lines once if either is set.
+    if (deepThinkingEnabled || effortLevel === 'deep') {
       behaviorInstructions.push(
         'Deep thinking mode: reason carefully, compare alternatives, and include key trade-offs.',
         'Provide a concise executive answer first, then details.'
@@ -6131,6 +6143,30 @@ export default function ChatApp() {
                   {isStreaming ? 'Stop' : 'Send'}
                 </button>
               </div>
+            </div>
+
+            {/* Status line: compact strip under the composer, understated meta row.
+                Left: effort control. Right: running token total for this conversation. */}
+            <div className="mt-2 flex items-center justify-between gap-3 border-t border-[var(--hairline)] pt-1.5 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">Effort</span>
+                <SegmentedControl
+                  size="sm"
+                  value={effortLevel}
+                  onChange={setEffortLevel}
+                  options={[
+                    { value: 'fast', label: 'Fast' },
+                    { value: 'balanced', label: 'Balanced' },
+                    { value: 'deep', label: 'Deep' }
+                  ]}
+                />
+              </div>
+              <span
+                className="font-medium tabular-nums"
+                title={`in ${chatTokenSummary.input.toLocaleString()} / out ${chatTokenSummary.output.toLocaleString()}`}
+              >
+                {(chatTokenSummary.input + chatTokenSummary.output).toLocaleString()} tokens
+              </span>
             </div>
           </footer>
 

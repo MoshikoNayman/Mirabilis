@@ -2,6 +2,14 @@
 
 Versioning follows Junos-style tags.
 
+## [26.2R1-S32] - 2026-07-13
+
+### Chat status line: Effort control + running token total
+
+- **Effort** control under the chat (Fast / Balanced / Deep) that shapes each reply: Fast keeps it concise and direct, Deep reasons through alternatives and trade-offs. Persists across sessions.
+- **Running token total** for the conversation shown beside it (input plus output), with an input/output breakdown on hover.
+- **Launcher fix**: the image service (Stable Diffusion) now starts in the background instead of blocking startup for up to 900s on its first-run model download. Set MIRABILIS_SKIP_IMAGE=1 to skip it or MIRABILIS_WAIT_IMAGE=1 to wait.
+
 ## [26.2R1-S31] - 2026-07-13
 
 ### Local-First Features + Aurora Chrome Refresh
