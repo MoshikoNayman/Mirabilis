@@ -64,6 +64,33 @@ Get-FileHash .\Mirabilis.AI-*-x64.exe -Algorithm SHA256
 
 > Note: installers are not yet Apple-notarized / Windows-signed, so the OS may still show an unsigned-app warning even after the checksum matches.
 
+### Opening on macOS (first launch)
+
+The Mac build is not yet Apple-notarized, so on first launch macOS may say the app
+is **"damaged and can't be opened"** or is from an **"unidentified developer"**. The
+app is not damaged - this is macOS Gatekeeper blocking any app that is not signed
+with a paid Apple Developer certificate. Clear it once and it opens normally from
+then on. Pick whichever is easiest:
+
+- **Terminal (most reliable).** After moving the app out of the DMG (e.g. to
+  `Applications`), run:
+
+  ```bash
+  xattr -cr "/Applications/Mirabilis AI.app"
+  ```
+
+  Then double-click the app. Done.
+
+- **No Terminal, macOS Ventura / Sonoma.** Right-click the app, choose **Open**,
+  then **Open** again in the dialog.
+
+- **No Terminal, macOS Sequoia (15).** Double-click (it gets blocked), then open
+  **System Settings > Privacy & Security**, scroll down, and click **Open Anyway**.
+
+To remove this step for everyone, the build must be **code-signed and notarized**
+with an Apple Developer account. The release pipeline is ready to enable it as soon
+as those credentials are provided.
+
 ---
 
 ## Public Repo Notes
