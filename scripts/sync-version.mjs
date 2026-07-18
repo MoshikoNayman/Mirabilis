@@ -77,6 +77,23 @@ if (constDrift) {
   }
 }
 
+// Stamp the human-facing version line in README.md so it can never drift from
+// the canonical VERSION again (this was previously hand-maintained and went stale).
+const readmePath = join(ROOT, 'README.md');
+try {
+  const readme = readFileSync(readmePath, 'utf8');
+  const next = readme.replace(/^\*\*Version:\*\* .*$/m, `**Version:** ${marketing}  `);
+  if (next !== readme) {
+    drift = true;
+    if (!check) {
+      writeFileSync(readmePath, next);
+      console.log(`updated README.md -> ${marketing}`);
+    } else {
+      console.error(`drift: README.md version line is out of sync`);
+    }
+  }
+} catch { /* README is optional */ }
+
 if (check && drift) {
   console.error('\nVersion files are out of sync. Run: node scripts/sync-version.mjs');
   process.exit(1);

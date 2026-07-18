@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-**Version:** 26.2R1-S30  
+**Version:** 26.2R1-S33  
 **Author:** Moshiko Nayman
 
 [![Download Latest Release](https://img.shields.io/badge/Download-Latest%20Release-1aa86f?style=for-the-badge)](https://github.com/MoshikoNayman/Mirabilis/releases/latest)
