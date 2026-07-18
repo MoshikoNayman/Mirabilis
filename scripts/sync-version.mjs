@@ -94,6 +94,22 @@ try {
   }
 } catch { /* README is optional */ }
 
+// Keep the version line in the proprietary LICENSE footer current too.
+const licensePath = join(ROOT, 'LICENSE');
+try {
+  const lic = readFileSync(licensePath, 'utf8');
+  const next = lic.replace(/^Version:\s+.*$/m, `Version: ${marketing}`);
+  if (next !== lic) {
+    drift = true;
+    if (!check) {
+      writeFileSync(licensePath, next);
+      console.log(`updated LICENSE -> ${marketing}`);
+    } else {
+      console.error(`drift: LICENSE version line is out of sync`);
+    }
+  }
+} catch { /* LICENSE is optional */ }
+
 if (check && drift) {
   console.error('\nVersion files are out of sync. Run: node scripts/sync-version.mjs');
   process.exit(1);
