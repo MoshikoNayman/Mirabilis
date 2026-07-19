@@ -179,7 +179,13 @@ const PROVIDER_OPTIONS = [
   { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server' },
   { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp' }
 ];
-const STREAM_STALL_TIMEOUT_MS = 120000;
+// Two separate budgets. Time-to-first-token on a big local model includes cold load
+// + long-context prefill and can legitimately take minutes, so it gets a very
+// generous budget (effectively "wait, trust Stop"). Once tokens are flowing, a short
+// gap means a genuinely dead stream. Splitting these stops the old 120s single timer
+// from aborting a healthy slow-starting local generation.
+const STREAM_FIRST_TOKEN_BUDGET_MS = 900000; // 15 min before the first token
+const STREAM_STALL_TIMEOUT_MS = 60000;       // 60s gap between tokens = dead
 
 const UNCENSORED_MODEL_PRIORITY = [
   'qwen3.5-uncensored',
@@ -4521,6 +4527,7 @@ export default function ChatApp() {
     setIsStreaming(true);
     let stalledByWatchdog = false;
     let stallTimer = null;
+    let firstTokenSeen = false; // switches the watchdog from the first-token budget to the inter-token stall timer
     let liveProgressTimer = null; // hoisted so `finally` can always clear it
 
     try {
@@ -4531,7 +4538,7 @@ export default function ChatApp() {
         stallTimer = setTimeout(() => {
           stalledByWatchdog = true;
           try { ctrl.abort(); } catch { /* no-op */ }
-        }, STREAM_STALL_TIMEOUT_MS);
+        }, firstTokenSeen ? STREAM_STALL_TIMEOUT_MS : STREAM_FIRST_TOKEN_BUDGET_MS);
       };
       const outboundSystemPrompt = uncensoredMode ? '' : systemPrompt;
       const outboundUsePersonalMemory = uncensoredMode ? false : usePersonalMemory;
@@ -4685,6 +4692,7 @@ export default function ChatApp() {
           }
 
           if (event === 'token') {
+            if (!firstTokenSeen) firstTokenSeen = true; // switch to the short inter-token stall timer
             refreshStallWatchdog();
             pendingTokens += payload.token || '';
             liveTokenCount += 1;
@@ -4753,7 +4761,7 @@ export default function ChatApp() {
             if (next.length > 0 && next[next.length - 1].role === 'assistant' && !next[next.length - 1].content) {
               next[next.length - 1] = {
                 ...next[next.length - 1],
-                content: 'Error: Stream timed out after 120s without output. Try a smaller local model or reduce prompt/context size.'
+                content: 'Error: the stream went quiet with no output for a long time and was stopped. The model may not be running. Try again, or pick a smaller model.'
               };
             }
             return next;

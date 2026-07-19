@@ -47,7 +47,9 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
   const payload = {
     model,
     messages: conversation,
-    max_tokens: maxTokens != null ? maxTokens : 2048,
+    // Anthropic requires max_tokens. Default high so replies are not silently
+    // truncated (Ollama/OpenAI-compatible send no cap); the user override still wins.
+    max_tokens: maxTokens != null ? maxTokens : 8192,
     stream: false,
     ...(system ? { system } : {}),
     ...(temperature != null ? { temperature } : {})

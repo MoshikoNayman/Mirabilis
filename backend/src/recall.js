@@ -15,7 +15,9 @@ const DEFAULT_TOP_K = 6;
 // embed storm. Most recent chats are preferred when the cap is hit.
 const MAX_DOCS = 600;
 const EMBED_CONCURRENCY = 4;
-const EMBED_TIMEOUT_MS = 30000;
+// Raised from 30s: the first embed includes a cold load of the embedding model,
+// which can breach 30s on a slow disk and silently fail the first Recall query.
+const EMBED_TIMEOUT_MS = 90000;
 
 // Contradiction detection ("Your Past Self Disagrees"). A small local chat model
 // judges whether a current decision conflicts with a similar past one. All caps
@@ -25,7 +27,9 @@ const CONTRA_SIM_THRESHOLD = 0.55; // minimum cosine similarity to bother judgin
 const CONTRA_NEAR_DUPLICATE = 0.985; // above this it is almost certainly the same sentence
 const CONTRA_TOP_K = 3; // at most this many past candidates per statement
 const CONTRA_MAX_JUDGE_CALLS = 6; // hard cap on LLM judge calls per request
-const CHAT_TIMEOUT_MS = 30000;
+// Raised from 30s: the judge model is user-selectable and its first call includes a
+// cold load; a larger judge on CPU can exceed 30s and be killed mid-verdict.
+const CHAT_TIMEOUT_MS = 120000;
 
 function sha1(text) {
   return createHash('sha1').update(text).digest('hex');

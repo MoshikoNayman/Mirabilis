@@ -94,7 +94,12 @@ app.use(cors({
   maxAge: 600
 }));
 
-if (isProduction) {
+// The rate limiter is a multi-tenant/cloud defense. On a single-user loopback app
+// it can only 429 the user against their own machine, so only enforce it when the
+// backend is deliberately bound to a non-loopback host (LAN-exposed behind a proxy).
+const bindHost = String(process.env.MIRABILIS_BIND_HOST || '127.0.0.1').trim();
+const isLoopbackBind = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(bindHost);
+if (isProduction && !isLoopbackBind) {
   const apiLimiter = rateLimit({
     windowMs: config.apiRateLimitWindowMs,
     max: config.apiRateLimitMax,
@@ -376,7 +381,10 @@ function detectThreadCount() {
   return Number.isFinite(n) && n > 0 ? n : 4;
 }
 
-async function waitForEndpoint(url, timeoutMs = 30000) {
+// Default raised from 30s: loading a large GGUF into RAM/VRAM (or a model that
+// spills to disk) routinely needs 1-3 min on modest local hardware, and killing a
+// server that was about to come up penalizes exactly the capability-first user.
+async function waitForEndpoint(url, timeoutMs = 180000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     try {
@@ -2861,7 +2869,9 @@ app.post('/api/generate-image', async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, steps, width, height, negative_prompt, guidance_scale, seed }),
-      signal: AbortSignal.timeout(180000)
+      // Raised from 180s: a high-step / high-resolution (SDXL-class) render on CPU or
+      // a modest GPU can exceed 3 min; do not discard a nearly-finished image.
+      signal: AbortSignal.timeout(Number(process.env.MIRABILIS_IMAGE_TIMEOUT_MS || 600000))
     });
     if (!imgRes.ok) {
       const errText = await imgRes.text().catch(() => 'Image service error');
