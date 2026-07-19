@@ -23,7 +23,45 @@ export async function listOpenAICompatibleModels(input) {
   }
 }
 
-export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messages, signal, onToken, temperature, maxTokens, providerLabel = 'OpenAI-compatible' }) {
+// The full sampling/behaviour parameter set an OpenAI-compatible server (llama.cpp
+// llama-server, vLLM, LM Studio, KoboldCpp) understands. Previously only temperature
+// and max_tokens were forwarded, so grammar/JSON mode, stop sequences, seed, nucleus
+// sampling, penalties, and tools were unreachable even against a capable local server.
+// Values are coerced to safe ranges; unknown keys are dropped.
+const OPENAI_PARAM_SPEC = {
+  top_p: { min: 0, max: 1 },
+  top_k: { min: 0, max: 500, int: true },
+  min_p: { min: 0, max: 1 },                 // llama.cpp / vLLM extension
+  typical_p: { min: 0, max: 1 },
+  repeat_penalty: { min: 0, max: 4 },        // llama.cpp extension
+  presence_penalty: { min: -2, max: 2 },
+  frequency_penalty: { min: -2, max: 2 },
+  seed: { min: 0, max: 2147483647, int: true },
+  n_predict: { min: -1, max: 131072, int: true } // llama.cpp alias for max tokens
+};
+
+export function sanitizeOpenAIParams(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const [key, spec] of Object.entries(OPENAI_PARAM_SPEC)) {
+    const value = raw[key];
+    if (value == null || value === '') continue;
+    let num = Number(value);
+    if (!isFinite(num)) continue;
+    if (spec.int) num = Math.round(num);
+    out[key] = Math.min(spec.max, Math.max(spec.min, num));
+  }
+  // Pass-through complex fields the server validates itself.
+  if (Array.isArray(raw.stop) && raw.stop.length) out.stop = raw.stop.slice(0, 8).map(String);
+  else if (typeof raw.stop === 'string' && raw.stop) out.stop = [raw.stop];
+  if (raw.response_format && typeof raw.response_format === 'object') out.response_format = raw.response_format;
+  if (Array.isArray(raw.tools) && raw.tools.length) out.tools = raw.tools;
+  if (raw.tool_choice != null) out.tool_choice = raw.tool_choice;
+  if (raw.grammar && typeof raw.grammar === 'string') out.grammar = raw.grammar; // llama.cpp GBNF
+  return out;
+}
+
+export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messages, signal, onToken, temperature, maxTokens, params, providerLabel = 'OpenAI-compatible' }) {
   const base = baseUrl || OPENAI_BASE_URL;
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -37,6 +75,7 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
     stream: true,
     ...(temperature != null ? { temperature } : {}),
     ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
+    ...sanitizeOpenAIParams(params),
   };
 
   try {

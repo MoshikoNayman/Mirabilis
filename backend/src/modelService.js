@@ -479,7 +479,7 @@ export async function listModels(config, provider = config.aiProvider, options =
   return [...curated, ...extraModels];
 }
 
-export async function streamWithProvider({ provider, model, messages, config, signal, onToken, onStats, onNotice, overrideBaseUrl, overrideApiKey, temperature, maxTokens, ollamaOptions, keepAlive }) {
+export async function streamWithProvider({ provider, model, messages, config, signal, onToken, onStats, onNotice, overrideBaseUrl, overrideApiKey, temperature, maxTokens, ollamaOptions, openaiParams, keepAlive }) {
   // Central SSRF guard for the streaming path too (not just /api/models and
   // /api/providers/health): this is the one outbound call that echoes the
   // provider response body back to the caller, so a metadata-endpoint baseUrl
@@ -511,6 +511,7 @@ export async function streamWithProvider({ provider, model, messages, config, si
       onToken,
       temperature,
       maxTokens,
+      params: openaiParams,
       providerLabel: provider === 'openai'
         ? 'OpenAI'
         : provider === 'grok'
@@ -529,7 +530,7 @@ export async function streamWithProvider({ provider, model, messages, config, si
     });
   }
 
-  if (provider === 'koboldcpp') {
+  if (provider === 'koboldcpp' || provider === 'llamacpp') {
     return streamOpenAICompatibleChat({
       baseUrl: overrideBaseUrl || config.koboldBaseUrl,
       apiKey: overrideApiKey !== undefined ? overrideApiKey : '',
@@ -539,7 +540,8 @@ export async function streamWithProvider({ provider, model, messages, config, si
       onToken,
       temperature,
       maxTokens,
-      providerLabel: 'KoboldCpp',
+      params: openaiParams,
+      providerLabel: provider === 'llamacpp' ? 'llama.cpp' : 'KoboldCpp',
     });
   }
 

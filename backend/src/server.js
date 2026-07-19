@@ -2556,7 +2556,7 @@ app.delete('/api/chats', async (_req, res) => {
 });
 
 app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
-  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens, localOnly, ollamaOptions, pinModel } = req.body || {};
+  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens, localOnly, ollamaOptions, openaiParams, pinModel } = req.body || {};
   const chatId = req.params.chatId;
 
   if (!content || typeof content !== 'string') {
@@ -2751,6 +2751,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       temperature: typeof temperature === 'number' && isFinite(temperature) ? temperature : undefined,
       maxTokens: typeof maxTokens === 'number' && isFinite(maxTokens) && maxTokens > 0 ? Math.round(maxTokens) : undefined,
       ollamaOptions: tuning.options,
+      openaiParams,
       keepAlive: pinModel === true ? -1 : '30m',
       onToken: (token) => {
         if (firstTokenAt === null) firstTokenAt = Date.now();
