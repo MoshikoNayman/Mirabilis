@@ -2,6 +2,18 @@
 
 Versioning follows Junos-style tags.
 
+## [26.3R1-S1] - 2026-07-19
+
+### Local-First Engine + Capability Routing + Security Hardening
+
+- **Managed llama.cpp runtime**: Mirabilis can now supervise a `llama-server` process directly, exposing the knobs Ollama hides: KV-cache quantization (q8_0 roughly halves KV memory), flash attention, and server slots. It runs your existing Ollama GGUF blobs with no re-download, one managed server at a time so unified-memory Macs stay safe.
+- **Runtime registry**: runtimes (Ollama, llama.cpp, vLLM, OpenAI-compatible, KoboldCpp) are now declarative with capability flags; vLLM is gated off Apple Silicon automatically.
+- **Capability model router**: an `auto` model picks the best installed model for the task lane (coding / reasoning / general / experimental) using a cheap keyword classifier, honoring the hardware memory ceiling. Explicit Uncensored intent routes to the experimental lane.
+- **Hardware auto-tune**: `num_ctx` is sized to the model's real context window capped by a memory budget derived from device RAM, with `low_vram` and thread counts tuned to the machine. Local generation is no longer bounded by cloud-shaped defaults.
+- **Resilient local streaming**: adaptive timeouts, OOM auto-retry with a graceful option ladder, live progress while a model loads, and split first-token / stall watchdogs so long local generations are not cut short.
+- **Security**: hardened the llama.cpp runtime against path traversal. A crafted model ref or spoofed blob digest could previously resolve to a file outside the Ollama store; model refs are now charset-validated, resolved paths are confirmed inside the store root, blob digests are validated before use, and an explicit model path must be a real `.gguf` file. KV-cache quant types are whitelisted and numeric flags are clamped.
+- **Housekeeping**: the MCP client handshake version is now generated from the single VERSION source, so it can never drift from the release again.
+
 ## [26.2R1-S33] - 2026-07-18
 
 ### Config Vault, Inference Cockpit, Performance Receipt, Voice Chat

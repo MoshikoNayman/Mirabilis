@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { APP_VERSION } from '../version.js';
 
 const DEFAULT_PROTOCOL_VERSION = '2024-11-05';
 
@@ -203,7 +204,7 @@ export class McpConnectorService {
     this.filePath = options.filePath;
     this.clientInfo = {
       name: options.clientName || 'mirabilis',
-      version: options.clientVersion || '26.2R1-S3'
+      version: options.clientVersion || APP_VERSION
     };
     this.state = {
       servers: []

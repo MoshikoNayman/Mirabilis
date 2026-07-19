@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import { Client as SshClient } from 'ssh2';
 import { config } from './config.js';
+import { APP_VERSION } from './version.js';
 import { getLocalHardwareProfile } from './hardwareProfile.js';
 import {
   ensureStoreFile,
@@ -1939,7 +1940,7 @@ const mcpAuditLogPath = join(dirname(config.chatStorePath), 'mcp-audit.jsonl');
 const mcpConnector = new McpConnectorService({
   filePath: mcpStorePath,
   clientName: 'mirabilis',
-  clientVersion: '26.2R1-S3'
+  clientVersion: APP_VERSION
 });
 let mcpInitPromise = null;
 const mcpApprovalTokens = new Map(); // token -> { serverId, toolName, argsHash, expiresAt }
