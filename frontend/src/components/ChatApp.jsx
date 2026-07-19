@@ -4521,6 +4521,7 @@ export default function ChatApp() {
     setIsStreaming(true);
     let stalledByWatchdog = false;
     let stallTimer = null;
+    let liveProgressTimer = null; // hoisted so `finally` can always clear it
 
     try {
       const ctrl = new AbortController();
@@ -4574,9 +4575,13 @@ export default function ChatApp() {
       // token - O(n^2) for long answers. One flush per frame keeps rendering smooth.
       let pendingTokens = '';
       let tokenRafId = null;
+      let tokenTimerId = null;
       const canRaf = typeof requestAnimationFrame === 'function';
       const flushTokens = () => {
+        if (tokenRafId != null && canRaf) cancelAnimationFrame(tokenRafId);
+        if (tokenTimerId != null) clearTimeout(tokenTimerId);
         tokenRafId = null;
+        tokenTimerId = null;
         if (!pendingTokens) return;
         const add = pendingTokens;
         pendingTokens = '';
@@ -4591,11 +4596,32 @@ export default function ChatApp() {
           return next;
         });
       };
+      // rAF renders smoothly in-focus; the setTimeout fallback keeps output flowing
+      // when the window is backgrounded (rAF is throttled/paused there), so a long
+      // local generation never looks frozen while the user is in another app.
+      const scheduleFlush = () => {
+        if (canRaf && tokenRafId == null) tokenRafId = requestAnimationFrame(flushTokens);
+        if (tokenTimerId == null) tokenTimerId = setTimeout(flushTokens, 250);
+      };
       const cancelTokenFlush = () => {
         if (tokenRafId != null && canRaf) cancelAnimationFrame(tokenRafId);
+        if (tokenTimerId != null) clearTimeout(tokenTimerId);
         tokenRafId = null;
+        tokenTimerId = null;
         pendingTokens = '';
       };
+
+      // Live during-stream progress in the status line: real generated-token count,
+      // elapsed seconds, and rolling tok/s (replaces the faked "Thinking…" ladder).
+      // Before the first token it shows a genuine "loading" state, not a wall-clock guess.
+      let liveTokenCount = 0;
+      let liveFirstTokenTs = null;
+      liveProgressTimer = setInterval(() => {
+        if (liveFirstTokenTs == null) { setStatusText('Loading model / prefilling…'); return; }
+        const elapsed = (Date.now() - liveFirstTokenTs) / 1000;
+        const tps = elapsed > 0 ? liveTokenCount / elapsed : 0;
+        setStatusText(`${liveTokenCount.toLocaleString()} tok · ${tps >= 10 ? tps.toFixed(0) : tps.toFixed(1)} tok/s · ${elapsed.toFixed(0)}s`);
+      }, 400);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -4661,11 +4687,14 @@ export default function ChatApp() {
           if (event === 'token') {
             refreshStallWatchdog();
             pendingTokens += payload.token || '';
-            if (canRaf) {
-              if (tokenRafId == null) tokenRafId = requestAnimationFrame(flushTokens);
-            } else {
-              flushTokens();
-            }
+            liveTokenCount += 1;
+            if (liveFirstTokenTs == null) liveFirstTokenTs = Date.now();
+            scheduleFlush();
+          }
+
+          if (event === 'notice' && payload.message) {
+            // OOM auto-retry (or similar) reduced the runtime settings; surface it.
+            setStatusText(payload.message);
           }
 
           if (event === 'error') {
@@ -4754,6 +4783,7 @@ export default function ChatApp() {
         });
       }
     } finally {
+      if (liveProgressTimer) clearInterval(liveProgressTimer);
       streamAbortRef.current = null;
       setIsStreaming(false);
     }

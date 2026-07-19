@@ -54,8 +54,11 @@ export async function getOllamaModelInfo(baseUrl, model) {
 
 const OOM_RE = /out of memory|unable to allocate|failed to allocate|cudamalloc|insufficient memory|not enough memory|\bvram\b/i;
 
-export async function streamOllamaChat({ baseUrl, model, messages, signal, onToken, onStats, onNotice, temperature, maxTokens, options: extraOptions }) {
+export async function streamOllamaChat({ baseUrl, model, messages, signal, onToken, onStats, onNotice, temperature, maxTokens, keepAlive, options: extraOptions }) {
   const base = baseUrl || OLLAMA_BASE_URL;
+  // Keep the model resident instead of Ollama's default 5-minute idle unload, so a
+  // reply after a pause does not pay a full cold reload. Default 30m; -1 = never unload.
+  const keep_alive = keepAlive != null ? keepAlive : '30m';
   // Merge every tuning knob into a single Ollama `options` object. Explicit
   // extraOptions (the Inference Cockpit profile / auto-tune) take precedence;
   // temperature and maxTokens stay as convenience params.
@@ -84,6 +87,7 @@ export async function streamOllamaChat({ baseUrl, model, messages, signal, onTok
       model,
       messages: messages.map(m => ({ role: m.role, content: m.content })),
       stream: true,
+      keep_alive,
       ...(Object.keys(opts).length ? { options: opts } : {}),
     };
     const res = await fetch(`${base}/api/chat`, {

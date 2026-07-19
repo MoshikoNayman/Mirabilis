@@ -315,7 +315,10 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Keep timers/rAF running when the window is in the background so a long local
+      // generation keeps streaming visibly instead of freezing until refocus.
+      backgroundThrottling: false
     }
   });
 

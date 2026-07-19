@@ -479,7 +479,7 @@ export async function listModels(config, provider = config.aiProvider, options =
   return [...curated, ...extraModels];
 }
 
-export async function streamWithProvider({ provider, model, messages, config, signal, onToken, onStats, onNotice, overrideBaseUrl, overrideApiKey, temperature, maxTokens, ollamaOptions }) {
+export async function streamWithProvider({ provider, model, messages, config, signal, onToken, onStats, onNotice, overrideBaseUrl, overrideApiKey, temperature, maxTokens, ollamaOptions, keepAlive }) {
   // Central SSRF guard for the streaming path too (not just /api/models and
   // /api/providers/health): this is the one outbound call that echoes the
   // provider response body back to the caller, so a metadata-endpoint baseUrl
@@ -567,6 +567,7 @@ export async function streamWithProvider({ provider, model, messages, config, si
     onNotice,
     temperature,
     maxTokens,
+    keepAlive,
     options: ollamaOptions,
   });
 }

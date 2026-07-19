@@ -161,7 +161,7 @@ function sanitizeSnapshots(chat) {
   chat.snapshots = chat.snapshots.slice(-20);
 }
 
-async function generateChatTitle({ content, provider, model, config: cfg }) {
+async function generateChatTitle({ content, provider, model, config: cfg, ollamaOptions, keepAlive }) {
   const snippet = content.trim().slice(0, 300);
   const titleMessages = [
     {
@@ -176,6 +176,10 @@ async function generateChatTitle({ content, provider, model, config: cfg }) {
     model,
     messages: titleMessages,
     config: cfg,
+    // Reuse the chat's runtime config (num_ctx, keep_alive) so titling does not
+    // spin up a second model instance with a different context size.
+    ollamaOptions,
+    keepAlive,
     onToken: (token) => { title += token; }
   });
   return title
@@ -2544,7 +2548,7 @@ app.delete('/api/chats', async (_req, res) => {
 });
 
 app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
-  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens, localOnly, ollamaOptions } = req.body || {};
+  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens, localOnly, ollamaOptions, pinModel } = req.body || {};
   const chatId = req.params.chatId;
 
   if (!content || typeof content !== 'string') {
@@ -2620,11 +2624,8 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     }
   }
 
-  // Start AI title generation in parallel - fires concurrently with the main stream.
-  // Uses a separate call (no abort signal) so user cancellation doesn't kill title gen.
-  const titleGenPromise = chatWasNew
-    ? generateChatTitle({ content, provider: effectiveProvider, model: effectiveModel, config }).catch(() => null)
-    : null;
+  // Title generation is deferred to AFTER the main stream (see the done handler) so
+  // it does not contend for the model during the user's time-to-first-token.
 
   const outgoingMessages = [];
 
@@ -2742,6 +2743,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       temperature: typeof temperature === 'number' && isFinite(temperature) ? temperature : undefined,
       maxTokens: typeof maxTokens === 'number' && isFinite(maxTokens) && maxTokens > 0 ? Math.round(maxTokens) : undefined,
       ollamaOptions: tuning.options,
+      keepAlive: pinModel === true ? -1 : '30m',
       onToken: (token) => {
         if (firstTokenAt === null) firstTokenAt = Date.now();
         assistantText += token;
@@ -2797,9 +2799,14 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
 
     sendSSE(res, 'done', { message: assistantMessage });
 
-    // Await AI-generated title and emit update if we got a better one
-    if (titleGenPromise) {
-      const aiTitle = await titleGenPromise;
+    // Generate the AI title now (new chats only), after the reply has streamed, so
+    // it never competes for the model during first-token. Reuses the same tuning +
+    // keep_alive so the model stays warm rather than reloading for the title call.
+    if (chatWasNew) {
+      const aiTitle = await generateChatTitle({
+        content, provider: effectiveProvider, model: effectiveModel, config,
+        ollamaOptions: tuning.options, keepAlive: pinModel === true ? -1 : '30m'
+      }).catch(() => null);
       // Skip the title save if clearChats ran after this request started -
       // the epoch will have changed and we must not write the cleared chat back.
       if (aiTitle && aiTitle !== chat.title && getEpoch() === requestEpoch) {
