@@ -29,6 +29,7 @@ import { getOllamaModelInfo, listOllamaModels } from './providers/ollama.js';
 import { deriveInferenceDefaults } from './autoTune.js';
 import { listRuntimes } from './runtimeRegistry.js';
 import * as llamacpp from './llamacppRuntime.js';
+import { route as routeModel, classifyLane } from './modelRouter.js';
 import { listHosts, addHost, deleteHost } from './storage/homelabStore.js';
 import { probeAllHosts } from './homelab.js';
 import * as workspace from './workspace.js';
@@ -973,6 +974,21 @@ app.post('/api/runtimes/llamacpp/start', async (req, res) => {
 app.post('/api/runtimes/llamacpp/stop', async (_req, res) => {
   await llamacpp.stopServer();
   res.json({ ok: true, running: false });
+});
+
+// Capability router: given a prompt (or explicit lane), pick the best installed model.
+app.post('/api/route', async (req, res) => {
+  try {
+    const { prompt, lane, uncensored } = req.body || {};
+    const [models, specs] = await Promise.all([
+      listOllamaModels(config.ollamaBaseUrl).catch(() => []),
+      Promise.resolve({ ramGb: Number((os.totalmem() / 1024 ** 3).toFixed(1)) })
+    ]);
+    const decision = routeModel({ prompt, lane, uncensored, availableModels: models, ramGb: specs.ramGb });
+    res.json({ ok: true, ...decision });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: `Route failed: ${error.message}` });
+  }
 });
 
 app.get('/api/system/hardware-profile', async (_req, res) => {
@@ -2671,6 +2687,18 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
 
   const effectiveProvider = provider || config.aiProvider;
   let effectiveModel = await getEffectiveModel({ provider: effectiveProvider, model, config });
+  // Capability routing: when the model is left on Auto, pick the best installed model
+  // for the task lane (coding/reasoning/general) from the prompt, not just the first one.
+  if ((model === 'auto' || !model) && effectiveProvider === 'ollama' && !chatUncensoredMode) {
+    try {
+      const routed = routeModel({
+        prompt: content,
+        availableModels: await listOllamaModels(config.ollamaBaseUrl),
+        ramGb: Number((os.totalmem() / 1024 ** 3).toFixed(1))
+      });
+      if (routed.model) effectiveModel = routed.model;
+    } catch { /* keep the default effectiveModel */ }
+  }
   if (chatUncensoredMode && effectiveProvider === 'ollama') {
     try {
       const forcedModel = await pickMostUncensoredOllamaModel(config);
