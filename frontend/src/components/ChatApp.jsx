@@ -1424,6 +1424,10 @@ export default function ChatApp() {
     }
     return {};
   });
+  // Pin the local model resident (Ollama keep_alive: -1) instead of the 5-min unload.
+  const [pinModel, setPinModel] = useState(() => (typeof window !== 'undefined' ? safeStorageGet('mirabilis-pin-model') === 'true' : false));
+  // Auto-tune result reported by the backend on each send (resolved num_ctx + a why line).
+  const [resolvedTuning, setResolvedTuning] = useState(null);
   const [remoteBudgetUsd, setRemoteBudgetUsd] = useState(() => {
     if (typeof window !== 'undefined') {
       const v = Number(safeStorageGet('mirabilis-remote-budget-usd', '20') || '20');
@@ -4557,6 +4561,7 @@ export default function ChatApp() {
           providerBaseUrl: resolvedProvider.providerBaseUrl,
           providerApiKey: resolvedProvider.providerApiKey,
           localOnly: appStore.getGoDark(),
+          ...(pinModel ? { pinModel: true } : {}),
           ...(temperature !== null && isFinite(temperature) ? { temperature } : {}),
           ...(maxTokens !== null && isFinite(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
           ...(resolvedProvider.provider === 'ollama' && ollamaParams && Object.values(ollamaParams).some((v) => v != null)
@@ -4679,6 +4684,9 @@ export default function ChatApp() {
           }
 
           if (event === 'meta' && payload.provider) {
+            if (payload.numCtx || payload.tuning) {
+              setResolvedTuning({ numCtx: payload.numCtx || null, note: payload.tuning && payload.tuning.note ? payload.tuning.note : null });
+            }
             setMessages((prev) => {
               const next = [...prev];
               if (next.length > 0) {
@@ -6001,7 +6009,22 @@ export default function ChatApp() {
                               </div>
                             ))}
                           </div>
-                          <p className="mt-1.5 text-[9px] leading-tight text-[color:var(--text-muted)]">Applied to local Ollama models only. KV-cache quant is set on the Ollama server, not here.</p>
+                          <button
+                            type="button"
+                            onClick={() => setPinModel((v) => { const n = !v; safeStorageSet('mirabilis-pin-model', n ? 'true' : 'false'); return n; })}
+                            title="Keep the model resident in memory (Ollama keep_alive: never unload) so replies after a pause don't cold-reload. Uses RAM continuously."
+                            className={`mt-2 flex w-full items-center justify-between rounded-[var(--r-md)] px-2 py-1.5 text-[10px] font-medium transition ${
+                              pinModel ? 'border text-[color:var(--accent)]' : 'au-hairline au-material text-[color:var(--text-main)]'
+                            }`}
+                            style={pinModel ? { borderColor: 'color-mix(in srgb, var(--accent) 55%, var(--hairline))', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' } : undefined}
+                          >
+                            <span>Pin model in memory</span>
+                            <span className="opacity-70">{pinModel ? 'on' : 'off'}</span>
+                          </button>
+                          {resolvedTuning && resolvedTuning.note ? (
+                            <p className="mt-1.5 text-[9px] leading-tight text-[color:var(--accent)]">Auto-tuned: {resolvedTuning.note}</p>
+                          ) : null}
+                          <p className="mt-1 text-[9px] leading-tight text-[color:var(--text-muted)]">Auto-tuned for your hardware. Fields above override; blank = auto. KV-cache quant is set on the Ollama server.</p>
                         </div>
                       )}
                     </div>
