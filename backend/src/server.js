@@ -27,6 +27,8 @@ import {
 import { getEffectiveModel, listModels, streamWithProvider } from './modelService.js';
 import { getOllamaModelInfo, listOllamaModels } from './providers/ollama.js';
 import { deriveInferenceDefaults } from './autoTune.js';
+import { listRuntimes } from './runtimeRegistry.js';
+import * as llamacpp from './llamacppRuntime.js';
 import { listHosts, addHost, deleteHost } from './storage/homelabStore.js';
 import { probeAllHosts } from './homelab.js';
 import * as workspace from './workspace.js';
@@ -923,6 +925,54 @@ app.get('/api/system/specs', async (_req, res) => {
     cpuThreads,
     ramGb
   });
+});
+
+// ── Inference runtimes (Ollama / llama.cpp / vLLM / custom) ──────────────────────
+// Declarative registry + a managed llama.cpp process (launch/health/stop) so the
+// power-user runtime is first-class, not just "point at a URL".
+app.get('/api/runtimes', (_req, res) => {
+  res.json({ runtimes: listRuntimes(), llamacpp: llamacpp.status() });
+});
+
+app.get('/api/runtimes/llamacpp/status', (_req, res) => {
+  res.json(llamacpp.status());
+});
+
+app.post('/api/runtimes/llamacpp/start', async (req, res) => {
+  const { model, modelPath, numCtx, kvQuant, flashAttn, parallel } = req.body || {};
+  if (!model && !modelPath) {
+    res.status(400).json({ ok: false, error: 'Provide an installed Ollama model name or an absolute .gguf modelPath.' });
+    return;
+  }
+  // Size the context from hardware+model when the caller does not specify one.
+  let ctx = Number(numCtx) || null;
+  if (!ctx && model) {
+    try {
+      const [profile, info, models] = await Promise.all([
+        getLocalHardwareProfile().catch(() => null),
+        getOllamaModelInfo(config.ollamaBaseUrl, model).catch(() => ({ contextWindow: null })),
+        listOllamaModels(config.ollamaBaseUrl).catch(() => [])
+      ]);
+      const rec = Array.isArray(models) ? models.find((m) => m.id === model || m.name === model) : null;
+      ctx = deriveInferenceDefaults({
+        profileRaw: (profile && profile.raw) || {},
+        modelSizeBytes: rec ? rec.sizeBytes || 0 : 0,
+        paramSize: rec ? rec.paramSize || null : null,
+        modelContextWindow: (info && info.contextWindow) || 8192
+      }).options.num_ctx;
+    } catch { ctx = 8192; }
+  }
+  try {
+    const out = await llamacpp.startServer({ model, modelPath, numCtx: ctx || 8192, kvQuant: kvQuant || 'q8_0', flashAttn: flashAttn !== false, parallel: parallel || 1 });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (error) {
+    res.status(500).json({ ok: false, error: `llama.cpp start failed: ${error.message}` });
+  }
+});
+
+app.post('/api/runtimes/llamacpp/stop', async (_req, res) => {
+  await llamacpp.stopServer();
+  res.json({ ok: true, running: false });
 });
 
 app.get('/api/system/hardware-profile', async (_req, res) => {
