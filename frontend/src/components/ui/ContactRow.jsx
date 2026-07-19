@@ -6,11 +6,17 @@ import { PresenceDot, Badge } from './primitives';
 import { PRESENCE_LABELS } from '../../lib/presence';
 
 export default function ContactRow({ provider, presence = 'unknown', modelCount, warmLabel, onClick }) {
+  // The buddy list is a status board (presence at a glance). When no onClick is
+  // given the row is purely presentational - no button, no hover - so it never
+  // looks like a dead control. Model/provider selection lives in the composer bar.
+  const interactive = typeof onClick === 'function';
+  const Tag = interactive ? 'button' : 'div';
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="au-focus group flex w-full items-center gap-2.5 rounded-[var(--r-md)] px-2.5 py-2 text-left transition hover:bg-[color:var(--hairline)]"
+    <Tag
+      {...(interactive ? { type: 'button', onClick } : {})}
+      className={`group flex w-full items-center gap-2.5 rounded-[var(--r-md)] px-2.5 py-2 text-left ${
+        interactive ? 'au-focus transition hover:bg-[color:var(--hairline)]' : ''
+      }`}
     >
       <PresenceDot presence={presence === 'unknown' ? 'offline' : presence} />
       <span className="flex min-w-0 flex-1 flex-col">
@@ -30,6 +36,6 @@ export default function ContactRow({ provider, presence = 'unknown', modelCount,
           ) : null}
         </span>
       </span>
-    </button>
+    </Tag>
   );
 }

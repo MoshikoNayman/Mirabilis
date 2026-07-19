@@ -15,7 +15,7 @@ function warmLabelFor(providerId, warm) {
   return `${warm.length} models warm`;
 }
 
-function Group({ title, providers, presence, warm, onPick }) {
+function Group({ title, providers, presence, warm }) {
   if (!providers.length) return null;
   return (
     <div className="mb-2">
@@ -29,7 +29,6 @@ function Group({ title, providers, presence, warm, onPick }) {
             provider={p}
             presence={presence[p.id] || 'unknown'}
             warmLabel={warmLabelFor(p.id, warm)}
-            onClick={() => onPick?.(p)}
           />
         ))}
       </div>
@@ -37,7 +36,7 @@ function Group({ title, providers, presence, warm, onPick }) {
   );
 }
 
-export default function BuddyList({ open, presence, warm = [], onPick }) {
+export default function BuddyList({ open, presence, warm = [] }) {
   const local = useMemo(() => PROVIDERS.filter((p) => p.scope === 'local'), []);
   const remote = useMemo(() => PROVIDERS.filter((p) => p.scope === 'remote'), []);
 
@@ -78,8 +77,8 @@ export default function BuddyList({ open, presence, warm = [], onPick }) {
           <IconButton label="Close" onClick={() => appStore.setBuddyOpen(false)}>✕</IconButton>
         </div>
         <div className="au-scroll flex-1 overflow-y-auto p-1.5">
-          <Group title="On this Mac" providers={local} presence={presence} warm={warm} onPick={onPick} />
-          <Group title="Cloud providers" providers={remote} presence={presence} onPick={onPick} />
+          <Group title="On this Mac" providers={local} presence={presence} warm={warm} />
+          <Group title="Cloud providers" providers={remote} presence={presence} />
         </div>
         <div className="flex items-center gap-2 border-t px-4 py-2 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]" style={{ borderColor: 'var(--hairline)' }}>
           <span className="flex items-center gap-1"><PresenceDot presence="online" /> online</span>

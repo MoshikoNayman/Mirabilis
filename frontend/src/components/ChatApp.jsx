@@ -5274,7 +5274,7 @@ export default function ChatApp() {
                   {activeChatId ? 'New Conversation' : 'Welcome to Mirabilis AI'}
                 </h2>
                 <p className="max-w-md text-[length:var(--text-md)] leading-relaxed text-[color:var(--text-muted)]">
-                  {activeChatId ? 'Type a message below to get started.' : 'Pick a buddy from the flower, choose a model, and start talking.'}
+                  {activeChatId ? 'Type a message below to get started.' : 'See who is online in the flower, pick a model in the bar, and start talking.'}
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   {!activeChatId && (

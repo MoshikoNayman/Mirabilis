@@ -91,7 +91,7 @@ export default function AuroraChrome({ activeTab, onTab }) {
     <>
       <Dock orbState={orbState} spinning={searching} />
 
-      <BuddyList open={buddyOpen} presence={presence} warm={warm} onPick={handlePickProvider} />
+      <BuddyList open={buddyOpen} presence={presence} warm={warm} />
       <HomelabRoster open={homelabOpen} />
       <WatchedWorkspace open={workspaceOpen} />
       <CommandPalette open={commandOpen} onTab={onTab} />
