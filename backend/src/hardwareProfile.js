@@ -244,6 +244,12 @@ function buildProfile({
 }) {
   const coresLabel = `${computeCores || cpuCores || 1}C`;
   const memoryLimit = memorySize || 'Unknown';
+  // Parse the human strings back into numbers so downstream tuning (autoTune.js)
+  // can actually use the hardware instead of just displaying it.
+  const numFrom = (s, re) => { const m = String(s || '').match(re); return m ? parseFloat(m[1]) : null; };
+  const ramGbNum = numFrom(memorySize, /([\d.]+)\s*GB/i);
+  const bandwidthNum = numFrom(bandwidth, /([\d.]+)\s*GB\/s/i);
+  const isUnified = backend === 'Metal' || vendor === 'apple';
   const resolvedGpuCategory = gpuCategory || gpuCategoryForVendor(vendor || 'generic');
   const resolvedMemType = systemMemoryType || memoryTypeForVendor(vendor || 'generic');
   const cacheStr = cpuCaches
@@ -292,6 +298,20 @@ function buildProfile({
     action: {
       label: 'Change Engine',
       options: [backend, 'CPU']
+    },
+    // Machine-readable hardware facts for inference auto-tuning. Static specs only;
+    // available (free) memory is read fresh at tune time, not from here.
+    raw: {
+      backend: backend || 'CPU',
+      vendor: vendor || 'generic',
+      cpuCores: Number(cpuCores) || null,
+      cpuThreads: Number(cpuThreads) || Number(cpuCores) || null,
+      gpuCores: Number(computeCores) || null,
+      ramGb: ramGbNum,
+      bandwidthGbs: bandwidthNum,
+      unifiedMemory: isUnified,
+      vramGb: isUnified ? ramGbNum : null,
+      gpuOffloadCapable: !!backend && backend !== 'CPU'
     }
   };
 }

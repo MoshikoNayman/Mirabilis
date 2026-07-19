@@ -22,40 +22,103 @@ export async function listOllamaModels(baseUrl) {
   }
 }
 
-export async function streamOllamaChat({ baseUrl, model, messages, signal, onToken, onStats, temperature, maxTokens, options: extraOptions }) {
+// Per-model runtime facts from Ollama's /api/show: the model's TRUE context window
+// and parameter count, used by autoTune to size num_ctx. Cached (static per model).
+const _modelInfoCache = new Map();
+export async function getOllamaModelInfo(baseUrl, model) {
+  const base = baseUrl || OLLAMA_BASE_URL;
+  const key = `${base}::${model}`;
+  if (_modelInfoCache.has(key)) return _modelInfoCache.get(key);
+  let out = { contextWindow: null, paramCount: null };
+  try {
+    const res = await fetch(`${base}/api/show`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const info = data.model_info || {};
+      let ctx = null;
+      for (const [k, v] of Object.entries(info)) {
+        if (k.endsWith('.context_length')) { ctx = Number(v) || null; break; }
+      }
+      out = { contextWindow: ctx, paramCount: Number(info['general.parameter_count']) || null };
+    }
+  } catch {
+    // best effort - autoTune falls back to a default window
+  }
+  _modelInfoCache.set(key, out);
+  return out;
+}
+
+const OOM_RE = /out of memory|unable to allocate|failed to allocate|cudamalloc|insufficient memory|not enough memory|\bvram\b/i;
+
+export async function streamOllamaChat({ baseUrl, model, messages, signal, onToken, onStats, onNotice, temperature, maxTokens, options: extraOptions }) {
   const base = baseUrl || OLLAMA_BASE_URL;
   // Merge every tuning knob into a single Ollama `options` object. Explicit
-  // extraOptions (the Inference Cockpit profile) take precedence; temperature
-  // and maxTokens stay as convenience params. A single merged object avoids the
-  // old double-spread where the second `options` clobbered the first.
-  const options = {};
-  if (temperature != null) options.temperature = temperature;
-  if (maxTokens != null) options.num_predict = maxTokens;
+  // extraOptions (the Inference Cockpit profile / auto-tune) take precedence;
+  // temperature and maxTokens stay as convenience params.
+  const baseOptions = {};
+  if (temperature != null) baseOptions.temperature = temperature;
+  if (maxTokens != null) baseOptions.num_predict = maxTokens;
   if (extraOptions && typeof extraOptions === 'object') {
     for (const [key, value] of Object.entries(extraOptions)) {
-      if (value != null) options[key] = value;
+      if (value != null) baseOptions[key] = value;
     }
   }
-  const payload = {
-    model,
-    messages: messages.map(m => ({
-      role: m.role,
-      content: m.content
-    })),
-    stream: true,
-    ...(Object.keys(options).length ? { options } : {}),
-  };
 
-  try {
+  // On an out-of-memory / allocation failure, degrade gracefully instead of
+  // hard-failing the whole message: shrink num_ctx and enable low_vram, then fall
+  // all the way back to CPU. Each rung is only tried when the error looks like OOM.
+  function reduceOptions(opts, step) {
+    const next = { ...opts, low_vram: true };
+    const curCtx = Number(next.num_ctx) || 4096;
+    if (step === 1) { next.num_ctx = Math.max(2048, Math.floor(curCtx / 2)); next.num_batch = 256; }
+    else { next.num_ctx = 2048; next.num_gpu = 0; next.num_batch = 128; }
+    return next;
+  }
+
+  async function attempt(opts) {
+    const payload = {
+      model,
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      stream: true,
+      ...(Object.keys(opts).length ? { options: opts } : {}),
+    };
     const res = await fetch(`${base}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal,
     });
-
     if (!res.ok) {
-      throw new Error(`Ollama API error: ${res.status}`);
+      let body = '';
+      try { body = await res.text(); } catch { /* ignore */ }
+      const err = new Error(`Ollama API error: ${res.status}${body ? ' - ' + body.slice(0, 200) : ''}`);
+      err.isOom = OOM_RE.test(body);
+      throw err;
+    }
+    return res;
+  }
+
+  try {
+    let opts = baseOptions;
+    let res;
+    for (let step = 0; step <= 2; step += 1) {
+      try {
+        res = await attempt(opts);
+        break;
+      } catch (e) {
+        if (e && e.isOom && step < 2) {
+          opts = reduceOptions(opts, step + 1);
+          if (typeof onNotice === 'function') {
+            onNotice(`Reduced to fit memory: num_ctx ${opts.num_ctx}${opts.num_gpu === 0 ? ', CPU offload' : ', low VRAM'}.`);
+          }
+          continue;
+        }
+        throw e;
+      }
     }
 
     const reader = res.body.getReader();
