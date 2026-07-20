@@ -6,6 +6,10 @@ Versioning follows Junos-style tags.
 
 ### Local-First Engine + Capability Routing + Security Hardening
 
+- **Vision input**: attach an image and ask about it. Images are forwarded to vision-capable models (Ollama reports the capability precisely; a non-vision model gets the image stripped and a clear "pick a vision model" notice). Works with gemma3, gemma4:e4b, llava, and OpenAI-compatible or cloud vision models.
+- **llama.cpp as a first-class local engine**: pick one of your models and Start a Metal-native `llama-server` that runs the model itself (KV-cache quant + flash attention), independent of the Ollama daemon. Selectable as its own provider.
+- **LaTeX math + exact token counts**: `$...$` and `$$...$$` render as real math (KaTeX). Per-message token counts show the exact output count from Ollama with no approximation marks, alongside the exact tokens/sec.
+- **Searchable, grouped provider picker**: type to filter, grouped Local / Remote / Cloud APIs, height-capped with internal scrolling so the whole menu is always on screen.
 - **Managed llama.cpp runtime**: Mirabilis can now supervise a `llama-server` process directly, exposing the knobs Ollama hides: KV-cache quantization (q8_0 roughly halves KV memory), flash attention, and server slots. It runs your existing Ollama GGUF blobs with no re-download, one managed server at a time so unified-memory Macs stay safe.
 - **Runtime registry**: runtimes (Ollama, llama.cpp, vLLM, OpenAI-compatible, KoboldCpp) are now declarative with capability flags; vLLM is gated off Apple Silicon automatically.
 - **Capability model router**: an `auto` model picks the best installed model for the task lane (coding / reasoning / general / experimental) using a cheap keyword classifier, honoring the hardware memory ceiling. Explicit Uncensored intent routes to the experimental lane.
