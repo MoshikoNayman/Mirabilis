@@ -3,6 +3,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 import { FlowerMark } from './ui/StatusOrb';
@@ -413,7 +416,7 @@ function estimateTokens(text) {
 
 function formatTokenCount(value) {
   const amount = Number(value || 0);
-  return `~${amount.toLocaleString()} tok`;
+  return `${amount.toLocaleString()} tok`;
 }
 
 // Pre-pull model-fit estimate: compare a model's on-disk weight size against
@@ -432,7 +435,7 @@ function computeModelFit(item, ramGb) {
   if (!Number.isFinite(weightsGb) || weightsGb <= 0) return null;
   // Runtime footprint runs above raw weights (KV cache, activations, overhead).
   const required = weightsGb * 1.2;
-  const detail = `~${weightsGb.toFixed(1)} GB weights vs ${ramGb} GB memory (estimate; excludes long-context KV cache)`;
+  const detail = `${weightsGb.toFixed(1)} GB weights vs ${ramGb} GB memory (estimate; excludes long-context KV cache)`;
   if (required <= ramGb * 0.6) return { tier: 'fits', label: 'Fits', title: `Comfortable fit: ${detail}` };
   if (required <= ramGb * 0.82) return { tier: 'tight', label: 'Tight', title: `Tight fit, close other apps: ${detail}` };
   return { tier: 'swap', label: 'Will swap', title: `Likely too large, expect swapping or slow load: ${detail}` };
@@ -762,7 +765,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
 
   return (
     <div className="markdown-body text-sm" dir={dir}>
-      <ReactMarkdown components={mdComponents} remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      <ReactMarkdown components={mdComponents} remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{text}</ReactMarkdown>
     </div>
   );
 }
@@ -1004,7 +1007,7 @@ const MessageRow = memo(function MessageRow({
       {message.role === 'user' && message.content && (
         <div className="mt-1.5 flex items-center justify-between border-t border-[var(--hairline)] pt-1">
           <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-[color:var(--text-main)] opacity-70">
-            You · ~{(message.tokenEstimate || 0).toLocaleString()} tok
+            You · {(message.tokenEstimate || 0).toLocaleString()} tok
           </span>
           <CopyMessageButton
             text={message.content || ''}
@@ -1047,7 +1050,15 @@ const MessageRow = memo(function MessageRow({
                     </span>
                   );
                 })() : null}
-                ~{(message.tokenEstimate || 0).toLocaleString()} tok
+                {(() => {
+                  // Show the EXACT output token count (from Ollama eval metrics) when
+                  // we have it; fall back to the live char/4 estimate while streaming
+                  // or for providers that do not report counts. No tilde either way.
+                  const p = message.performance;
+                  const exactOut = p && p.source === 'ollama' && !p.isEstimate && p.tokens != null;
+                  const count = exactOut ? p.tokens : (message.tokenEstimate || 0);
+                  return `${Number(count).toLocaleString()} tok`;
+                })()}
                 {message.performance && message.performance.tokensPerSec != null ? (() => {
                   const perf = message.performance;
                   const exact = perf.source === 'ollama' && !perf.isEstimate;
@@ -1061,7 +1072,7 @@ const MessageRow = memo(function MessageRow({
                       title={parts.join(' · ')}
                       className="ml-1.5 inline-flex items-center gap-1 rounded-[var(--r-pill)] bg-black/[0.05] px-1.5 py-[2px] align-middle text-[9px] font-semibold normal-case tracking-normal text-[color:var(--text-muted)] dark:bg-white/[0.06]"
                     >
-                      {exact ? '' : '~'}{perf.tokensPerSec} tok/s
+                      {perf.tokensPerSec} tok/s
                       {perf.ttftMs != null ? (
                         <span className="opacity-70">{` ${perf.ttftMs >= 1000 ? (perf.ttftMs / 1000).toFixed(1) + 's' : perf.ttftMs + 'ms'} ttft`}</span>
                       ) : null}
