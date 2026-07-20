@@ -775,6 +775,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
 const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, onSelect, onToggleMenu, onDelete, onRename, onExport, onTogglePin, onBranch }) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false); // two-click delete on the row
 
   function startRename() {
     setRenameValue(chat.title || '');
@@ -795,6 +796,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
     <li>
       <div
         data-chat-item={chat.id}
+        onMouseLeave={() => setConfirmDelete(false)}
         className={`group relative flex items-start gap-2 rounded-xl border px-2 py-2 transition ${
           isActive
             ? 'border-accent bg-accentSoft/80 dark:bg-accent/20'
@@ -829,6 +831,33 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
               {chat.parentChatId ? <span className="rounded-full border border-[var(--hairline)] px-1.5 py-0">branch</span> : null}
               {chat.snapshotCount > 0 ? <span className="rounded-full border border-[var(--hairline)] px-1.5 py-0">{chat.snapshotCount} snap</span> : null}
             </div>
+          </button>
+        )}
+        {!isRenaming && (
+          <button
+            type="button"
+            aria-label={confirmDelete ? `Confirm delete ${chat.title}` : `Delete ${chat.title}`}
+            title={confirmDelete ? 'Click again to delete' : 'Delete chat'}
+            className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition focus:opacity-100 ${
+              confirmDelete
+                ? 'bg-red-500 text-white opacity-100'
+                : 'text-[color:var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-300'
+            }`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirmDelete) onDelete(chat.id);
+              else setConfirmDelete(true);
+            }}
+          >
+            {confirmDelete ? (
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 6h18" /><path d="M8 6V4.8c0-.7.6-1.3 1.3-1.3h5.4c.7 0 1.3.6 1.3 1.3V6" /><path d="M6.5 6l1 12.2c.1.8.7 1.3 1.5 1.3h6c.8 0 1.4-.5 1.5-1.3L17.5 6" />
+              </svg>
+            )}
           </button>
         )}
         {!isRenaming && (
@@ -895,20 +924,6 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
                 <line x1="12" y1="15" x2="12" y2="3"/>
               </svg>
               <span>Export .md</span>
-            </button>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
-              onClick={() => onDelete(chat.id)}
-            >
-              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 6h18" />
-                <path d="M8 6V4.8c0-.7.6-1.3 1.3-1.3h5.4c.7 0 1.3.6 1.3 1.3V6" />
-                <path d="M6.5 6l1 12.2c.1.8.7 1.3 1.5 1.3h6c.8 0 1.4-.5 1.5-1.3L17.5 6" />
-                <path d="M10 10.2v5.6" />
-                <path d="M14 10.2v5.6" />
-              </svg>
-              <span>Delete</span>
             </button>
           </div>
         )}
@@ -1256,6 +1271,7 @@ export default function ChatApp() {
   const [systemPrompt, setSystemPrompt] = useState(buildDefaultSystemPrompt(provider));
   const [statusText, setStatusText] = useState('Ready');
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
+  const [clearArmed, setClearArmed] = useState(false); // two-click confirm for "clear all"
   const [imageServiceAvailable, setImageServiceAvailable] = useState(false);
   const [imageServiceDevice, setImageServiceDevice] = useState(null);
   const [hardwareProfile, setHardwareProfile] = useState({
@@ -1385,6 +1401,8 @@ export default function ChatApp() {
   const voiceSpeakRef = useRef(null);
   const voiceStopSpeakRef = useRef(null);
   const messagesRef = useRef([]);
+  // Always-fresh voice settings so a retained speakText closure uses current values.
+  const voiceSettingsRef = useRef({});
 
   const [isDragOverChat, setIsDragOverChat] = useState(false);
   const [deepWebEnabled, setDeepWebEnabled] = useState(() => {
@@ -2008,7 +2026,15 @@ export default function ChatApp() {
   }
 
   function speakText(text, messageId = null) {
-    if (voiceEngine === 'piper') {
+    // Read live settings from the ref so a memoized row's retained closure still
+    // uses the CURRENT voice/rate/pitch (falls back to the render-time state).
+    const vs = voiceSettingsRef.current || {};
+    const engine = vs.voiceEngine ?? voiceEngine;
+    const voiceUri = vs.selectedVoiceUri ?? selectedVoiceUri;
+    const rate = vs.voiceRate ?? voiceRate;
+    const pitch = vs.voicePitch ?? voicePitch;
+    const voices = vs.availableVoices ?? availableVoices;
+    if (engine === 'piper') {
       speakTextViaPiper(text, messageId);
       return;
     }
@@ -2019,10 +2045,10 @@ export default function ChatApp() {
     if (!clean) return;
 
     const utterance = new SpeechSynthesisUtterance(clean);
-    const voice = availableVoices.find((v) => v.voiceURI === selectedVoiceUri);
+    const voice = (voices || []).find((v) => v.voiceURI === voiceUri);
     if (voice) utterance.voice = voice;
-    utterance.rate = Math.min(1.5, Math.max(0.8, Number(voiceRate) || 1));
-    utterance.pitch = Math.min(1.4, Math.max(0.8, Number(voicePitch) || 1));
+    utterance.rate = Math.min(1.5, Math.max(0.8, Number(rate) || 1));
+    utterance.pitch = Math.min(1.4, Math.max(0.8, Number(pitch) || 1));
     utterance.onstart = () => {
       setIsSpeaking(true);
       setSpeakingMessageId(messageId);
@@ -2056,7 +2082,7 @@ export default function ChatApp() {
       const resp = await fetch(`${API_BASE}/api/voice/tts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: clean.slice(0, 5000), modelId: selectedPiperModelId || undefined }),
+        body: JSON.stringify({ text: clean.slice(0, 5000), modelId: (voiceSettingsRef.current?.selectedPiperModelId ?? selectedPiperModelId) || undefined }),
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -2104,6 +2130,9 @@ export default function ChatApp() {
     voiceSpeakRef.current = speakText;
     voiceStopSpeakRef.current = stopSpeaking;
     messagesRef.current = messages;
+    // Voice settings, mirrored to refs so a memoized message row that captured an
+    // older speakText closure still speaks with the CURRENT voice/rate/pitch.
+    voiceSettingsRef.current = { voiceEngine, selectedVoiceUri, voiceRate, voicePitch, selectedPiperModelId, availableVoices };
   });
 
   // The live loop records audio and transcribes on the backend (whisper.cpp),
@@ -3360,6 +3389,9 @@ export default function ChatApp() {
   }
 
   async function loadChat(chatId) {
+    // A stream is bound to the chat it started in; switching away while it runs
+    // would let its tokens land in the newly opened chat. Stop it first.
+    if (streamAbortRef.current) stopStreaming();
     setIsTeachPanelOpen(false);
     // Save scroll position of the current chat before switching
     if (activeChatId && messagesScrollRef.current) {
@@ -3393,6 +3425,8 @@ export default function ChatApp() {
   }
 
   async function createChat({ ephemeral = false } = {}) {
+    // Stop any in-progress stream so its tokens do not bleed into the new chat.
+    if (streamAbortRef.current) stopStreaming();
     const payload = await api('/api/chats', {
       method: 'POST',
       body: JSON.stringify({
@@ -3530,20 +3564,6 @@ export default function ChatApp() {
     } catch {
       // ignore - UI is already empty
     }
-  }
-
-  async function deleteLastChat() {
-    if (!chats.length) {
-      return;
-    }
-    // If a chat is active, delete it. Otherwise delete the most recently updated.
-    const targetId = activeChatId
-      ? activeChatId
-      : ([...chats].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0]?.id);
-    if (!targetId) {
-      return;
-    }
-    await removeChat(targetId);
   }
 
   async function renameChat(chatId, newTitle) {
@@ -4437,18 +4457,28 @@ export default function ChatApp() {
 
     let chatId = activeChatId;
     if (!chatId) {
-      const payload = await api('/api/chats', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: content.slice(0, 40),
-          uncensoredMode,
-          systemPrompt,
-          promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
-        })
-      });
-      chatId = payload.chat.id;
-      setActiveChatId(chatId);
-      await refreshChats();
+      // Guard the auto-create: if it throws, it happens BEFORE the try below, so
+      // without this catch isStreaming would stay true (composer locked) and the
+      // rejection would go unhandled.
+      try {
+        const payload = await api('/api/chats', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: content.slice(0, 40),
+            uncensoredMode,
+            systemPrompt,
+            promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
+          })
+        });
+        chatId = payload.chat.id;
+        setActiveChatId(chatId);
+        await refreshChats();
+      } catch (error) {
+        setStatusText(`Image error: ${error.message}`);
+        setInput(content); // restore the prompt the user typed
+        setIsStreaming(false);
+        return;
+      }
     }
 
     const userMessage = {
@@ -4855,7 +4885,17 @@ export default function ChatApp() {
       }
     }
 
-    const resolvedProvider = await resolveProviderForSend();
+    // resolveProviderForSend throws when a cloud provider has no API key (or its
+    // health check fails). The composer was already cleared above, so restore the
+    // draft and surface the error instead of losing input to an unhandled reject.
+    let resolvedProvider;
+    try {
+      resolvedProvider = await resolveProviderForSend();
+    } catch (error) {
+      setStatusText(error?.message || 'Cannot send with the selected provider.');
+      setInput(content);
+      return;
+    }
 
     setStatusText('Streaming response...');
 
@@ -5202,30 +5242,6 @@ export default function ChatApp() {
             <TabSwitch active="chat" />
           </div>
 
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              onClick={() => createChat()}
-              className="rounded-full bg-accent px-2 py-1.5 text-xs font-semibold text-white shadow-[0_6px_14px_-8px_rgba(26,168,111,0.9)] transition hover:brightness-95"
-            >
-              New Chat
-            </button>
-            <button
-              onClick={deleteLastChat}
-              disabled={chats.length === 0}
-              className="rounded-full border border-[var(--hairline)] px-2 py-1.5 text-xs font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-[var(--material-thin)]"
-              title={activeChatId ? 'Delete current chat' : 'Delete most recent chat'}
-            >
-              Delete
-            </button>
-            <button
-              onClick={clearAllChats}
-              disabled={chats.length === 0}
-              className="rounded-full border border-red-400/55 px-2 py-1.5 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-400/35 dark:text-red-300 dark:hover:bg-red-950/30"
-            >
-              Clear All
-            </button>
-          </div>
-
           {isSystemPromptVisible && (
           <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.25)]">
             <div className="space-y-2.5">
@@ -5301,15 +5317,50 @@ export default function ChatApp() {
           </div>
           )}
 
-          <div className="mb-2 mt-2">
+          <div className="mb-2 mt-2 flex items-center gap-2">
             <input
               type="text"
               autoComplete="off"
               placeholder="Search chats…"
               value={chatSearch}
               onChange={(e) => setChatSearch(e.target.value)}
-              className="w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-1.5 text-xs outline-none placeholder:text-[color:var(--text-muted)] focus:border-accent dark:placeholder:text-[color:var(--text-muted)]"
+              className="min-w-0 flex-1 rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-1.5 text-xs outline-none placeholder:text-[color:var(--text-muted)] focus:border-accent dark:placeholder:text-[color:var(--text-muted)]"
             />
+            {/* New chat: a compact accent button beside the search, so a fresh
+                chat is one click away without spending a full sidebar row. */}
+            <button
+              onClick={() => createChat()}
+              title="New chat"
+              aria-label="New chat"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white shadow-[0_6px_14px_-8px_rgba(26,168,111,0.9)] transition hover:brightness-95"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+            {/* Clear all: a subtle icon that arms on first click and clears on the
+                second, so nuking every chat is never a single misclick. Hidden
+                entirely when there is nothing to clear. Per-chat delete lives on
+                the row itself (hover the chat). */}
+            {chats.length > 0 && (
+              <button
+                onClick={() => { if (clearArmed) { clearAllChats(); setClearArmed(false); } else { setClearArmed(true); } }}
+                onMouseLeave={() => setClearArmed(false)}
+                onBlur={() => setClearArmed(false)}
+                title={clearArmed ? 'Click again to clear all chats' : 'Clear all chats'}
+                aria-label={clearArmed ? 'Confirm clear all chats' : 'Clear all chats'}
+                className={`inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-full text-xs font-semibold transition ${
+                  clearArmed
+                    ? 'border border-red-500 bg-red-500 px-2 text-white'
+                    : 'w-8 border border-[var(--hairline)] text-[color:var(--text-muted)] hover:border-red-400/55 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/30'
+                }`}
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 6h18" /><path d="M8 6V4.8c0-.7.6-1.3 1.3-1.3h5.4c.7 0 1.3.6 1.3 1.3V6" /><path d="M6.5 6l1 12.2c.1.8.7 1.3 1.5 1.3h6c.8 0 1.4-.5 1.5-1.3L17.5 6" />
+                </svg>
+                {clearArmed && <span>Clear all?</span>}
+              </button>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto scroll-thin pr-1">

@@ -1,10 +1,15 @@
+// @ts-check
 // frontend/src/lib/presence.js
 // Provider catalog + presence mapping. Turns provider health/local-status into
 // the ICQ-style presence states the Buddy List and StatusOrb render.
 
 import { API_BASE } from './api';
 
+/** @typedef {import('../types.js').ProviderMeta} ProviderMeta */
+/** @typedef {import('../types.js').PresenceState} PresenceState */
+
 // Mirrors ChatApp's provider metadata (kept here so the shell is self-contained).
+/** @type {ProviderMeta[]} */
 export const PROVIDERS = [
   { id: 'ollama', label: 'Ollama', scope: 'local', needsKey: false, requiresBinary: false, baseUrl: 'http://127.0.0.1:11434' },
   { id: 'openai-compatible', label: 'Local / Custom', scope: 'local', needsKey: false, requiresBinary: true, baseUrl: 'http://127.0.0.1:8080/v1' },
@@ -31,6 +36,7 @@ export const PRESENCE_LABELS = {
 // Model Warmth: which Ollama models are currently loaded in memory (warm in
 // VRAM) and can answer instantly. Returns the warm model names, empty when
 // Ollama is cold or unreachable.
+/** @param {{ signal?: AbortSignal }} [opts] @returns {Promise<string[]>} */
 export async function probeOllamaWarmth({ signal } = {}) {
   try {
     const res = await fetch(`${API_BASE}/api/providers/ollama/ps`, { signal });
@@ -45,6 +51,7 @@ export async function probeOllamaWarmth({ signal } = {}) {
 }
 
 // Aggregate a presence map into a single orb state for the title bar.
+/** @param {Record<string, PresenceState>} map @param {boolean} [streaming] @returns {PresenceState} */
 export function aggregatePresence(map, streaming = false) {
   if (streaming) return 'busy';
   const states = Object.values(map || {});
@@ -67,8 +74,9 @@ function looksLikeMissingKey(text) {
 // Uses provider metadata so the result is semantically correct: a remote
 // provider with no key is "needkey" (blue), a local provider whose binary
 // isn't running is "offline" (gray), and a reachable engine is "online".
+/** @param {string} id @param {{ signal?: AbortSignal }} [opts] @returns {Promise<PresenceState>} */
 export async function probeProvider(id, { signal } = {}) {
-  const meta = PROVIDERS.find((p) => p.id === id) || {};
+  const meta = PROVIDERS.find((p) => p.id === id) || /** @type {Partial<ProviderMeta>} */ ({});
   try {
     const res = await fetch(
       `${API_BASE}/api/providers/health?provider=${encodeURIComponent(id)}`,
@@ -102,6 +110,7 @@ export async function probeProvider(id, { signal } = {}) {
 }
 
 // Probe every provider with bounded concurrency; returns { [id]: state }.
+/** @param {{ signal?: AbortSignal }} [opts] @returns {Promise<Record<string, PresenceState>>} */
 export async function probeAll({ signal } = {}) {
   const entries = await Promise.all(
     PROVIDERS.map(async (p) => [p.id, await probeProvider(p.id, { signal })])

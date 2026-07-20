@@ -1,3 +1,4 @@
+// @ts-check
 // frontend/src/lib/api.js
 // Centralized API base + fetch helpers. Replaces the inline fetch + ad-hoc
 // readJsonOrThrow logic scattered through the component tree.
@@ -5,6 +6,7 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
+/** @param {Response} res @param {string} [fallbackMessage] @returns {Promise<any>} */
 export async function readJsonOrThrow(res, fallbackMessage) {
   const bodyText = await res.text();
   let payload = {};
@@ -26,6 +28,11 @@ export async function readJsonOrThrow(res, fallbackMessage) {
 }
 
 // Generic JSON fetch with timeout + abort support.
+/**
+ * @param {string} path
+ * @param {{ method?: string, body?: any, signal?: AbortSignal, timeoutMs?: number, headers?: Record<string, string> }} [opts]
+ * @returns {Promise<any>}
+ */
 export async function apiFetch(path, { method = 'GET', body, signal, timeoutMs = 15000, headers } = {}) {
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   const controller = new AbortController();
