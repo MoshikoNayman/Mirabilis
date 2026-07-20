@@ -129,6 +129,7 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
   let chosenModel = null;
   let chosenJudgeModel = null;
   const embedCache = new Map(); // sha1(text) -> number[]
+  const EMBED_CACHE_MAX = 2000; // bound memory: LRU-evict beyond this many vectors
 
   async function embedOnce(model, prompt) {
     const controller = new AbortController();
@@ -197,9 +198,16 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
   async function embedText(text) {
     const key = sha1(text);
     const cached = embedCache.get(key);
-    if (cached) return cached;
+    if (cached) {
+      embedCache.delete(key); embedCache.set(key, cached); // mark most-recent
+      return cached;
+    }
     const vector = await embedOnce(chosenModel, text);
     embedCache.set(key, vector);
+    if (embedCache.size > EMBED_CACHE_MAX) {
+      const oldest = embedCache.keys().next().value; // Map keeps insertion order
+      if (oldest !== undefined) embedCache.delete(oldest);
+    }
     return vector;
   }
 

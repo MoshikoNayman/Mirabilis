@@ -1,4 +1,8 @@
 import express from 'express';
+// Patches Express 4 so a rejected promise from an `async` route handler is
+// forwarded to the error middleware below instead of hanging the request with
+// no response (e.g. a corrupt chat store or a disk-full write).
+import 'express-async-errors';
 import cors from 'cors';
 import compression from 'compression';
 import helmet from 'helmet';
@@ -340,6 +344,11 @@ async function resolveOllamaTuning({ provider, model, userOllamaOptions, baseUrl
   if (provider !== 'ollama') {
     return { options: userOpts, numCtx: null, meta: null };
   }
+  // Auto-tune fetches the model info + tags from baseUrl; apply the same
+  // metadata-endpoint SSRF guard the /api/models and stream paths use, and skip
+  // tuning (rather than crash) if a caller passes an unsafe override URL.
+  try { if (baseUrl) assertSafeProviderUrl(baseUrl); }
+  catch { return { options: userOpts, numCtx: null, meta: null }; }
   let autoOptions = {};
   let meta = null;
   try {
@@ -2725,11 +2734,13 @@ app.get('/api/chats/:chatId', async (req, res) => {
 });
 
 app.delete('/api/chats/:chatId', async (req, res) => {
+  const chat = await getChat(config.chatStorePath, req.params.chatId).catch(() => null);
   const removed = await deleteChat(config.chatStorePath, req.params.chatId);
   if (!removed) {
     res.status(404).json({ error: 'Chat not found' });
     return;
   }
+  await purgeChatBackingFiles(chat); // free the deleted chat's uploads + images
   res.status(204).end();
 });
 
@@ -2831,7 +2842,14 @@ app.post('/api/chats/:chatId/snapshots/:snapshotId/restore', async (req, res) =>
 });
 
 app.delete('/api/chats', async (_req, res) => {
+  // Collect every chat's backing files BEFORE clearing, then remove them so a
+  // privacy-motivated "clear all" does not leave images/attachments on disk.
+  const summaries = await listChats(config.chatStorePath).catch(() => []);
+  const fulls = await Promise.all(
+    (Array.isArray(summaries) ? summaries : []).map((c) => getChat(config.chatStorePath, c.id).catch(() => null))
+  );
   await clearChats(config.chatStorePath);
+  for (const full of fulls) await purgeChatBackingFiles(full);
   res.status(204).end();
 });
 
@@ -3170,6 +3188,23 @@ async function collectMessageImages(msg) {
   return out;
 }
 
+// Best-effort removal of a chat's on-disk backing files (uploaded attachments +
+// generated images) when the chat is deleted or all chats are cleared.
+async function purgeChatBackingFiles(chat) {
+  if (!chat || !Array.isArray(chat.messages)) return;
+  for (const m of chat.messages) {
+    for (const a of (Array.isArray(m.attachments) ? m.attachments : [])) {
+      if (a && a.storedName && SAFE_STORED_NAME.test(a.storedName)) {
+        await unlink(join(uploadDir, a.storedName)).catch(() => {});
+      }
+    }
+    if (typeof m.imageUrl === 'string' && m.imageUrl.startsWith('/api/images/')) {
+      const fname = m.imageUrl.slice('/api/images/'.length);
+      if (SAFE_STORED_NAME.test(fname)) await unlink(join(imageDir, fname)).catch(() => {});
+    }
+  }
+}
+
 // Can the selected model actually see images? Ollama reports this precisely via
 // /api/show capabilities; for OpenAI-compatible / cloud we assume the user chose
 // a vision model (the server errors if not) rather than block a valid request.
@@ -3222,7 +3257,9 @@ app.post('/api/generate-image', async (req, res) => {
   }
 });
 
-app.post('/api/chats/:chatId/image-messages', async (req, res) => {
+// This route receives a base64-encoded generated image, which routinely exceeds
+// the global 1mb JSON cap; give it its own larger parser so saves never fail.
+app.post('/api/chats/:chatId/image-messages', express.json({ limit: '24mb' }), async (req, res) => {
   const { prompt, imageBase64, format } = req.body || {};
   const chatId = req.params.chatId;
 
@@ -3991,18 +4028,18 @@ function clearReminderWorkerTimer() {
   intelLedgerReminderWorkerTimer = null;
 }
 
-function shutdown(reason = 'signal') {
+function shutdown(reason = 'signal', exitCode = 0) {
   if (isShuttingDown) return;
   isShuttingDown = true;
   console.log(`[backend] shutdown requested (${reason})`);
   clearReminderWorkerTimer();
   server.close(() => {
     console.log('[backend] shutdown complete');
-    process.exit(0);
+    process.exit(exitCode);
   });
   setTimeout(() => {
     console.error('[backend] forced shutdown timeout reached');
-    process.exit(1);
+    process.exit(exitCode || 1);
   }, 10_000).unref();
 }
 
@@ -4013,5 +4050,7 @@ process.on('unhandledRejection', (error) => {
 });
 process.on('uncaughtException', (error) => {
   console.error('[backend] uncaughtException:', error);
-  shutdown('uncaughtException');
+  // Exit non-zero so the desktop shell treats it as a crash (restart / notify)
+  // instead of a clean exit that silently leaves a dead window.
+  shutdown('uncaughtException', 1);
 });

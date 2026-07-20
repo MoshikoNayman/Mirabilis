@@ -169,7 +169,11 @@ export function deleteChat(filePath, chatId) {
 export function clearChats(filePath) {
   return withLock(async () => {
     _epoch++; // invalidate all in-flight saveChat calls
-    await writeStore(filePath, { ...emptyStore });
+    // Write a FRESH empty array, never a shallow copy of the module-level
+    // emptyStore: `{ ...emptyStore }` aliases emptyStore.chats, and a later
+    // saveChat push()es onto that shared array, permanently polluting the
+    // "empty" template so subsequent clears silently keep old chats on disk.
+    await writeStore(filePath, { chats: [] });
   });
 }
 
