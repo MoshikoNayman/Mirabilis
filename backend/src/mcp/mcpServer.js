@@ -30,7 +30,7 @@ const { version: PKG_VERSION } = require('../../package.json');
 
 // Every provider the app supports; the MCP tools should not be capped below this.
 // Remote providers require their API key to be configured server-side.
-const MCP_PROVIDERS = ['ollama', 'openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas', 'openai-compatible', 'koboldcpp'];
+const MCP_PROVIDERS = ['ollama', 'openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas', 'openai-compatible', 'koboldcpp', 'vllm'];
 
 const PROTOCOL_VERSION = '2024-11-05';
 const SERVER_INFO = { name: 'mirabilis', version: PKG_VERSION };

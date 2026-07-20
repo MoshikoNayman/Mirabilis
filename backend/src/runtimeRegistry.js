@@ -97,10 +97,10 @@ export function isAppleSilicon() {
 export function listRuntimes() {
   const appleSilicon = isAppleSilicon();
   return RUNTIMES.map((r) => {
-    // vLLM (and SGLang later) are CUDA-only; they cannot run on Apple Silicon at
-    // all. Surface that as an explicit availability flag + reason so the UI can
-    // show the runtime greyed-out with an explanation instead of hiding it.
-    const cudaBlocked = r.kind === 'vllm' && appleSilicon;
+    // vLLM (and SGLang later) are CUDA-only, so they cannot be LAUNCHED on this
+    // Mac - but they are fully usable as a REMOTE endpoint over the OpenAI
+    // transport. So they stay available (consumable), just not localLaunchable.
+    const cudaLocalBlocked = r.kind === 'vllm' && appleSilicon;
     return {
       id: r.id,
       label: r.label,
@@ -111,10 +111,10 @@ export function listRuntimes() {
       capabilities: r.capabilities,
       canPull: r.capabilities?.pull === true,
       note: r.note,
-      localLaunchable: r.managed === 'spawn' && !cudaBlocked,
-      available: !cudaBlocked,
-      unavailableReason: cudaBlocked
-        ? 'vLLM is CUDA-only and cannot run on Apple Silicon. Point a Local/Custom Endpoint at a remote vLLM server instead.'
+      localLaunchable: r.managed === 'spawn' && !cudaLocalBlocked,
+      available: true,
+      remoteOnlyReason: cudaLocalBlocked
+        ? 'vLLM is CUDA-only, so it runs on a remote NVIDIA host, not locally on Apple Silicon. Point it at your vLLM server URL.'
         : null
     };
   });

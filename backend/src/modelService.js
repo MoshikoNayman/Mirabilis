@@ -233,12 +233,15 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
 }
 
 export async function getEffectiveModel({ provider, model, config }) {
-  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible') {
+  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') {
+    // vLLM is a remote OpenAI-compatible server: like the cloud providers it
+    // never mixes in local GGUF, but (like openai-compatible) its key is optional.
     const isCloudOnly = provider !== 'openai-compatible';
     let preferred = model && model !== 'auto' ? model : (isCloudOnly ? null : config.openAIModel);
     // Guard: reject local GGUF filenames being sent to cloud APIs
     if (isCloudOnly && preferred && preferred.toLowerCase().endsWith('.gguf')) preferred = null;
     if (preferred && preferred !== 'auto') return preferred;
+    if (provider === 'vllm') return config.openAIModel || 'model';
     if (provider === 'openai') return 'gpt-4o-mini';
     if (provider === 'grok') return 'grok-3-mini';
     if (provider === 'groq') return 'llama-3.3-70b-versatile';
@@ -285,7 +288,7 @@ export async function listModels(config, provider = config.aiProvider, options =
   const overrideBaseUrl = typeof options?.overrideBaseUrl === 'string' ? options.overrideBaseUrl.trim() : '';
   const overrideApiKey = typeof options?.overrideApiKey === 'string' ? options.overrideApiKey.trim() : undefined;
 
-  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible') {
+  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') {
     const defaultBase = provider === 'openai'
       ? 'https://api.openai.com/v1'
       : provider === 'grok'
@@ -300,6 +303,8 @@ export async function listModels(config, provider = config.aiProvider, options =
       ? 'https://api.cerebras.ai/v1'
       : provider === 'gpuaas'
       ? ''
+      : provider === 'vllm'
+      ? 'http://127.0.0.1:8000/v1'
       : config.openAIBaseUrl;
 
     // Cloud-only providers - never mix in local GGUF files; they can't be loaded via a remote API.
@@ -319,6 +324,8 @@ export async function listModels(config, provider = config.aiProvider, options =
       ? 'llama-3.3-70b'
       : provider === 'gpuaas'
       ? null   // no meaningful default - user must specify
+      : provider === 'vllm'
+      ? null   // vLLM lists its own models remotely; user points at their server
       : config.openAIModel;
 
     const baseUrl = overrideBaseUrl || defaultBase;
@@ -484,7 +491,7 @@ export async function streamWithProvider({ provider, model, messages, config, si
   // must be refused here as well. Only blocks cloud-metadata hosts; loopback/LAN
   // (local models) stay allowed.
   if (overrideBaseUrl) assertSafeProviderUrl(overrideBaseUrl);
-  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible') {
+  if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') {
     const defaultBase = provider === 'openai'
       ? 'https://api.openai.com/v1'
       : provider === 'grok'
@@ -499,6 +506,8 @@ export async function streamWithProvider({ provider, model, messages, config, si
       ? 'https://api.cerebras.ai/v1'
       : provider === 'gpuaas'
       ? ''
+      : provider === 'vllm'
+      ? 'http://127.0.0.1:8000/v1'
       : config.openAIBaseUrl;
     return streamOpenAICompatibleChat({
       baseUrl: overrideBaseUrl || defaultBase,
@@ -524,6 +533,8 @@ export async function streamWithProvider({ provider, model, messages, config, si
         ? 'Cerebras'
         : provider === 'gpuaas'
         ? 'GPUaaS'
+        : provider === 'vllm'
+        ? 'vLLM'
         : 'OpenAI-compatible',
     });
   }

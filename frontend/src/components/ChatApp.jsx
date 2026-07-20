@@ -178,10 +178,10 @@ const PROVIDER_OPTIONS = [
   { id: 'gpuaas', label: 'GPUaaS Endpoint', scope: 'Remote' },
   { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server' },
   { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp' },
-  // vLLM is CUDA-only and cannot run on Apple Silicon. Shown disabled (not hidden)
-  // so it is discoverable, with a pointer to the working path: a remote vLLM box
-  // consumed through the Local/Custom Endpoint (OpenAI-compatible) transport.
-  { id: 'vllm', label: 'vLLM', scope: 'Remote / CUDA', available: false, unavailableReason: 'CUDA-only. Cannot run on Apple Silicon. Use "Local/Custom Endpoint" pointed at a remote vLLM server.' }
+  // vLLM is CUDA-only so it runs on a remote NVIDIA host, not locally on Apple
+  // Silicon. Selectable as a remote OpenAI-compatible endpoint: point it at your
+  // vLLM server URL and it works over the same transport as the cloud providers.
+  { id: 'vllm', label: 'vLLM (remote)', scope: 'Remote' }
 ];
 // Two separate budgets. Time-to-first-token on a big local model includes cold load
 // + long-context prefill and can legitimately take minutes, so it gets a very
@@ -1208,7 +1208,10 @@ export default function ChatApp() {
       claude: { baseUrl: 'https://api.anthropic.com', apiKey: '' },
       gpuaas: { baseUrl: '', apiKey: '' },
       'openai-compatible': { baseUrl: 'http://127.0.0.1:8000/v1', apiKey: '' },
-      'koboldcpp': { baseUrl: 'http://127.0.0.1:5001/v1', apiKey: '' }
+      'koboldcpp': { baseUrl: 'http://127.0.0.1:5001/v1', apiKey: '' },
+      // Empty by default so selecting vLLM opens the endpoint config to enter the
+      // remote server URL (e.g. http://gpu-host:8000/v1).
+      'vllm': { baseUrl: '', apiKey: '' }
     };
   });
   const [isProviderConfigOpen, setIsProviderConfigOpen] = useState(false);
@@ -1497,7 +1500,7 @@ export default function ChatApp() {
 
   const selectedModelRecord = useMemo(() => models.find((item) => item.id === model) || null, [model, models]);
   const shouldShowModelChip = useMemo(
-    () => provider === 'ollama' || provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'koboldcpp' || models.length > 0,
+    () => provider === 'ollama' || provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm' || provider === 'koboldcpp' || models.length > 0,
     [provider, models.length]
   );
 
@@ -1645,7 +1648,7 @@ export default function ChatApp() {
         const query = new URLSearchParams({ provider });
         if (cfgBase) query.set('baseUrl', cfgBase);
         // API key travels in a header, never the URL (query strings leak into logs/history).
-        const keyHeader = ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && cfgKey)
+        const keyHeader = ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') && cfgKey)
           ? { 'x-provider-key': cfgKey } : undefined;
         const health = await api(`/api/providers/health?${query.toString()}`, keyHeader ? { headers: keyHeader } : undefined);
         if (cancelled) return;
@@ -3661,7 +3664,7 @@ export default function ChatApp() {
         const apiKey = String(providerConfigs?.[provider]?.apiKey || '').trim();
         if (baseUrl) query.set('baseUrl', baseUrl);
         // Key in a header, never the URL.
-        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && apiKey) keyHeader = { 'x-provider-key': apiKey };
+        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') && apiKey) keyHeader = { 'x-provider-key': apiKey };
       }
       const payload = await api(`/api/models?${query.toString()}`, keyHeader ? { headers: keyHeader } : undefined);
       const available = payload.models || [];
@@ -3760,7 +3763,7 @@ export default function ChatApp() {
       query.set('baseUrl', configuredBaseUrl);
     }
     // Key in a header, never the URL.
-    const keyHeader = ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && configuredApiKey)
+    const keyHeader = ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') && configuredApiKey)
       ? { 'x-provider-key': configuredApiKey } : undefined;
 
     try {
@@ -5683,7 +5686,7 @@ export default function ChatApp() {
                                 setProvider(opt.id);
                                 setIsProviderMenuOpen(false);
                                 setStatusText(`Provider: ${opt.label} (${opt.scope})`);
-                                const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas'];
+                                const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas', 'vllm'];
                                 if (cloudOnlyProviders.includes(opt.id)) {
                                   setModel((m) => (typeof m === 'string' && m.toLowerCase().endsWith('.gguf') ? 'auto' : m));
                                 }
@@ -5795,6 +5798,11 @@ export default function ChatApp() {
                         ℹ Use your GPUaaS OpenAI-compatible endpoint URL and key (for example Together, Fireworks, RunPod OpenAI proxy, vLLM gateway).
                       </p>
                     )}
+                    {provider === 'vllm' && (
+                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                        ℹ vLLM is CUDA-only, so it runs on a <strong>remote NVIDIA host</strong> (not on this Mac). Start vLLM there with <code>--api-key</code> optional, then enter its URL below, e.g. <code>http://gpu-host:8000/v1</code>. Models load from that server automatically.
+                      </p>
+                    )}
                     {provider === 'openai' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                         ℹ OpenAI uses https://api.openai.com/v1 and requires an API key.
@@ -5834,11 +5842,11 @@ export default function ChatApp() {
                     <input
                       type="text"
                       className="mb-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
-                      placeholder={provider === 'koboldcpp' ? 'http://127.0.0.1:5001/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'grok' ? 'https://api.x.ai/v1' : provider === 'groq' ? 'https://api.groq.com/openai/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'cerebras' ? 'https://api.cerebras.ai/v1' : provider === 'claude' ? 'https://api.anthropic.com' : provider === 'gpuaas' ? 'https://your-gpuaas-endpoint.example/v1' : 'http://127.0.0.1:1234/v1'}
+                      placeholder={provider === 'koboldcpp' ? 'http://127.0.0.1:5001/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'grok' ? 'https://api.x.ai/v1' : provider === 'groq' ? 'https://api.groq.com/openai/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'cerebras' ? 'https://api.cerebras.ai/v1' : provider === 'claude' ? 'https://api.anthropic.com' : provider === 'gpuaas' ? 'https://your-gpuaas-endpoint.example/v1' : provider === 'vllm' ? 'http://gpu-host:8000/v1' : 'http://127.0.0.1:1234/v1'}
                       value={providerConfigs[provider]?.baseUrl || ''}
                       onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], baseUrl: e.target.value } }))}
                     />
-                    {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible') && (
+                    {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') && (
                       <>
                         <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">API Key <span className="opacity-60">{provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' ? '(required)' : '(leave empty for local servers)'}</span></label>
                         <div className="mb-2 flex gap-1">

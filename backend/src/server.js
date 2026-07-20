@@ -900,7 +900,7 @@ app.get('/api/providers/health', async (req, res) => {
   const provider = String(req.query?.provider || config.aiProvider || 'ollama').trim();
   const overrideBaseUrl = String(req.query?.baseUrl || '').trim();
 
-  if (!['ollama', 'openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas', 'openai-compatible', 'koboldcpp'].includes(provider)) {
+  if (!['ollama', 'openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas', 'openai-compatible', 'koboldcpp', 'vllm'].includes(provider)) {
     res.status(400).json({ error: `Unknown provider: ${provider}` });
     return;
   }
