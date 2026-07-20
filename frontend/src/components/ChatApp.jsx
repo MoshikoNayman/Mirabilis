@@ -177,7 +177,11 @@ const PROVIDER_OPTIONS = [
   { id: 'claude', label: 'Claude', scope: 'Remote' },
   { id: 'gpuaas', label: 'GPUaaS Endpoint', scope: 'Remote' },
   { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server' },
-  { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp' }
+  { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp' },
+  // vLLM is CUDA-only and cannot run on Apple Silicon. Shown disabled (not hidden)
+  // so it is discoverable, with a pointer to the working path: a remote vLLM box
+  // consumed through the Local/Custom Endpoint (OpenAI-compatible) transport.
+  { id: 'vllm', label: 'vLLM', scope: 'Remote / CUDA', available: false, unavailableReason: 'CUDA-only. Cannot run on Apple Silicon. Use "Local/Custom Endpoint" pointed at a remote vLLM server.' }
 ];
 // Two separate budgets. Time-to-first-token on a big local model includes cold load
 // + long-context prefill and can legitimately take minutes, so it gets a very
@@ -1298,6 +1302,7 @@ export default function ChatApp() {
   });
   const [voiceTools, setVoiceTools] = useState(null);
   const [isSettingUpVoiceTools, setIsSettingUpVoiceTools] = useState(false);
+  const [isSettingUpStt, setIsSettingUpStt] = useState(false);
   const [voiceEngine, setVoiceEngine] = useState(() => {
     if (typeof window !== 'undefined') return safeStorageGet('mirabilis-voice-engine', 'browser');
     return 'browser';
@@ -1335,6 +1340,17 @@ export default function ChatApp() {
   const voiceSawSpeakingRef = useRef(false);   // saw isSpeaking flip true after speak
   const voiceRestartTimerRef = useRef(null);   // debounce re-listen after empty turn
   const voiceSpeakWatchdogRef = useRef(null);  // fallback if TTS never starts
+  // MediaRecorder-based capture (webkitSpeechRecognition is dead in Electron, so
+  // the loop records audio and transcribes via the local whisper.cpp backend).
+  const voiceStreamRef = useRef(null);         // active getUserMedia MediaStream
+  const voiceRecorderRef = useRef(null);       // active MediaRecorder
+  const voiceChunksRef = useRef([]);           // recorded audio chunks this turn
+  const voiceAudioCtxRef = useRef(null);       // AudioContext for silence detection
+  const voiceVadRafRef = useRef(null);         // rAF handle for the VAD meter
+  const voiceVadTimersRef = useRef({});        // { maxDuration, noSpeech } timers
+  const voiceSttReadyRef = useRef(true);       // backend speech-to-text is usable
+  const voiceHeardSpeechRef = useRef(false);   // did the VAD detect speech this turn
+  const voiceStopCaptureRef = useRef(null);    // finalize() handle for an orb tap
   // Always-fresh handles so the loop never calls a stale send/speak closure.
   const voiceSendRef = useRef(null);
   const voiceSpeakRef = useRef(null);
@@ -1832,6 +1848,21 @@ export default function ChatApp() {
     }
   }
 
+  async function setupStt() {
+    setIsSettingUpStt(true);
+    setStatusText('Installing local speech-to-text (this can take a few minutes)...');
+    try {
+      const payload = await api('/api/voice/stt-setup', { method: 'POST' });
+      if (payload?.status?.ready) voiceSttReadyRef.current = true;
+      setStatusText(payload?.status?.ready ? 'Speech-to-text ready' : 'Speech-to-text setup finished');
+      await checkVoiceTools();
+    } catch (error) {
+      setStatusText(`Speech-to-text setup failed: ${error.message}`);
+    } finally {
+      setIsSettingUpStt(false);
+    }
+  }
+
   function stopStreaming() {
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
@@ -1948,25 +1979,94 @@ export default function ChatApp() {
     messagesRef.current = messages;
   });
 
-  // Does this browser expose the Web Speech API we need for the live loop?
+  // The live loop records audio and transcribes on the backend (whisper.cpp),
+  // so it needs mic capture + MediaRecorder - NOT the Web Speech API, which is
+  // dead inside the packaged Electron app.
   useEffect(() => {
     const supported = typeof window !== 'undefined'
-      && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+      && Boolean(navigator.mediaDevices?.getUserMedia) && Boolean(window.MediaRecorder);
     setVoiceLoopSupported(supported);
   }, []);
 
+  // Tear the whole capture path down: stop the recorder, release the mic (this
+  // is what turns the macOS orange mic indicator OFF), close the audio context,
+  // and clear every VAD timer. Idempotent - safe to call repeatedly.
   function stopVoiceRecognition() {
-    const rec = voiceRecognitionRef.current;
+    const timers = voiceVadTimersRef.current || {};
+    for (const k of Object.keys(timers)) { clearTimeout(timers[k]); }
+    voiceVadTimersRef.current = {};
+    if (voiceVadRafRef.current) { cancelAnimationFrame(voiceVadRafRef.current); voiceVadRafRef.current = null; }
+    const rec = voiceRecorderRef.current;
     if (rec) {
       try {
-        rec.onresult = null;
-        rec.onend = null;
+        rec.ondataavailable = null;
+        rec.onstop = null;
         rec.onerror = null;
-        rec.onstart = null;
-        rec.stop();
+        if (rec.state !== 'inactive') rec.stop();
       } catch { /* already stopped */ }
+      voiceRecorderRef.current = null;
+    }
+    if (voiceStreamRef.current) {
+      try { voiceStreamRef.current.getTracks().forEach((t) => t.stop()); } catch { /* gone */ }
+      voiceStreamRef.current = null;
+    }
+    if (voiceAudioCtxRef.current) {
+      try { voiceAudioCtxRef.current.close(); } catch { /* already closed */ }
+      voiceAudioCtxRef.current = null;
+    }
+    // Legacy Web Speech handle, in case an old recognizer is somehow still around.
+    const legacy = voiceRecognitionRef.current;
+    if (legacy) {
+      try { legacy.onresult = null; legacy.onend = null; legacy.onerror = null; legacy.stop(); } catch { /* noop */ }
       voiceRecognitionRef.current = null;
     }
+  }
+
+  // Decode a recorded audio Blob and re-encode it as a 16 kHz mono PCM16 WAV -
+  // the format whisper.cpp consumes directly, so no server-side ffmpeg is needed.
+  async function encodeWavFromBlob(blob) {
+    const arrayBuf = await blob.arrayBuffer();
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const decodeCtx = new Ctx();
+    let decoded;
+    try {
+      decoded = await decodeCtx.decodeAudioData(arrayBuf.slice(0));
+    } finally {
+      try { decodeCtx.close(); } catch { /* noop */ }
+    }
+    const targetRate = 16000;
+    const frames = Math.ceil(decoded.duration * targetRate);
+    if (!frames) return null;
+    const offline = new OfflineAudioContext(1, frames, targetRate);
+    const src = offline.createBufferSource();
+    src.buffer = decoded;
+    src.connect(offline.destination);
+    src.start(0);
+    const rendered = await offline.startRendering();
+    const samples = rendered.getChannelData(0);
+    // PCM16 WAV
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+    const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);          // PCM
+    view.setUint16(22, 1, true);          // mono
+    view.setUint32(24, targetRate, true);
+    view.setUint32(28, targetRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, samples.length * 2, true);
+    let off = 44;
+    for (let i = 0; i < samples.length; i++, off += 2) {
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    }
+    return new Blob([view], { type: 'audio/wav' });
   }
 
   // Pick the closest male/female browser voice by name (best effort - the Web
@@ -2014,81 +2114,168 @@ export default function ChatApp() {
     }
   }
 
-  function startVoiceListening() {
+  async function startVoiceListening() {
     if (!voiceActiveRef.current || !voiceLoopSupported) return;
     if (voiceRestartTimerRef.current) {
       clearTimeout(voiceRestartTimerRef.current);
       voiceRestartTimerRef.current = null;
     }
-    stopVoiceRecognition();
+    stopVoiceRecognition(); // tear down any prior capture and release the mic
 
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
-
-    let recognition;
+    let stream;
     try {
-      recognition = new SR();
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     } catch {
+      voiceActiveRef.current = false;
+      setVoiceNote('Microphone access denied. Allow the mic in System Settings, then reopen voice chat.');
+      setVoicePhaseBoth('idle');
       return;
     }
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = (typeof navigator !== 'undefined' && navigator.language) || 'en-US';
+    // The loop may have been ended while we awaited the permission prompt.
+    if (!voiceActiveRef.current) { stream.getTracks().forEach((t) => t.stop()); return; }
+
+    voiceStreamRef.current = stream;
+    voiceChunksRef.current = [];
+    voiceHeardSpeechRef.current = false;
     voiceFinalRef.current = '';
-    voiceRecognitionRef.current = recognition;
+    setVoiceInterim('');
 
-    recognition.onstart = () => {
-      setVoicePhaseBoth('listening');
-      setVoiceInterim('');
+    const mimeType = getDictationMimeType();
+    let recorder;
+    try {
+      recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    } catch {
+      stopVoiceRecognition();
+      voiceActiveRef.current = false;
+      setVoiceNote('Audio recording is not supported here.');
+      setVoicePhaseBoth('idle');
+      return;
+    }
+    voiceRecorderRef.current = recorder;
+    setVoicePhaseBoth('listening');
+
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) voiceChunksRef.current.push(e.data); };
+    recorder.onerror = () => { /* surfaced via onstop */ };
+
+    // Finalize once - the VAD, the max-duration cap, and an orb tap can all race.
+    let finalized = false;
+    const finalize = () => {
+      if (finalized) return; finalized = true;
+      const timers = voiceVadTimersRef.current || {};
+      for (const k of Object.keys(timers)) clearTimeout(timers[k]);
+      voiceVadTimersRef.current = {};
+      if (voiceVadRafRef.current) { cancelAnimationFrame(voiceVadRafRef.current); voiceVadRafRef.current = null; }
+      try { if (recorder.state !== 'inactive') recorder.stop(); } catch { /* noop */ }
     };
+    voiceStopCaptureRef.current = finalize;
 
-    recognition.onresult = (event) => {
-      let interim = '';
-      let final = '';
-      for (let i = event.resultIndex; i < event.results.length; i += 1) {
-        const res = event.results[i];
-        if (res.isFinal) final += res[0].transcript;
-        else interim += res[0].transcript;
+    recorder.onstop = async () => {
+      // Release the mic immediately - this is what turns the orange indicator off.
+      if (voiceStreamRef.current) { try { voiceStreamRef.current.getTracks().forEach((t) => t.stop()); } catch { /* noop */ } voiceStreamRef.current = null; }
+      if (voiceAudioCtxRef.current) { try { voiceAudioCtxRef.current.close(); } catch { /* noop */ } voiceAudioCtxRef.current = null; }
+      voiceRecorderRef.current = null;
+      if (!voiceActiveRef.current) return;
+      const chunks = voiceChunksRef.current; voiceChunksRef.current = [];
+      if (!voiceHeardSpeechRef.current || !chunks.length) {
+        // Nothing said - keep listening hands-free.
+        if (voiceActiveRef.current && voicePhaseRef.current === 'listening') {
+          voiceRestartTimerRef.current = setTimeout(() => { if (voiceActiveRef.current) startVoiceListening(); }, 250);
+        }
+        return;
       }
-      if (final) {
-        voiceFinalRef.current = `${voiceFinalRef.current} ${final}`.trim();
-        setVoiceInterim(voiceFinalRef.current);
-      } else if (interim) {
-        setVoiceInterim(`${voiceFinalRef.current} ${interim}`.trim());
-      }
-    };
-
-    recognition.onerror = (event) => {
-      const code = event?.error || 'unknown';
-      if (code === 'not-allowed' || code === 'service-not-allowed') {
-        // No mic permission - stop the loop and tell the user in the overlay.
+      setVoicePhaseBoth('thinking');
+      try {
+        const raw = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        const wav = await encodeWavFromBlob(raw);
+        if (!wav) throw new Error('empty audio');
+        const fd = new FormData();
+        fd.append('audio', wav, 'voice.wav');
+        const resp = await fetch(`${API_BASE}/api/voice/transcribe`, { method: 'POST', body: fd });
+        if (!resp.ok) {
+          const payload = await resp.json().catch(() => ({}));
+          throw new Error(payload.error || `Transcription failed (${resp.status})`);
+        }
+        const payload = await resp.json();
+        const text = String(payload?.text || '').trim();
+        if (!voiceActiveRef.current) return;
+        if (text) {
+          submitVoiceTurn(text);
+        } else {
+          // Heard sound but no words - listen again.
+          setVoicePhaseBoth('listening');
+          if (voiceActiveRef.current) startVoiceListening();
+        }
+      } catch (err) {
+        if (!voiceActiveRef.current) return;
+        // STT unavailable or failed: stop the loop cleanly. Never blink forever.
         voiceActiveRef.current = false;
-        setVoiceNote('Microphone access denied. Allow the mic, then tap the orb to retry.');
+        stopVoiceRecognition();
+        const msg = String(err?.message || '');
+        setVoiceNote(/speech-to-text|speech to text|whisper/i.test(msg)
+          ? 'Local speech-to-text is not installed yet. Open Voice Settings to set it up.'
+          : `Voice error: ${msg || 'transcription failed'}`);
         setVoicePhaseBoth('idle');
       }
-      // no-speech / aborted / network errors fall through to onend, which
-      // re-listens while the loop is still active.
     };
 
-    recognition.onend = () => {
-      voiceRecognitionRef.current = null;
-      if (!voiceActiveRef.current) return;
-      const finalText = voiceFinalRef.current.trim();
-      voiceFinalRef.current = '';
-      if (finalText) {
-        submitVoiceTurn(finalText);
-      } else if (voicePhaseRef.current === 'listening') {
-        // Nothing captured (silence / no-speech) - keep listening hands-free.
-        voiceRestartTimerRef.current = setTimeout(() => {
-          if (voiceActiveRef.current) startVoiceListening();
-        }, 350);
+    // Voice activity detection: auto-stop shortly after the user stops talking,
+    // cap the turn length, and release the mic if no speech is heard at all.
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new Ctx();
+      voiceAudioCtxRef.current = audioCtx;
+      // May start suspended under the autoplay policy after our awaits; resume so
+      // the analyser actually processes audio (otherwise VAD would never fire).
+      if (audioCtx.state === 'suspended') { audioCtx.resume().catch(() => {}); }
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.fftSize);
+      const SPEECH_RMS = 0.015;      // above this counts as speech
+      const SILENCE_HANG_MS = 1200;  // stop this long after speech ends
+      let silenceStart = 0;
+      const tick = () => {
+        if (finalized || !voiceActiveRef.current) return;
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+        const rms = Math.sqrt(sum / data.length);
+        const now = performance.now();
+        if (rms > SPEECH_RMS) {
+          if (!voiceHeardSpeechRef.current) {
+            voiceHeardSpeechRef.current = true;
+            if (voiceVadTimersRef.current.noSpeech) { clearTimeout(voiceVadTimersRef.current.noSpeech); voiceVadTimersRef.current.noSpeech = null; }
+          }
+          silenceStart = 0;
+        } else if (voiceHeardSpeechRef.current) {
+          if (!silenceStart) silenceStart = now;
+          else if (now - silenceStart > SILENCE_HANG_MS) { finalize(); return; }
+        }
+        voiceVadRafRef.current = requestAnimationFrame(tick);
+      };
+      voiceVadRafRef.current = requestAnimationFrame(tick);
+    } catch { /* no VAD - the hard timers below still bound the turn */ }
+
+    // Hard caps: longest single turn, and a ceiling on holding an idle mic.
+    voiceVadTimersRef.current.maxDuration = setTimeout(() => finalize(), 30000);
+    voiceVadTimersRef.current.noSpeech = setTimeout(() => {
+      if (!voiceHeardSpeechRef.current) {
+        finalized = true;
+        stopVoiceRecognition();
+        if (voiceActiveRef.current) {
+          setVoiceNote('Listening paused (no speech heard). Tap the orb to talk.');
+          setVoicePhaseBoth('idle');
+        }
       }
-    };
+    }, 10000);
 
     try {
-      recognition.start();
+      recorder.start();
     } catch {
-      voiceRecognitionRef.current = null;
+      stopVoiceRecognition();
+      voiceActiveRef.current = false;
+      setVoicePhaseBoth('idle');
     }
   }
 
@@ -2122,11 +2309,28 @@ export default function ChatApp() {
     // voice menu was never opened; the piperModels effect re-applies on arrival.
     fetchPiperModels();
     ensureVoiceForGender(voiceGender);
-    if (voiceLoopSupported) {
-      startVoiceListening();
-    } else {
+    if (!voiceLoopSupported) {
+      setVoiceNote('Microphone recording is not available here.');
       setVoicePhaseBoth('idle');
+      return;
     }
+    // Only open the mic once we know a speech-to-text engine is actually usable,
+    // so we never hold the mic (blinking indicator) with nothing to transcribe.
+    setVoicePhaseBoth('thinking');
+    fetch(`${API_BASE}/api/voice/stt-status`).then((r) => r.json()).then((s) => {
+      if (!voiceActiveRef.current) return;
+      voiceSttReadyRef.current = Boolean(s?.ready);
+      if (s?.ready) {
+        startVoiceListening();
+      } else {
+        setVoiceNote('Local speech-to-text is not installed. Open Voice Settings to enable talking.');
+        setVoicePhaseBoth('idle');
+      }
+    }).catch(() => {
+      // Status unknown (backend slow/unreachable): try anyway; the transcribe
+      // error path will guide the user if STT is genuinely missing.
+      if (voiceActiveRef.current) startVoiceListening();
+    });
   }
 
   function stopVoiceLoop() {
@@ -2150,13 +2354,20 @@ export default function ChatApp() {
 
   function onVoiceOrbTap() {
     if (!voiceLoopSupported || !voiceActiveRef.current) return;
-    if (voicePhaseRef.current === 'speaking') {
+    const phase = voicePhaseRef.current;
+    if (phase === 'speaking') {
       // Barge-in: cut the reply short and start listening immediately.
       voiceStopSpeakRef.current?.();
       startVoiceListening();
-    } else if (voicePhaseRef.current !== 'thinking') {
+    } else if (phase === 'listening') {
+      // End the current turn now and transcribe what was captured.
+      if (voiceStopCaptureRef.current) voiceStopCaptureRef.current();
+    } else if (phase === 'idle') {
+      // Resume after a no-speech pause (or a retry).
+      setVoiceNote('');
       startVoiceListening();
     }
+    // 'thinking' - ignore taps while a reply is generating.
   }
 
   function onVoiceGenderChange(gender) {
@@ -5457,15 +5668,18 @@ export default function ChatApp() {
                   {isProviderMenuOpen && (
                     <div data-menu-panel="provider" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-48 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       {PROVIDER_OPTIONS.map((opt) => {
+                        const unavailable = opt.available === false;
                         const binaryMissing = opt.requiresBinary && localBinaryStatus[opt.requiresBinary] !== true;
                         const isInstalling = installingBinary?.provider === opt.requiresBinary && !installingBinary?.done;
+                        const disabled = unavailable || binaryMissing;
                         return (
                           <div key={opt.id} className="relative">
                             <button
                               type="button"
-                              disabled={binaryMissing}
+                              disabled={disabled}
+                              title={unavailable ? opt.unavailableReason : undefined}
                               onClick={() => {
-                                if (binaryMissing) return;
+                                if (disabled) return;
                                 setProvider(opt.id);
                                 setIsProviderMenuOpen(false);
                                 setStatusText(`Provider: ${opt.label} (${opt.scope})`);
@@ -5478,7 +5692,7 @@ export default function ChatApp() {
                                 }
                               }}
                               className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
-                                binaryMissing
+                                disabled
                                   ? 'cursor-not-allowed opacity-40'
                                   : provider === opt.id
                                     ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
@@ -5487,9 +5701,9 @@ export default function ChatApp() {
                             >
                               <span className="flex min-w-0 flex-col">
                                 <span className="truncate">{opt.label}</span>
-                                <span className="text-[10px] opacity-60">{binaryMissing ? 'Not installed' : opt.scope}</span>
+                                <span className="text-[10px] opacity-60">{unavailable ? 'Unavailable here' : binaryMissing ? 'Not installed' : opt.scope}</span>
                               </span>
-                              {!binaryMissing && provider === opt.id ? <span className="text-[10px] opacity-70">active</span> : null}
+                              {!disabled && provider === opt.id ? <span className="text-[10px] opacity-70">active</span> : null}
                             </button>
                             {binaryMissing && (
                               <button
@@ -5750,7 +5964,8 @@ export default function ChatApp() {
                                       if (provider === 'ollama') {
                                         installModel(item.ollamaId || item.id, item.id);
                                       } else {
-                                        setStatusText('Model not available in this endpoint yet. Add GGUF to mirabilis/models or load it in the provider runtime.');
+                                        const plabel = PROVIDER_OPTIONS.find((o) => o.id === provider)?.label || provider;
+                                        setStatusText(`${plabel} loads a GGUF at launch and cannot pull models. Drop a .gguf into mirabilis/models, or start ${plabel} with your model, then it will appear here.`);
                                       }
                                     } else if (isInstalled) {
                                       if (provider === 'ollama') {
@@ -5911,6 +6126,18 @@ export default function ChatApp() {
                         >
                           Browse the Ollama model library ↗
                         </a>
+                      </div>
+                    )}
+
+                    {/* KoboldCpp / custom-endpoint runtimes load one GGUF at launch and
+                        cannot pull models on demand. Explain how to get a model in,
+                        instead of showing a dead "install" row. */}
+                    {(provider === 'koboldcpp' || provider === 'openai-compatible') && (
+                      <div className="mt-1 border-t border-black/10 px-2 py-2">
+                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Loading a model</div>
+                        <p className="text-[10px] leading-relaxed text-[color:var(--text-muted)]">
+                          This runtime loads a single GGUF at launch. Drop a <code className="rounded bg-black/5 px-1 dark:bg-white/10">.gguf</code> file into <code className="rounded bg-black/5 px-1 dark:bg-white/10">mirabilis/models</code> and it appears above, or start the server pointed at your model. Only Ollama can download models on demand.
+                        </p>
                       </div>
                     )}
 
@@ -6747,6 +6974,33 @@ export default function ChatApp() {
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Voice Settings</span>
                       <span className="text-[10px] text-[color:var(--text-muted)]">{voiceSupported ? 'TTS ready' : 'Unavailable'}</span>
+                    </div>
+
+                    {/* Speech-to-text (talking to the assistant). The live voice loop
+                        records audio and transcribes locally via whisper.cpp - the
+                        browser Web Speech API does not work in the desktop app. */}
+                    <div className="mb-2 rounded-lg border border-[var(--hairline)] p-2">
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Speech to Text (talking)</span>
+                        <span className={`text-[10px] font-medium ${voiceTools?.stt?.ready ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
+                          {voiceTools?.stt?.ready ? 'Ready' : 'Not installed'}
+                        </span>
+                      </div>
+                      <p className="mb-1.5 text-[10px] leading-relaxed text-[color:var(--text-muted)]">
+                        {voiceTools?.stt?.ready
+                          ? (voiceTools?.stt?.whisperCpp ? 'Local whisper.cpp - fully offline.' : voiceTools?.stt?.openai ? 'Using OpenAI transcription.' : 'Local Whisper CLI.')
+                          : 'Install local speech-to-text (whisper.cpp) to talk hands-free. One-time ~150MB download, runs offline.'}
+                      </p>
+                      {!voiceTools?.stt?.ready && (
+                        <button
+                          type="button"
+                          onClick={setupStt}
+                          disabled={isSettingUpStt}
+                          className="w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
+                        >
+                          {isSettingUpStt ? 'Installing…' : 'Install local speech-to-text'}
+                        </button>
+                      )}
                     </div>
 
                     <div className="mb-2 grid grid-cols-2 gap-1">

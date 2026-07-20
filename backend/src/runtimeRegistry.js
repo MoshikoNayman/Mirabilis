@@ -25,7 +25,7 @@ export const RUNTIMES = [
     baseUrlEnv: 'OLLAMA_BASE_URL',
     defaultBaseUrl: 'http://127.0.0.1:11434',
     capabilities: {
-      autoNumCtx: true, keepAlive: true, oomRetry: true,
+      autoNumCtx: true, keepAlive: true, oomRetry: true, pull: true,
       kvQuant: false, flashAttn: 'auto', grammar: false, speculative: false, jsonMode: true
     },
     note: 'Zero-config default local runtime. Best for casual single-user use.'
@@ -96,16 +96,26 @@ export function isAppleSilicon() {
 // A serializable view for the UI / router: which runtimes are usable here.
 export function listRuntimes() {
   const appleSilicon = isAppleSilicon();
-  return RUNTIMES.map((r) => ({
-    id: r.id,
-    label: r.label,
-    kind: r.kind,
-    scope: r.scope,
-    transport: r.transport,
-    managed: r.managed,
-    capabilities: r.capabilities,
-    note: r.note,
-    // vLLM/SGLang are CUDA-oriented; flag that they cannot be launched on this Mac.
-    localLaunchable: r.managed === 'spawn' && !(r.kind === 'vllm' && appleSilicon)
-  }));
+  return RUNTIMES.map((r) => {
+    // vLLM (and SGLang later) are CUDA-only; they cannot run on Apple Silicon at
+    // all. Surface that as an explicit availability flag + reason so the UI can
+    // show the runtime greyed-out with an explanation instead of hiding it.
+    const cudaBlocked = r.kind === 'vllm' && appleSilicon;
+    return {
+      id: r.id,
+      label: r.label,
+      kind: r.kind,
+      scope: r.scope,
+      transport: r.transport,
+      managed: r.managed,
+      capabilities: r.capabilities,
+      canPull: r.capabilities?.pull === true,
+      note: r.note,
+      localLaunchable: r.managed === 'spawn' && !cudaBlocked,
+      available: !cudaBlocked,
+      unavailableReason: cudaBlocked
+        ? 'vLLM is CUDA-only and cannot run on Apple Silicon. Point a Local/Custom Endpoint at a remote vLLM server instead.'
+        : null
+    };
+  });
 }

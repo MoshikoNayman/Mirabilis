@@ -534,17 +534,28 @@ async function transcribeWithWhisperCli({ audioPath, outputStem, model = 'base' 
   return String(parsed.text || '').trim();
 }
 
-async function transcribeDictationAudio({ sourceStem }) {
+async function transcribeDictationAudio({ sourcePath }) {
   const providerPref = String(process.env.INTELLEDGER_TRANSCRIBE_PROVIDER || 'auto').toLowerCase();
   const transcribeModel = process.env.INTELLEDGER_TRANSCRIBE_MODEL || 'whisper-1';
   const whisperCliModel = process.env.INTELLEDGER_WHISPER_CLI_MODEL || 'base';
   const hasOpenAI = Boolean(config.openAIApiKey);
 
-  const sourcePath = `${sourceStem}.webm`;
-  const wavPath = `${sourceStem}.wav`;
-  await extractAudioTrack(sourcePath, wavPath);
+  const stem = String(sourcePath).replace(/\.[^.]+$/, '');
+  const isWav = /\.wav$/i.test(sourcePath);
+
+  // whisper.cpp / OpenAI want a 16kHz mono WAV. The voice-chat client encodes
+  // WAV in-browser (so no ffmpeg is needed there). Dictation may still send
+  // webm/mp4/ogg; convert with ffmpeg when it is present.
+  let wavPath = sourcePath;
+  let madeWav = false;
+  if (!isWav) {
+    wavPath = `${stem}.converted.wav`;
+    await extractAudioTrack(sourcePath, wavPath);
+    madeWav = true;
+  }
 
   try {
+    // 1. OpenAI Whisper API (explicitly chosen, or a key exists and pref=auto).
     if (providerPref === 'openai' || (providerPref === 'auto' && hasOpenAI)) {
       return await transcribeWithOpenAI({
         audioPath: wavPath,
@@ -554,18 +565,29 @@ async function transcribeDictationAudio({ sourceStem }) {
       });
     }
 
-    if (!(await commandExists('whisper'))) {
-      throw new Error('Whisper CLI is not installed and no OpenAI transcription key is configured.');
+    // 2. Local whisper.cpp - offline, works in Electron. The default local path.
+    if (providerPref !== 'whisper-py') {
+      const wcBin = await resolveWhisperCppBinary();
+      const wcModel = resolveWhisperCppModel();
+      if (wcBin && wcModel) {
+        return await transcribeWithWhisperCpp({ wavPath, binary: wcBin, model: wcModel, outStem: stem });
+      }
     }
 
-    return await transcribeWithWhisperCli({
-      audioPath: wavPath,
-      outputStem: sourceStem,
-      model: whisperCliModel
-    });
+    // 3. Python openai-whisper CLI (heavier, optional).
+    if (await commandExists('whisper')) {
+      return await transcribeWithWhisperCli({
+        audioPath: wavPath,
+        outputStem: stem,
+        model: whisperCliModel
+      });
+    }
+
+    throw new Error('No speech-to-text engine is available. Open Voice Settings and install local speech-to-text, or set an OpenAI key.');
   } finally {
-    unlink(sourcePath).catch(() => {});
-    unlink(wavPath).catch(() => {});
+    if (madeWav) unlink(wavPath).catch(() => {});
+    unlink(`${stem}.txt`).catch(() => {});
+    unlink(`${stem}.json`).catch(() => {});
   }
 }
 
@@ -637,6 +659,99 @@ async function downloadPiperVoiceModel(modelId) {
   ]);
 }
 
+// ── Whisper.cpp speech-to-text ──────────────────────────────────────────────
+// Local, offline STT that works INSIDE Electron. The browser Web Speech API
+// (webkitSpeechRecognition) streams to Google's cloud endpoint and is dead in a
+// packaged Electron build, so the voice loop records audio and posts it here.
+// Mirrors the Piper pattern: a small model catalog, a models dir, and helpers.
+const WHISPER_MODEL_CATALOG = [
+  { id: 'base.en', label: 'Base English (fast, ~142MB)', sizeMb: 142, url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' },
+  { id: 'small.en', label: 'Small English (more accurate, ~466MB)', sizeMb: 466, url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin' }
+];
+
+function getWhisperModelsDir() {
+  if (process.platform === 'darwin') {
+    return join(os.homedir(), 'Library', 'Application Support', 'whisper', 'models');
+  }
+  return join(os.homedir(), '.local', 'share', 'whisper', 'models');
+}
+
+function getInstalledWhisperModelIds() {
+  const dir = getWhisperModelsDir();
+  return WHISPER_MODEL_CATALOG
+    .filter((m) => existsSync(join(dir, `ggml-${m.id}.bin`)))
+    .map((m) => m.id);
+}
+
+async function downloadWhisperModel(modelId) {
+  const model = WHISPER_MODEL_CATALOG.find((m) => m.id === modelId);
+  if (!model) throw new Error(`Unknown Whisper model: ${modelId}`);
+  const dir = getWhisperModelsDir();
+  await mkdir(dir, { recursive: true });
+  await downloadFile(model.url, join(dir, `ggml-${model.id}.bin`));
+}
+
+// whisper.cpp ships its CLI under a few names across versions/distros.
+const WHISPER_CPP_BINARIES = ['whisper-cli', 'whisper-cpp', 'main'];
+
+async function resolveWhisperCppBinary() {
+  const override = process.env.WHISPER_CPP_BINARY;
+  if (override) return (override.includes('/') ? existsSync(override) : await commandExists(override)) ? override : null;
+  for (const cand of WHISPER_CPP_BINARIES) {
+    if (await commandExists(cand)) return cand;
+  }
+  return null;
+}
+
+function resolveWhisperCppModel() {
+  const override = process.env.WHISPER_CPP_MODEL;
+  if (override && existsSync(override)) return override;
+  const dir = getWhisperModelsDir();
+  for (const m of WHISPER_MODEL_CATALOG) {
+    const p = join(dir, `ggml-${m.id}.bin`);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+// Strip whisper.cpp non-speech markers like [BLANK_AUDIO], (music), [ Silence ].
+function cleanTranscript(text) {
+  return String(text || '')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\((?:blank audio|music|silence|inaudible|noise)\)/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function transcribeWithWhisperCpp({ wavPath, binary, model, outStem }) {
+  // whisper-cli writes <outStem>.txt with -otxt/-of; -nt strips timestamps.
+  await runCommand(binary, [
+    '-m', model,
+    '-f', wavPath,
+    '-otxt',
+    '-of', outStem,
+    '-nt'
+  ], { timeoutMs: 1000 * 60 * 5 });
+  const txt = await readFile(`${outStem}.txt`, 'utf8').catch(() => '');
+  return cleanTranscript(txt);
+}
+
+async function getSttStatus() {
+  const wcBin = await resolveWhisperCppBinary();
+  const wcModel = resolveWhisperCppModel();
+  const whisperPy = await commandExists('whisper');
+  const openai = Boolean(config.openAIApiKey);
+  return {
+    whisperCpp: Boolean(wcBin),
+    whisperCppModel: Boolean(wcModel),
+    whisperPy,
+    openai,
+    installedModels: getInstalledWhisperModelIds(),
+    // "ready" means an engine + (for whisper.cpp) a model is actually usable now.
+    ready: Boolean((wcBin && wcModel) || openai || whisperPy)
+  };
+}
+
 async function getVoiceToolsStatus() {
   const platform = process.platform;
   const hasSay = platform === 'darwin' ? await commandExists('say') : false;
@@ -648,6 +763,7 @@ async function getVoiceToolsStatus() {
 
   const systemTts = platform === 'darwin' ? hasSay : platform === 'linux' ? hasEspeak : true;
   const installedPiperModels = getInstalledPiperModelIds();
+  const stt = await getSttStatus();
   const setupRequired = !hasPiper;
 
   return {
@@ -659,6 +775,7 @@ async function getVoiceToolsStatus() {
       ffmpeg: hasFfmpeg,
       piperModels: installedPiperModels,
     },
+    stt,
     packageManagers: {
       brew: hasBrew,
       apt: hasApt
@@ -1080,6 +1197,63 @@ app.post('/api/voice/download-model', async (req, res) => {
   }
 });
 
+// GET /api/voice/stt-status - which speech-to-text engines are usable now
+app.get('/api/voice/stt-status', async (_req, res) => {
+  try {
+    const stt = await getSttStatus();
+    const brew = process.platform === 'darwin' ? await commandExists('brew') : false;
+    const apt = process.platform === 'linux' ? await commandExists('apt-get') : false;
+    res.json({ ...stt, catalog: WHISPER_MODEL_CATALOG, packageManagers: { brew, apt } });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Failed to read STT status' });
+  }
+});
+
+// POST /api/voice/stt-setup - one-click local speech-to-text: install the
+// whisper.cpp binary (brew/apt) and download a default English model.
+app.post('/api/voice/stt-setup', async (req, res) => {
+  const modelId = String(req.body?.modelId || 'base.en');
+  try {
+    let bin = await resolveWhisperCppBinary();
+    if (!bin) {
+      if (process.platform === 'darwin') {
+        if (!(await commandExists('brew'))) {
+          throw new Error('Homebrew is required to install local speech-to-text on macOS. Install brew, then try again.');
+        }
+        await execAsync('brew install whisper-cpp', { timeout: 1000 * 60 * 20, maxBuffer: 1024 * 1024 * 8 });
+      } else if (process.platform === 'linux') {
+        if (!(await commandExists('apt-get'))) {
+          throw new Error('One-click STT setup currently supports Homebrew (macOS) or apt-based Linux.');
+        }
+        await execAsync('sudo -n apt-get update && sudo -n apt-get install -y whisper-cpp', { timeout: 1000 * 60 * 20, maxBuffer: 1024 * 1024 * 8 });
+      } else {
+        throw new Error('One-click STT setup is supported on macOS and apt-based Linux.');
+      }
+      bin = await resolveWhisperCppBinary();
+    }
+    if (!resolveWhisperCppModel()) {
+      await downloadWhisperModel(WHISPER_MODEL_CATALOG.find((m) => m.id === modelId) ? modelId : 'base.en');
+    }
+    res.json({ ok: true, status: await getSttStatus() });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'STT setup failed' });
+  }
+});
+
+// POST /api/voice/stt-download-model - fetch a specific whisper.cpp model
+app.post('/api/voice/stt-download-model', async (req, res) => {
+  const modelId = String(req.body?.modelId || '');
+  if (!WHISPER_MODEL_CATALOG.find((m) => m.id === modelId)) {
+    return res.status(400).json({ error: 'Unknown or missing modelId' });
+  }
+  try {
+    await downloadWhisperModel(modelId);
+    res.json({ ok: true, status: await getSttStatus() });
+  } catch (error) {
+    res.status(500).json({ error: error.message || 'Download failed' });
+  }
+});
+
 // POST /api/voice/tts - generate speech via piper, returns audio/wav
 app.post('/api/voice/tts', async (req, res) => {
   const { text, modelId } = req.body || {};
@@ -1138,17 +1312,26 @@ app.post('/api/voice/transcribe', upload.single('audio'), async (req, res) => {
 
   const tempId = uuidv4();
   const sourceStem = join(os.tmpdir(), `mirabilis-dictation-${tempId}`);
-  const sourcePath = `${sourceStem}.webm`;
+  // Preserve the real container. The voice loop sends WAV (fed straight to
+  // whisper.cpp, no ffmpeg); dictation may send webm/mp4/ogg.
+  const name = String(file.originalname || '').toLowerCase();
+  const type = String(file.mimetype || '').toLowerCase();
+  const ext = (name.endsWith('.wav') || type.includes('wav')) ? 'wav'
+    : (name.endsWith('.m4a') || name.endsWith('.mp4') || type.includes('mp4') || type.includes('m4a')) ? 'm4a'
+    : (name.endsWith('.ogg') || type.includes('ogg')) ? 'ogg'
+    : 'webm';
+  const sourcePath = `${sourceStem}.${ext}`;
   try {
     await writeFile(sourcePath, file.buffer);
-    const text = await transcribeDictationAudio({ sourceStem });
+    const text = await transcribeDictationAudio({ sourcePath });
     res.json({ ok: true, text });
   } catch (error) {
     res.status(500).json({ error: error.message || 'Transcription failed' });
   } finally {
     unlink(sourcePath).catch(() => {});
-    unlink(`${sourcePath}.wav`).catch(() => {});
+    unlink(`${sourceStem}.converted.wav`).catch(() => {});
     unlink(`${sourceStem}.wav`).catch(() => {});
+    unlink(`${sourceStem}.txt`).catch(() => {});
     unlink(`${sourceStem}.json`).catch(() => {});
   }
 });

@@ -185,15 +185,13 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
       };
     }
 
-    return {
-      ...entry,
-      id: entry.id,
-      label: entry.label,
-      available: false,
-      selected: false,
-      paramSize: null
-    };
-  });
+    // Not loaded by the endpoint and no matching local GGUF. This catalog is only
+    // built for endpoints that CANNOT pull a model on demand (koboldcpp,
+    // openai-compatible) - unlike Ollama, they load a single GGUF at launch. So
+    // drop the entry instead of emitting a dead "install" row that, when clicked,
+    // only produced a "not available in this endpoint" dead-end.
+    return null;
+  }).filter(Boolean);
 
   const extras = Array.from(unmatchedRemoteIds)
     .map((id) => remoteById.get(id))
