@@ -4179,6 +4179,18 @@ export default function ChatApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, isProviderConfigOpen]);
 
+  // When the endpoint config panel CLOSES, re-list models so a newly entered
+  // server URL / key is reflected immediately (refreshModels only re-runs on a
+  // provider change, not on a base-URL edit).
+  const prevProviderConfigOpenRef = useRef(false);
+  useEffect(() => {
+    if (prevProviderConfigOpenRef.current && !isProviderConfigOpen && provider !== 'ollama') {
+      refreshModels();
+    }
+    prevProviderConfigOpenRef.current = isProviderConfigOpen;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isProviderConfigOpen]);
+
   useEffect(() => {
     refreshModels();
   }, [provider]);
@@ -6218,7 +6230,27 @@ export default function ChatApp() {
                         ))}
                         </>
                       ) : (
-                        <div className="px-2 py-2 text-xs text-[color:var(--text-muted)]">No models found</div>
+                        (() => {
+                          const endpointProviders = ['vllm', 'openai-compatible', 'koboldcpp', 'gpuaas'];
+                          const hasBaseUrl = !!String(providerConfigs[provider]?.baseUrl || '').trim();
+                          if (endpointProviders.includes(provider) && !hasBaseUrl) {
+                            return (
+                              <div className="px-2 py-3 text-[11px] leading-relaxed text-[color:var(--text-muted)]">
+                                {provider === 'vllm'
+                                  ? 'No vLLM server connected. Start a local vLLM (NVIDIA GPU) or enter a remote server URL - then this list fills with that server\'s models.'
+                                  : 'No server connected. Set the endpoint URL - then this list fills with its models.'}
+                                <button
+                                  type="button"
+                                  onClick={() => { setIsModelMenuOpen(false); setIsProviderMenuOpen(false); setIsProviderConfigOpen(true); }}
+                                  className="mt-2 block w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110"
+                                >
+                                  Configure endpoint
+                                </button>
+                              </div>
+                            );
+                          }
+                          return <div className="px-2 py-2 text-xs text-[color:var(--text-muted)]">No models found</div>;
+                        })()
                       )}
 
                     {/* Pull any model not in the list (Ollama mode) - reuses the
