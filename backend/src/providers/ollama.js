@@ -1,3 +1,4 @@
+// @ts-check
 // Ollama provider adapter for local LLM chat
 
 const OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
@@ -29,6 +30,7 @@ export async function getOllamaModelInfo(baseUrl, model) {
   const base = baseUrl || OLLAMA_BASE_URL;
   const key = `${base}::${model}`;
   if (_modelInfoCache.has(key)) return _modelInfoCache.get(key);
+  /** @type {import('../types.js').OllamaModelInfo} */
   let out = { contextWindow: null, paramCount: null, capabilities: [], vision: false };
   try {
     const res = await fetch(`${base}/api/show`, {
@@ -39,6 +41,7 @@ export async function getOllamaModelInfo(baseUrl, model) {
     if (res.ok) {
       const data = await res.json();
       const info = data.model_info || {};
+      /** @type {number | null} */
       let ctx = null;
       for (const [k, v] of Object.entries(info)) {
         if (k.endsWith('.context_length')) { ctx = Number(v) || null; break; }
@@ -109,7 +112,7 @@ export async function streamOllamaChat({ baseUrl, model, messages, signal, onTok
     if (!res.ok) {
       let body = '';
       try { body = await res.text(); } catch { /* ignore */ }
-      const err = new Error(`Ollama API error: ${res.status}${body ? ' - ' + body.slice(0, 200) : ''}`);
+      const err = /** @type {Error & { isOom?: boolean }} */ (new Error(`Ollama API error: ${res.status}${body ? ' - ' + body.slice(0, 200) : ''}`));
       err.isOom = OOM_RE.test(body);
       throw err;
     }
@@ -135,6 +138,7 @@ export async function streamOllamaChat({ baseUrl, model, messages, signal, onTok
       }
     }
 
+    if (!res.body) throw new Error('Ollama returned no response body.');
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';

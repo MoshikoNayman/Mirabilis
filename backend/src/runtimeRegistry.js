@@ -1,3 +1,4 @@
+// @ts-check
 // backend/src/runtimeRegistry.js
 // Declarative registry of inference RUNTIMES (as opposed to model providers). Every
 // runtime is treated as an OpenAI-compatible-or-Ollama endpoint with a known shape,
@@ -12,8 +13,12 @@
 
 import os from 'node:os';
 
+/** @typedef {import('./types.js').RuntimeDef} RuntimeDef */
+/** @typedef {import('./types.js').RuntimeInfo} RuntimeInfo */
+
 // kind -> the transport used to talk to it. 'ollama' uses the Ollama native API;
 // everything else speaks the OpenAI-compatible /v1/chat/completions shape.
+/** @type {RuntimeDef[]} */
 export const RUNTIMES = [
   {
     id: 'ollama',
@@ -85,6 +90,7 @@ export const RUNTIMES = [
 
 const BY_ID = new Map(RUNTIMES.map((r) => [r.id, r]));
 
+/** @param {string} id @returns {RuntimeDef | null} */
 export function getRuntime(id) {
   return BY_ID.get(id) || null;
 }
@@ -95,6 +101,7 @@ export function isAppleSilicon() {
 }
 
 // A serializable view for the UI / router: which runtimes are usable here.
+/** @returns {RuntimeInfo[]} */
 export function listRuntimes() {
   const appleSilicon = isAppleSilicon();
   return RUNTIMES.map((r) => {

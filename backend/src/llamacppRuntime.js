@@ -1,3 +1,4 @@
+// @ts-check
 // backend/src/llamacppRuntime.js
 // Managed llama.cpp runtime: launch / health-check / stop a llama-server process with
 // hardware-tuned flags, and talk to it over the OpenAI-compatible transport (which now
@@ -22,12 +23,14 @@ const SAFE_DIGEST = /^sha256[:-][0-9a-f]{64}$/;
 // KV-cache quant types llama.cpp accepts; anything else is dropped (falls back to default).
 const KV_TYPES = new Set(['f16', 'f32', 'q8_0', 'q4_0', 'q4_1', 'q5_0', 'q5_1', 'iq4_nl', 'bf16']);
 
+/** @type {import('node:child_process').ChildProcess | null} */
 let _proc = null;      // the running llama-server child, or null
+/** @type {{ pid?: number, port: number, baseUrl: string, model: string, startedAt: number, flags: string[] } | null} */
 let _state = null;     // { pid, port, baseUrl, model, startedAt, flags }
 
 function findBinary() {
   const rt = getRuntime('llamacpp');
-  for (const cand of rt.binaryCandidates) {
+  for (const cand of (rt?.binaryCandidates || [])) {
     if (cand.includes('/')) { if (existsSync(cand)) return cand; }
     else return cand; // rely on PATH
   }
@@ -134,6 +137,7 @@ export function status() {
   return { running: true, installed: true, ...(_state) };
 }
 
+/** @param {{ modelPath?: string, model?: string, numCtx?: number, port?: number, ngl?: number|null, kvQuant?: string, flashAttn?: boolean, parallel?: number, timeoutMs?: number }} [args] */
 export async function startServer({ modelPath, model, numCtx = 8192, port, ngl, kvQuant = 'q8_0', flashAttn = true, parallel = 1, timeoutMs = 180000 } = {}) {
   const bin = findBinary();
   if (!bin) return { ok: false, error: 'llama.cpp (llama-server) is not installed. Install with: brew install llama.cpp' };
@@ -141,6 +145,7 @@ export async function startServer({ modelPath, model, numCtx = 8192, port, ngl, 
   // Resolve the model path. An explicit modelPath must be an existing REGULAR .gguf
   // file (never a directory, device, or arbitrary file); an Ollama model name goes
   // through the validated resolver above.
+  /** @type {string | null} */
   let resolvedPath = null;
   if (modelPath) {
     const rp = resolve(String(modelPath).replace(/\0/g, ''));
@@ -157,7 +162,7 @@ export async function startServer({ modelPath, model, numCtx = 8192, port, ngl, 
 
   await stopServer(); // one managed server at a time
 
-  const rtPort = port || getRuntime('llamacpp').defaultPort || 8080;
+  const rtPort = port || getRuntime('llamacpp')?.defaultPort || 8080;
   const flags = buildFlags({ modelPath: resolvedPath, port: rtPort, numCtx, ngl, kvQuant, flashAttn, parallel });
   let stopping = false;
   const child = spawn(bin, flags, { stdio: ['ignore', 'pipe', 'pipe'] });

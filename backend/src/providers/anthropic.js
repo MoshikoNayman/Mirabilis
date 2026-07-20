@@ -1,3 +1,4 @@
+// @ts-check
 const ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
 const ANTHROPIC_VERSION = '2023-06-01';
 
@@ -39,10 +40,27 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
 
   const conversation = messages
     .filter((message) => message.role === 'user' || message.role === 'assistant')
-    .map((message) => ({
-      role: message.role,
-      content: String(message.content || '')
-    }));
+    .map((message) => {
+      // Vision: when a turn carries images, send Anthropic content blocks
+      // (base64 image parts + a text part) instead of a bare string.
+      const imgs = Array.isArray(message.images) ? message.images : [];
+      if (imgs.length) {
+        return {
+          role: message.role,
+          content: [
+            ...imgs.map((im) => ({ type: 'image', source: { type: 'base64', media_type: im.mime, data: im.data } })),
+            ...(message.content ? [{ type: 'text', text: String(message.content) }] : [])
+          ]
+        };
+      }
+      return { role: message.role, content: String(message.content || '') };
+    });
+  // Anthropic rejects a conversation that does not start with a user turn; the
+  // sliding history window can leave a leading assistant turn, so drop them.
+  while (conversation.length && conversation[0].role !== 'user') conversation.shift();
+
+  // Anthropic only accepts temperature in [0, 1]; the UI slider goes to 2.
+  const clampedTemp = temperature != null ? Math.min(1, Math.max(0, temperature)) : null;
 
   const payload = {
     model,
@@ -52,7 +70,7 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
     max_tokens: maxTokens != null ? maxTokens : 8192,
     stream: false,
     ...(system ? { system } : {}),
-    ...(temperature != null ? { temperature } : {})
+    ...(clampedTemp != null ? { temperature: clampedTemp } : {})
   };
 
   try {

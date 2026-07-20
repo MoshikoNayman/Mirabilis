@@ -1,3 +1,4 @@
+// @ts-check
 // backend/src/vllmRuntime.js
 // Managed LOCAL vLLM runtime for machines with a supported NVIDIA GPU (Linux/CUDA).
 // vLLM is a high-throughput OpenAI-compatible server; here Mirabilis can launch,
@@ -14,6 +15,9 @@ import { promisify } from 'node:util';
 import os from 'node:os';
 import { getRuntime } from './runtimeRegistry.js';
 
+/** @typedef {import('./types.js').VllmCapability} VllmCapability */
+/** @typedef {import('./types.js').RuntimeStatus} RuntimeStatus */
+
 const execFileP = promisify(execFile);
 
 // A model ref is a Hugging Face repo id or a local path. Restrict to a safe
@@ -21,7 +25,9 @@ const execFileP = promisify(execFile);
 // but this is defense in depth and rejects obvious garbage early).
 const SAFE_VLLM_MODEL = /^[a-zA-Z0-9][a-zA-Z0-9._/@-]*$/;
 
+/** @type {import('node:child_process').ChildProcess | null} */
 let _proc = null;   // running vLLM child, or null
+/** @type {{ pid?: number, port: number, baseUrl: string, model: string, startedAt: number } | null} */
 let _state = null;  // { pid, port, baseUrl, model, startedAt }
 
 function isAppleSilicon() {
@@ -30,6 +36,7 @@ function isAppleSilicon() {
 
 // Is a command on PATH? Uses `command -v` (posix) / `where` (win) with no shell
 // interpolation of untrusted input (cmd is always a fixed literal here).
+/** @param {string} cmd @returns {Promise<boolean>} */
 async function has(cmd) {
   try {
     if (os.platform() === 'win32') await execFileP('where', [cmd], { timeout: 5000 });
@@ -39,6 +46,7 @@ async function has(cmd) {
 }
 
 // Detect how vLLM can be launched: the `vllm` CLI, or `python -m vllm...`.
+/** @returns {Promise<{ installed: boolean, launcher: 'cli'|'python'|null, python: string|null }>} */
 async function detectLauncher() {
   if (await has('vllm')) return { installed: true, launcher: 'cli', python: null };
   for (const py of ['python3', 'python']) {
@@ -51,6 +59,7 @@ async function detectLauncher() {
 }
 
 // Can this machine run a LOCAL vLLM server? Returns a rich, UI-facing verdict.
+/** @returns {Promise<VllmCapability>} */
 export async function detectCapability() {
   if (isAppleSilicon()) {
     return {
@@ -78,6 +87,7 @@ export async function detectCapability() {
   return { canRunLocal: true, hasNvidia: true, installed: true, launcher, python, reason: null };
 }
 
+/** @param {number} port @param {number} timeoutMs @param {() => boolean} signalStop @returns {Promise<boolean>} */
 function pollHealth(port, timeoutMs, signalStop) {
   return new Promise((resolve) => {
     const started = Date.now();
@@ -94,12 +104,14 @@ function pollHealth(port, timeoutMs, signalStop) {
   });
 }
 
+/** @returns {RuntimeStatus} */
 export function status() {
   return _proc && _state ? { running: true, ...(_state) } : { running: false };
 }
 
 // Launch a local vLLM OpenAI-compatible server for `model` (a HF repo id or a
 // local path). Refuses cleanly on hardware that cannot run it.
+/** @param {{ model?: string, port?: number, gpuMemoryUtilization?: number, maxModelLen?: number, dtype?: string, extraArgs?: string[], timeoutMs?: number }} [args] */
 export async function startServer({ model, port, gpuMemoryUtilization, maxModelLen, dtype = 'auto', extraArgs = [], timeoutMs = 1000 * 60 * 15 } = {}) {
   const cap = await detectCapability();
   if (!cap.canRunLocal) return { ok: false, error: cap.reason || 'Local vLLM is not supported on this machine.' };
@@ -120,7 +132,9 @@ export async function startServer({ model, port, gpuMemoryUtilization, maxModelL
     if (typeof a === 'string' && a.length > 0 && a.length < 200 && !a.includes('\0')) common.push(a);
   }
 
-  const cmd = cap.launcher === 'python' ? cap.python : 'vllm';
+  // cap.canRunLocal guaranteed a launcher above; the `|| 'python3'` is a null-safe
+  // fallback so the spawn target is never undefined.
+  const cmd = cap.launcher === 'python' ? (cap.python || 'python3') : 'vllm';
   const args = cap.launcher === 'python'
     ? ['-m', 'vllm.entrypoints.openai.api_server', '--model', raw, ...common]
     : ['serve', raw, ...common];

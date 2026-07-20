@@ -1,3 +1,4 @@
+// @ts-check
 // OpenAI-compatible provider adapter (llama-server, compatible APIs)
 
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'http://127.0.0.1:8000/v1';
@@ -111,6 +112,7 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
       throw new Error(`${providerLabel} API error: ${res.status}${detail ? ` - ${detail}` : ''}`);
     }
 
+    if (!res.body) throw new Error(`${providerLabel} returned no response body.`);
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';

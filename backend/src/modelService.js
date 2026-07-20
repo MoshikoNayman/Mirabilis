@@ -1,3 +1,4 @@
+// @ts-check
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,8 +69,8 @@ function normalizeModelId(modelId) {
 function prettifyEndpointModelLabel(rawId) {
   const raw = String(rawId || '').trim();
   if (!raw) return 'model';
-  let value = raw.includes('\\') ? raw.split('\\').pop() : raw;
-  value = value.includes('/') ? value.split('/').pop() : value;
+  let value = raw.includes('\\') ? (raw.split('\\').pop() || raw) : raw;
+  value = value.includes('/') ? (value.split('/').pop() || value) : value;
   value = value.replace(/^koboldcpp\//i, '');
   value = value.replace(/\.gguf$/i, '');
   return value || raw;
@@ -116,7 +117,9 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
 
   const catalog = CURATED_OLLAMA_MODELS.map((entry) => {
     const entryNeedle = normalizeCatalogNeedle(`${entry.id} ${entry.ollamaId || ''} ${entry.label}`);
+    /** @type {any} */
     let matchedRemote = null;
+    /** @type {any} */
     let matchedLocal = null;
 
     // If this entry targets a specific version tag (e.g. gemma3:1b, gemma4:e2b),
@@ -218,7 +221,9 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
       modelFilePath: item.modelFilePath
     }));
 
-  const combined = [...catalog, ...localExtras, ...extras];
+  const combined = /** @type {import('./types.js').ModelListItem[]} */ (
+    [...catalog, ...localExtras, ...extras].filter(Boolean)
+  );
   if (!combined.some((item) => item.selected)) {
     const firstAvailable = combined.find((item) => item.available === true);
     if (firstAvailable) {
@@ -232,6 +237,7 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
   return combined;
 }
 
+/** @param {{ provider?: string, model?: string, config: any }} args @returns {Promise<string>} */
 export async function getEffectiveModel({ provider, model, config }) {
   if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') {
     // vLLM is a remote OpenAI-compatible server: like the cloud providers it
@@ -516,6 +522,11 @@ export async function streamWithProvider({ provider, model, messages, config, si
   // (local models) stay allowed.
   if (overrideBaseUrl) assertSafeProviderUrl(overrideBaseUrl);
   if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') {
+    // gpuaas has no default base URL; refuse rather than silently fall back to a
+    // local server (which would ship the user's API key to 127.0.0.1:8000).
+    if (provider === 'gpuaas' && !String(overrideBaseUrl || '').trim()) {
+      throw new Error('Set your GPUaaS endpoint URL in the provider config before sending.');
+    }
     const defaultBase = provider === 'openai'
       ? 'https://api.openai.com/v1'
       : provider === 'grok'
