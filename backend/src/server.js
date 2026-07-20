@@ -30,6 +30,7 @@ import { getOllamaModelInfo, listOllamaModels } from './providers/ollama.js';
 import { deriveInferenceDefaults } from './autoTune.js';
 import { listRuntimes } from './runtimeRegistry.js';
 import * as llamacpp from './llamacppRuntime.js';
+import * as vllm from './vllmRuntime.js';
 import { route as routeModel, classifyLane } from './modelRouter.js';
 import { listHosts, addHost, deleteHost } from './storage/homelabStore.js';
 import { probeAllHosts } from './homelab.js';
@@ -1050,11 +1051,40 @@ app.get('/api/system/specs', async (_req, res) => {
 // Declarative registry + a managed llama.cpp process (launch/health/stop) so the
 // power-user runtime is first-class, not just "point at a URL".
 app.get('/api/runtimes', (_req, res) => {
-  res.json({ runtimes: listRuntimes(), llamacpp: llamacpp.status() });
+  res.json({ runtimes: listRuntimes(), llamacpp: llamacpp.status(), vllm: vllm.status() });
 });
 
 app.get('/api/runtimes/llamacpp/status', (_req, res) => {
   res.json(llamacpp.status());
+});
+
+// Local vLLM management (NVIDIA/CUDA only). The status route probes the real
+// hardware capability so the UI can offer a local launch or fall back to remote.
+app.get('/api/runtimes/vllm/status', async (_req, res) => {
+  try {
+    const cap = await vllm.detectCapability();
+    res.json({ ...vllm.status(), ...cap });
+  } catch (error) {
+    res.status(500).json({ running: false, canRunLocal: false, error: error.message || 'vLLM status failed' });
+  }
+});
+
+app.post('/api/runtimes/vllm/start', async (req, res) => {
+  const { model, port, gpuMemoryUtilization, maxModelLen, dtype } = req.body || {};
+  if (!model) {
+    return res.status(400).json({ ok: false, error: 'Provide a model id (Hugging Face repo id or a local path).' });
+  }
+  try {
+    const out = await vllm.startServer({ model, port, gpuMemoryUtilization, maxModelLen, dtype });
+    res.status(out.ok ? 200 : 400).json(out);
+  } catch (error) {
+    res.status(500).json({ ok: false, error: `vLLM start failed: ${error.message}` });
+  }
+});
+
+app.post('/api/runtimes/vllm/stop', async (_req, res) => {
+  await vllm.stopServer();
+  res.json({ ok: true, running: false });
 });
 
 app.post('/api/runtimes/llamacpp/start', async (req, res) => {

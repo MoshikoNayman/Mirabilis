@@ -166,22 +166,24 @@ function formatUsagePercent(estUsd, budgetUsd) {
   if (pct > 0 && pct < 1) return '<1%';
   return `${Math.min(100, Math.round(pct))}%`;
 }
+// Providers carry a `group` so the picker can scale: Local (on this machine),
+// Remote (self-hosted GPU servers you point at), and Cloud APIs (keyed SaaS).
+const PROVIDER_GROUPS = ['Local', 'Remote', 'Cloud APIs'];
 const PROVIDER_OPTIONS = [
-  { id: 'ollama', label: 'Ollama', scope: 'Local' },
-  { id: 'openai', label: 'OpenAI', scope: 'Remote' },
-  { id: 'grok', label: 'Grok', scope: 'Remote' },
-  { id: 'groq', label: 'Groq', scope: 'Remote' },
-  { id: 'openrouter', label: 'OpenRouter', scope: 'Remote' },
-  { id: 'gemini', label: 'Gemini', scope: 'Remote' },
-  { id: 'cerebras', label: 'Cerebras', scope: 'Remote' },
-  { id: 'claude', label: 'Claude', scope: 'Remote' },
-  { id: 'gpuaas', label: 'GPUaaS Endpoint', scope: 'Remote' },
-  { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server' },
-  { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp' },
-  // vLLM is CUDA-only so it runs on a remote NVIDIA host, not locally on Apple
-  // Silicon. Selectable as a remote OpenAI-compatible endpoint: point it at your
-  // vLLM server URL and it works over the same transport as the cloud providers.
-  { id: 'vllm', label: 'vLLM (remote)', scope: 'Remote' }
+  { id: 'ollama', label: 'Ollama', scope: 'Local', group: 'Local' },
+  { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server', group: 'Local' },
+  { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp', group: 'Local' },
+  // vLLM runs as a managed local server on an NVIDIA/CUDA machine, or connects to
+  // a remote vLLM server by URL. On Apple Silicon only the remote path is offered.
+  { id: 'vllm', label: 'vLLM', scope: 'Local/Remote', group: 'Remote' },
+  { id: 'gpuaas', label: 'GPUaaS Endpoint', scope: 'Remote', group: 'Remote' },
+  { id: 'openai', label: 'OpenAI', scope: 'Remote', group: 'Cloud APIs' },
+  { id: 'claude', label: 'Claude', scope: 'Remote', group: 'Cloud APIs' },
+  { id: 'gemini', label: 'Gemini', scope: 'Remote', group: 'Cloud APIs' },
+  { id: 'grok', label: 'Grok', scope: 'Remote', group: 'Cloud APIs' },
+  { id: 'groq', label: 'Groq', scope: 'Remote', group: 'Cloud APIs' },
+  { id: 'openrouter', label: 'OpenRouter', scope: 'Remote', group: 'Cloud APIs' },
+  { id: 'cerebras', label: 'Cerebras', scope: 'Remote', group: 'Cloud APIs' }
 ];
 // Two separate budgets. Time-to-first-token on a big local model includes cold load
 // + long-context prefill and can legitimately take minutes, so it gets a very
@@ -1261,6 +1263,10 @@ export default function ChatApp() {
   });
   const [isContextPanelOpen, setIsContextPanelOpen] = useState(false);
   const [isProviderMenuOpen, setIsProviderMenuOpen] = useState(false);
+  const [providerSearch, setProviderSearch] = useState('');
+  const [vllmStatus, setVllmStatus] = useState(null);   // { canRunLocal, running, reason, ... }
+  const [vllmLocalModel, setVllmLocalModel] = useState('Qwen/Qwen2.5-7B-Instruct');
+  const [isVllmBusy, setIsVllmBusy] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   const [isTrainingMenuOpen, setIsTrainingMenuOpen] = useState(false);
@@ -1863,6 +1869,51 @@ export default function ChatApp() {
       setStatusText(`Speech-to-text setup failed: ${error.message}`);
     } finally {
       setIsSettingUpStt(false);
+    }
+  }
+
+  async function checkVllmStatus() {
+    try {
+      const s = await api('/api/runtimes/vllm/status');
+      setVllmStatus(s);
+      // If a local vLLM is already running, make sure the provider points at it.
+      if (s?.running && s?.baseUrl) {
+        setProviderConfigs((prev) => ({ ...prev, vllm: { ...prev.vllm, baseUrl: s.baseUrl } }));
+      }
+    } catch {
+      setVllmStatus(null);
+    }
+  }
+
+  async function startLocalVllm() {
+    const model = vllmLocalModel.trim();
+    if (!model) { setStatusText('Enter a model id for local vLLM.'); return; }
+    setIsVllmBusy(true);
+    setStatusText('Starting local vLLM (a first-time weight download can take a while)...');
+    try {
+      const out = await api('/api/runtimes/vllm/start', { method: 'POST', body: JSON.stringify({ model }) });
+      // Point the vLLM provider at the managed local server so chat routes to it.
+      setProviderConfigs((prev) => ({ ...prev, vllm: { ...prev.vllm, baseUrl: out.baseUrl } }));
+      setStatusText(`Local vLLM running at ${out.baseUrl}`);
+      await checkVllmStatus();
+      await refreshModels();
+    } catch (error) {
+      setStatusText(`vLLM start failed: ${error.message}`);
+    } finally {
+      setIsVllmBusy(false);
+    }
+  }
+
+  async function stopLocalVllm() {
+    setIsVllmBusy(true);
+    try {
+      await api('/api/runtimes/vllm/stop', { method: 'POST' });
+      setStatusText('Local vLLM stopped');
+      await checkVllmStatus();
+    } catch (error) {
+      setStatusText(`vLLM stop failed: ${error.message}`);
+    } finally {
+      setIsVllmBusy(false);
     }
   }
 
@@ -4121,6 +4172,13 @@ export default function ChatApp() {
     return () => { clearInterval(interval); clearInterval(utilInterval); };
   }, []);
 
+  // Probe local vLLM capability/status whenever the vLLM provider is active or its
+  // config panel opens, so the panel can offer a local launch or explain why not.
+  useEffect(() => {
+    if (provider === 'vllm') checkVllmStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider, isProviderConfigOpen]);
+
   useEffect(() => {
     refreshModels();
   }, [provider]);
@@ -5655,6 +5713,7 @@ export default function ChatApp() {
                       setIsEngineMenuOpen(false);
                       setIsVoiceMenuOpen(false);
                       setIsContextPanelOpen(false);
+                      setProviderSearch('');
                       setIsProviderMenuOpen((prev) => !prev);
                       setIsProviderConfigOpen(false);
                       if (installingBinary?.done) setInstallingBinary(null);
@@ -5669,83 +5728,116 @@ export default function ChatApp() {
                   </button>
 
                   {isProviderMenuOpen && (
-                    <div data-menu-panel="provider" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-48 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                      {PROVIDER_OPTIONS.map((opt) => {
-                        const unavailable = opt.available === false;
-                        const binaryMissing = opt.requiresBinary && localBinaryStatus[opt.requiresBinary] !== true;
-                        const isInstalling = installingBinary?.provider === opt.requiresBinary && !installingBinary?.done;
-                        const disabled = unavailable || binaryMissing;
-                        return (
-                          <div key={opt.id} className="relative">
-                            <button
-                              type="button"
-                              disabled={disabled}
-                              title={unavailable ? opt.unavailableReason : undefined}
-                              onClick={() => {
-                                if (disabled) return;
-                                setProvider(opt.id);
-                                setIsProviderMenuOpen(false);
-                                setStatusText(`Provider: ${opt.label} (${opt.scope})`);
-                                const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas', 'vllm'];
-                                if (cloudOnlyProviders.includes(opt.id)) {
-                                  setModel((m) => (typeof m === 'string' && m.toLowerCase().endsWith('.gguf') ? 'auto' : m));
-                                }
-                                if (opt.id !== 'ollama' && !String(providerConfigs[opt.id]?.baseUrl || '').trim()) {
-                                  setIsProviderConfigOpen(true);
-                                }
-                              }}
-                              className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
-                                disabled
-                                  ? 'cursor-not-allowed opacity-40'
-                                  : provider === opt.id
-                                    ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                                    : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                              }`}
-                            >
-                              <span className="flex min-w-0 flex-col">
-                                <span className="truncate">{opt.label}</span>
-                                <span className="text-[10px] opacity-60">{unavailable ? 'Unavailable here' : binaryMissing ? 'Not installed' : opt.scope}</span>
-                              </span>
-                              {!disabled && provider === opt.id ? <span className="text-[10px] opacity-70">active</span> : null}
-                            </button>
-                            {binaryMissing && (
-                              <button
-                                type="button"
-                                disabled={isInstalling}
-                                onClick={(e) => { e.stopPropagation(); installLocalProvider(opt.requiresBinary); setIsProviderMenuOpen(false); }}
-                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-accent hover:bg-accent/10 disabled:opacity-50"
-                              >
-                                {isInstalling ? 'Installing…' : 'Install'}
-                              </button>
-                            )}
-                            {!binaryMissing && opt.requiresBinary && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  api(`/api/providers/local/${encodeURIComponent(opt.requiresBinary)}`, { method: 'DELETE' })
-                                    .then(() => setLocalBinaryStatus((prev) => ({ ...prev, [opt.requiresBinary]: false })))
-                                    .catch(() => {});
-                                  if (provider === opt.id) setProvider('ollama');
-                                  setIsProviderMenuOpen(false);
-                                }}
-                                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-[color:var(--text-muted)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                                title="Uninstall binary"
-                              >
-                                Uninstall
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
+                    <div data-menu-panel="provider" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 flex max-h-[min(70vh,460px)] w-72 flex-col overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                      {/* Search box - keeps the picker usable as providers grow */}
+                      <div className="shrink-0 border-b border-black/10 p-2">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={providerSearch}
+                          onChange={(e) => setProviderSearch(e.target.value)}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === 'Escape') { setProviderSearch(''); setIsProviderMenuOpen(false); }
+                          }}
+                          placeholder="Search providers..."
+                          className="au-focus w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5 text-xs text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
+                        />
+                      </div>
+                      {/* Grouped, scrollable list - capped height so the top is never off-screen */}
+                      <div className="min-h-0 flex-1 overflow-y-auto p-1">
+                        {(() => {
+                          const q = providerSearch.trim().toLowerCase();
+                          const groups = PROVIDER_GROUPS
+                            .map((g) => ({ group: g, items: PROVIDER_OPTIONS.filter((o) => o.group === g && (!q || o.label.toLowerCase().includes(q) || o.id.includes(q))) }))
+                            .filter((g) => g.items.length);
+                          if (!groups.length) {
+                            return <div className="px-2 py-3 text-center text-[11px] text-[color:var(--text-muted)]">No providers match "{providerSearch}"</div>;
+                          }
+                          return groups.map(({ group, items }) => (
+                            <div key={group} className="mb-1 last:mb-0">
+                              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">{group}</div>
+                              {items.map((opt) => {
+                                const binaryMissing = opt.requiresBinary && localBinaryStatus[opt.requiresBinary] !== true;
+                                const isInstalling = installingBinary?.provider === opt.requiresBinary && !installingBinary?.done;
+                                const disabled = binaryMissing;
+                                return (
+                                  <div key={opt.id} className="relative">
+                                    <button
+                                      type="button"
+                                      disabled={disabled}
+                                      onClick={() => {
+                                        if (disabled) return;
+                                        setProvider(opt.id);
+                                        setIsProviderMenuOpen(false);
+                                        setProviderSearch('');
+                                        setStatusText(`Provider: ${opt.label} (${opt.scope})`);
+                                        const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas', 'vllm'];
+                                        if (cloudOnlyProviders.includes(opt.id)) {
+                                          setModel((m) => (typeof m === 'string' && m.toLowerCase().endsWith('.gguf') ? 'auto' : m));
+                                        }
+                                        if (opt.id !== 'ollama' && !String(providerConfigs[opt.id]?.baseUrl || '').trim()) {
+                                          setIsProviderConfigOpen(true);
+                                        }
+                                      }}
+                                      className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                                        disabled
+                                          ? 'cursor-not-allowed opacity-40'
+                                          : provider === opt.id
+                                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                                      }`}
+                                    >
+                                      <span className="flex min-w-0 flex-col">
+                                        <span className="truncate">{opt.label}</span>
+                                        <span className="text-[10px] opacity-60">{binaryMissing ? 'Not installed' : opt.scope}</span>
+                                      </span>
+                                      {!disabled && provider === opt.id ? <span className="ml-2 shrink-0 text-[10px] opacity-70">active</span> : null}
+                                    </button>
+                                    {binaryMissing && (
+                                      <button
+                                        type="button"
+                                        disabled={isInstalling}
+                                        onClick={(e) => { e.stopPropagation(); installLocalProvider(opt.requiresBinary); setIsProviderMenuOpen(false); }}
+                                        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-accent hover:bg-accent/10 disabled:opacity-50"
+                                      >
+                                        {isInstalling ? 'Installing…' : 'Install'}
+                                      </button>
+                                    )}
+                                    {!binaryMissing && opt.requiresBinary && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          api(`/api/providers/local/${encodeURIComponent(opt.requiresBinary)}`, { method: 'DELETE' })
+                                            .then(() => setLocalBinaryStatus((prev) => ({ ...prev, [opt.requiresBinary]: false })))
+                                            .catch(() => {});
+                                          if (provider === opt.id) setProvider('ollama');
+                                          setIsProviderMenuOpen(false);
+                                        }}
+                                        className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-[color:var(--text-muted)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                                        title="Uninstall binary"
+                                      >
+                                        Uninstall
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ));
+                        })()}
+                      </div>
+                      {/* Footer: configure the current non-Ollama endpoint */}
                       {provider !== 'ollama' && (
                         <button
                           type="button"
                           onClick={() => {
                             setIsProviderMenuOpen(false);
+                            setProviderSearch('');
                             setIsProviderConfigOpen(true);
                           }}
-                          className="mt-1 flex w-full items-center justify-between rounded-lg border-t border-black/10 px-2 py-1.5 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                          className="flex shrink-0 w-full items-center justify-between border-t border-black/10 px-3 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                         >
                           <span>Configure endpoint</span>
                           <span className="opacity-60">...</span>
@@ -5799,8 +5891,45 @@ export default function ChatApp() {
                       </p>
                     )}
                     {provider === 'vllm' && (
+                      <div className="mb-2 rounded-lg border border-[var(--hairline)] p-2">
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Local vLLM (NVIDIA GPU)</span>
+                          <span className={`text-[10px] font-medium ${vllmStatus?.running ? 'text-emerald-600 dark:text-emerald-300' : vllmStatus?.canRunLocal ? 'text-amber-600 dark:text-amber-300' : 'text-[color:var(--text-muted)]'}`}>
+                            {vllmStatus?.running ? 'Running' : vllmStatus?.canRunLocal ? 'Ready to launch' : 'Not available here'}
+                          </span>
+                        </div>
+                        {vllmStatus?.canRunLocal ? (
+                          vllmStatus?.running ? (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="min-w-0 truncate text-[11px] text-[color:var(--text-main)]">{vllmStatus.model} @ {vllmStatus.baseUrl}</span>
+                              <button type="button" onClick={stopLocalVllm} disabled={isVllmBusy} className="shrink-0 rounded-lg border border-[var(--hairline)] px-2 py-1 text-[11px] font-medium text-red-500 transition hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-900/20">
+                                {isVllmBusy ? '…' : 'Stop'}
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={vllmLocalModel}
+                                onChange={(e) => setVllmLocalModel(e.target.value)}
+                                placeholder="Hugging Face id, e.g. Qwen/Qwen2.5-7B-Instruct"
+                                className="au-focus min-w-0 flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[11px] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
+                              />
+                              <button type="button" onClick={startLocalVllm} disabled={isVllmBusy || !vllmLocalModel.trim()} className="shrink-0 rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
+                                {isVllmBusy ? 'Starting…' : 'Start'}
+                              </button>
+                            </div>
+                          )
+                        ) : (
+                          <p className="text-[10px] leading-relaxed text-[color:var(--text-muted)]">
+                            {vllmStatus?.reason || 'Checking hardware...'}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {provider === 'vllm' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ vLLM is CUDA-only, so it runs on a <strong>remote NVIDIA host</strong> (not on this Mac). Start vLLM there with <code>--api-key</code> optional, then enter its URL below, e.g. <code>http://gpu-host:8000/v1</code>. Models load from that server automatically.
+                        ℹ Or connect to a <strong>remote vLLM server</strong>: enter its URL below (e.g. <code>http://gpu-host:8000/v1</code>). Models load from that server automatically. Key optional.
                       </p>
                     )}
                     {provider === 'openai' && (

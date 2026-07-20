@@ -61,12 +61,13 @@ export const RUNTIMES = [
   {
     id: 'vllm',
     kind: 'vllm',
-    label: 'vLLM (remote / CUDA)',
-    scope: 'remote',
+    label: 'vLLM',
+    scope: 'local-or-remote',      // managed locally on NVIDIA/CUDA; remote elsewhere
     transport: 'openai',
-    managed: 'external',           // CUDA-first; we consume it over the network, never spawn on Mac
+    managed: 'spawn-or-external',  // spawn a local server on CUDA, or consume a remote one
+    defaultPort: 8000,
     capabilities: { jsonMode: true, continuousBatching: true, highConcurrency: true },
-    note: 'Throughput king on NVIDIA. Register a running vLLM server by base URL for API-server / multi-model modes. Not run locally on Apple Silicon.'
+    note: 'Throughput king on NVIDIA. Runs as a managed local server on a CUDA GPU, or connect to a remote vLLM server by URL. CUDA-only, so not launched locally on Apple Silicon.'
   },
   {
     id: 'koboldcpp',
@@ -111,7 +112,9 @@ export function listRuntimes() {
       capabilities: r.capabilities,
       canPull: r.capabilities?.pull === true,
       note: r.note,
-      localLaunchable: r.managed === 'spawn' && !cudaLocalBlocked,
+      // Coarse capability for the UI; the vLLM status route does the real probe
+      // (NVIDIA GPU present + vLLM installed) before offering a local launch.
+      localLaunchable: (r.managed === 'spawn' || r.managed === 'spawn-or-external') && !cudaLocalBlocked,
       available: true,
       remoteOnlyReason: cudaLocalBlocked
         ? 'vLLM is CUDA-only, so it runs on a remote NVIDIA host, not locally on Apple Silicon. Point it at your vLLM server URL.'
