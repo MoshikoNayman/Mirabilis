@@ -4680,7 +4680,13 @@ export default function ChatApp() {
   }
 
   async function sendMessageWithContent(content) {
-    if (isImageRequest(content)) {
+    // If the user recently attached an image, they are analyzing it (vision),
+    // not asking to generate one - don't let the "show/make ... image" wording
+    // heuristic misfire into image generation.
+    const recentImage = (messages || []).slice(-4).some(
+      (m) => Array.isArray(m.attachments) && m.attachments.some((a) => /^image\//i.test(a?.mimeType || ''))
+    );
+    if (isImageRequest(content) && !recentImage) {
       await handleImageGeneration(content);
       return;
     }

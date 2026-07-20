@@ -3007,8 +3007,20 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   }
   selectedHistory.reverse();
 
+  let outgoingHasImages = false;
   for (const msg of selectedHistory) {
-    outgoingMessages.push({ role: msg.role, content: msg.content });
+    const images = await collectMessageImages(msg);
+    if (images.length) outgoingHasImages = true;
+    outgoingMessages.push({ role: msg.role, content: msg.content, ...(images.length ? { images } : {}) });
+  }
+
+  // Vision gate: only forward attached images to a model that can actually see
+  // them. Ollama reports the capability precisely; for OpenAI-compatible / cloud
+  // we assume the user picked a vision model (the server errors if not).
+  let visionNotice = null;
+  if (outgoingHasImages && !(await providerSupportsVision(effectiveProvider, effectiveModel, ollamaBaseUrl))) {
+    for (const m of outgoingMessages) { if (m.images) delete m.images; }
+    visionNotice = 'This model cannot see images. Pick a vision model (for example gemma3, gemma4:e4b, or llava) to analyze pictures.';
   }
 
   const promptTokenEstimate = outgoingMessages.reduce((total, message) => total + estimateTokens(message.content), 0);
@@ -3031,6 +3043,8 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       numCtx: tuning.numCtx || null,
       tuning: tuning.meta || null
     });
+
+    if (visionNotice) sendSSE(res, 'notice', { message: visionNotice });
 
     await streamWithProvider({
       provider: effectiveProvider,
@@ -3136,6 +3150,36 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
 
 const imageDir = join(dirname(config.chatStorePath), 'images');
 const uploadDir = join(dirname(config.chatStorePath), 'uploads');
+
+// Stored upload filenames are sanitized on write; re-validate before reading.
+const SAFE_STORED_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+// Read a message's IMAGE attachments as base64, for vision-capable models. Skips
+// non-images, oversized files, and anything with an unexpected stored name.
+async function collectMessageImages(msg) {
+  const atts = Array.isArray(msg?.attachments) ? msg.attachments : [];
+  const out = [];
+  for (const a of atts) {
+    const stored = a && a.storedName;
+    if (!a || !/^image\//i.test(a.mimeType || '') || !stored || !SAFE_STORED_NAME.test(stored)) continue;
+    try {
+      const buf = await readFile(join(uploadDir, stored));
+      if (buf.length && buf.length <= 20 * 1024 * 1024) out.push({ mime: a.mimeType, data: buf.toString('base64') });
+    } catch { /* unreadable - skip */ }
+  }
+  return out;
+}
+
+// Can the selected model actually see images? Ollama reports this precisely via
+// /api/show capabilities; for OpenAI-compatible / cloud we assume the user chose
+// a vision model (the server errors if not) rather than block a valid request.
+async function providerSupportsVision(provider, model, ollamaBaseUrl) {
+  if (provider === 'ollama') {
+    try { const info = await getOllamaModelInfo(ollamaBaseUrl, model); return !!info.vision; }
+    catch { return false; }
+  }
+  return ['openai-compatible', 'llamacpp', 'vllm', 'openai', 'gemini', 'openrouter', 'groq', 'grok', 'claude'].includes(provider);
+}
 const SAFE_FILENAME = /^[0-9a-f-]{36}\.(png|jpg|jpeg|webp)$/i;
 const SAFE_UPLOAD_FILENAME = /^[0-9a-f-]{36}(?:-[a-zA-Z0-9._-]+)?$/;
 

@@ -68,10 +68,17 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
 
   const payload = {
     model,
-    messages: messages.map(m => ({
-      role: m.role,
-      content: m.content
-    })),
+    // OpenAI-compatible vision: a message with images becomes a content array of
+    // a text part plus image_url parts (data: URLs). Plain text stays a string.
+    messages: messages.map(m => (Array.isArray(m.images) && m.images.length
+      ? {
+        role: m.role,
+        content: [
+          ...(m.content ? [{ type: 'text', text: m.content }] : []),
+          ...m.images.map(im => ({ type: 'image_url', image_url: { url: `data:${im.mime};base64,${im.data}` } }))
+        ]
+      }
+      : { role: m.role, content: m.content })),
     stream: true,
     ...(temperature != null ? { temperature } : {}),
     ...(maxTokens != null ? { max_tokens: maxTokens } : {}),

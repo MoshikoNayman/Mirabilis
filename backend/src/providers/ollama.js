@@ -29,7 +29,7 @@ export async function getOllamaModelInfo(baseUrl, model) {
   const base = baseUrl || OLLAMA_BASE_URL;
   const key = `${base}::${model}`;
   if (_modelInfoCache.has(key)) return _modelInfoCache.get(key);
-  let out = { contextWindow: null, paramCount: null };
+  let out = { contextWindow: null, paramCount: null, capabilities: [], vision: false };
   try {
     const res = await fetch(`${base}/api/show`, {
       method: 'POST',
@@ -43,7 +43,13 @@ export async function getOllamaModelInfo(baseUrl, model) {
       for (const [k, v] of Object.entries(info)) {
         if (k.endsWith('.context_length')) { ctx = Number(v) || null; break; }
       }
-      out = { contextWindow: ctx, paramCount: Number(info['general.parameter_count']) || null };
+      const caps = Array.isArray(data.capabilities) ? data.capabilities : [];
+      out = {
+        contextWindow: ctx,
+        paramCount: Number(info['general.parameter_count']) || null,
+        capabilities: caps,
+        vision: caps.includes('vision')
+      };
     }
   } catch {
     // best effort - autoTune falls back to a default window
@@ -85,7 +91,11 @@ export async function streamOllamaChat({ baseUrl, model, messages, signal, onTok
   async function attempt(opts) {
     const payload = {
       model,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      // Ollama vision: a message can carry `images: [base64, ...]` (raw base64,
+      // no data: prefix). Only attached when the message actually has images.
+      messages: messages.map(m => (Array.isArray(m.images) && m.images.length
+        ? { role: m.role, content: m.content, images: m.images.map(im => im.data) }
+        : { role: m.role, content: m.content })),
       stream: true,
       keep_alive,
       ...(Object.keys(opts).length ? { options: opts } : {}),
