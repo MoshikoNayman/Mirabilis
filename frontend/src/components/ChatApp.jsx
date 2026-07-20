@@ -171,6 +171,9 @@ function formatUsagePercent(estUsd, budgetUsd) {
 const PROVIDER_GROUPS = ['Local', 'Remote', 'Cloud APIs'];
 const PROVIDER_OPTIONS = [
   { id: 'ollama', label: 'Ollama', scope: 'Local', group: 'Local' },
+  // First-class local llama.cpp engine (Metal-native on Apple Silicon), managed
+  // by Mirabilis. Runs your models itself - no Ollama daemon needed at inference.
+  { id: 'llamacpp', label: 'llama.cpp', scope: 'Local', group: 'Local' },
   { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server', group: 'Local' },
   { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp', group: 'Local' },
   // vLLM runs as a managed local server on an NVIDIA/CUDA machine, or connects to
@@ -1213,7 +1216,9 @@ export default function ChatApp() {
       'koboldcpp': { baseUrl: 'http://127.0.0.1:5001/v1', apiKey: '' },
       // Empty by default so selecting vLLM opens the endpoint config to enter the
       // remote server URL (e.g. http://gpu-host:8000/v1).
-      'vllm': { baseUrl: '', apiKey: '' }
+      'vllm': { baseUrl: '', apiKey: '' },
+      // Managed llama.cpp server; Mirabilis launches it on this port.
+      'llamacpp': { baseUrl: 'http://127.0.0.1:8080/v1', apiKey: '' }
     };
   });
   const [isProviderConfigOpen, setIsProviderConfigOpen] = useState(false);
@@ -1267,6 +1272,10 @@ export default function ChatApp() {
   const [vllmStatus, setVllmStatus] = useState(null);   // { canRunLocal, running, reason, ... }
   const [vllmLocalModel, setVllmLocalModel] = useState('Qwen/Qwen2.5-7B-Instruct');
   const [isVllmBusy, setIsVllmBusy] = useState(false);
+  const [llamacppStatus, setLlamacppStatus] = useState(null); // { installed, running, model, baseUrl }
+  const [llamacppModel, setLlamacppModel] = useState('');     // model to launch (Ollama name or .gguf path)
+  const [llamacppLaunchable, setLlamacppLaunchable] = useState([]); // models you can run
+  const [isLlamacppBusy, setIsLlamacppBusy] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   const [isTrainingMenuOpen, setIsTrainingMenuOpen] = useState(false);
@@ -1506,7 +1515,7 @@ export default function ChatApp() {
 
   const selectedModelRecord = useMemo(() => models.find((item) => item.id === model) || null, [model, models]);
   const shouldShowModelChip = useMemo(
-    () => provider === 'ollama' || provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm' || provider === 'koboldcpp' || models.length > 0,
+    () => provider === 'ollama' || provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm' || provider === 'koboldcpp' || provider === 'llamacpp' || models.length > 0,
     [provider, models.length]
   );
 
@@ -1914,6 +1923,59 @@ export default function ChatApp() {
       setStatusText(`vLLM stop failed: ${error.message}`);
     } finally {
       setIsVllmBusy(false);
+    }
+  }
+
+  async function checkLlamacppStatus() {
+    try {
+      const s = await api('/api/runtimes/llamacpp/status');
+      setLlamacppStatus(s);
+      if (s?.running && s?.baseUrl) {
+        setProviderConfigs((prev) => ({ ...prev, llamacpp: { ...prev.llamacpp, baseUrl: s.baseUrl } }));
+      }
+      // Launchable models = the GGUFs you already have (your downloaded/Ollama
+      // models). llama.cpp runs those files directly - no Ollama daemon at inference.
+      try {
+        const m = await api('/api/models?provider=ollama');
+        const ids = (m.models || []).filter((x) => x.available !== false).map((x) => x.id);
+        setLlamacppLaunchable(ids);
+        setLlamacppModel((cur) => cur || ids[0] || '');
+      } catch { /* leave list empty; user can still type a .gguf path */ }
+    } catch {
+      setLlamacppStatus(null);
+    }
+  }
+
+  async function startLlamacpp() {
+    const model = llamacppModel.trim();
+    if (!model) { setStatusText('Pick a model to run in llama.cpp.'); return; }
+    setIsLlamacppBusy(true);
+    setStatusText('Starting llama.cpp (loading the model)...');
+    try {
+      const body = /\.gguf$/i.test(model) ? { modelPath: model } : { model };
+      const out = await api('/api/runtimes/llamacpp/start', { method: 'POST', body: JSON.stringify(body) });
+      setProviderConfigs((prev) => ({ ...prev, llamacpp: { ...prev.llamacpp, baseUrl: out.baseUrl } }));
+      setStatusText(`llama.cpp running: ${model}`);
+      await checkLlamacppStatus();
+      await refreshModels();
+    } catch (error) {
+      setStatusText(`llama.cpp start failed: ${error.message}`);
+    } finally {
+      setIsLlamacppBusy(false);
+    }
+  }
+
+  async function stopLlamacpp() {
+    setIsLlamacppBusy(true);
+    try {
+      await api('/api/runtimes/llamacpp/stop', { method: 'POST' });
+      setStatusText('llama.cpp stopped');
+      await checkLlamacppStatus();
+      await refreshModels();
+    } catch (error) {
+      setStatusText(`llama.cpp stop failed: ${error.message}`);
+    } finally {
+      setIsLlamacppBusy(false);
     }
   }
 
@@ -4176,6 +4238,7 @@ export default function ChatApp() {
   // config panel opens, so the panel can offer a local launch or explain why not.
   useEffect(() => {
     if (provider === 'vllm') checkVllmStatus();
+    if (provider === 'llamacpp') checkLlamacppStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, isProviderConfigOpen]);
 
@@ -5898,6 +5961,52 @@ export default function ChatApp() {
                         ⚠ KoboldCpp is a <strong>separate app</strong> you must install &amp; run on your machine. It is not included in Mirabilis. Once running, enter its URL below.
                       </p>
                     )}
+                    {provider === 'llamacpp' && (
+                      <div className="mb-2 rounded-lg border border-[var(--hairline)] p-2">
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">llama.cpp engine (local, Metal)</span>
+                          <span className={`text-[10px] font-medium ${llamacppStatus?.running ? 'text-emerald-600 dark:text-emerald-300' : llamacppStatus?.installed ? 'text-amber-600 dark:text-amber-300' : 'text-[color:var(--text-muted)]'}`}>
+                            {llamacppStatus?.running ? 'Running' : llamacppStatus?.installed ? 'Ready to launch' : 'Not installed'}
+                          </span>
+                        </div>
+                        {!llamacppStatus?.installed ? (
+                          <p className="text-[10px] leading-relaxed text-[color:var(--text-muted)]">
+                            llama.cpp runs your models locally with no Ollama needed. Install it with <code className="rounded bg-black/5 px-1 dark:bg-white/10">brew install llama.cpp</code>, then reopen this panel.
+                          </p>
+                        ) : llamacppStatus?.running ? (
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="min-w-0 truncate text-[11px] text-[color:var(--text-main)]">{llamacppStatus.model} @ {llamacppStatus.baseUrl}</span>
+                            <button type="button" onClick={stopLlamacpp} disabled={isLlamacppBusy} className="shrink-0 rounded-lg border border-[var(--hairline)] px-2 py-1 text-[11px] font-medium text-red-500 transition hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-900/20">
+                              {isLlamacppBusy ? '…' : 'Stop'}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {llamacppLaunchable.length > 0 ? (
+                              <select
+                                value={llamacppModel}
+                                onChange={(e) => setLlamacppModel(e.target.value)}
+                                className="au-focus w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[11px] text-[color:var(--text-main)] outline-none"
+                              >
+                                {llamacppLaunchable.map((id) => <option key={id} value={id}>{id}</option>)}
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                value={llamacppModel}
+                                onChange={(e) => setLlamacppModel(e.target.value)}
+                                placeholder="Model name or /path/to/model.gguf"
+                                className="au-focus w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[11px] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
+                              />
+                            )}
+                            <button type="button" onClick={startLlamacpp} disabled={isLlamacppBusy || !llamacppModel.trim()} className="w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
+                              {isLlamacppBusy ? 'Starting…' : 'Start llama.cpp with this model'}
+                            </button>
+                            <p className="text-[10px] leading-relaxed text-[color:var(--text-muted)]">Runs the model file directly with KV-cache quant + flash attention. Your downloaded models are reused - Ollama does not need to be running.</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {provider === 'openai-compatible' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
                         ℹ Point to any OpenAI-compatible local server (LM Studio, llama.cpp, Oobabooga, etc.) or a cloud API that requires a key.
@@ -6239,6 +6348,17 @@ export default function ChatApp() {
                         (() => {
                           const endpointProviders = ['vllm', 'openai-compatible', 'koboldcpp', 'gpuaas'];
                           const hasBaseUrl = !!String(providerConfigs[provider]?.baseUrl || '').trim();
+                          const openConfig = () => { setIsModelMenuOpen(false); setIsProviderMenuOpen(false); setIsProviderConfigOpen(true); };
+                          if (provider === 'llamacpp') {
+                            return (
+                              <div className="px-2 py-3 text-[11px] leading-relaxed text-[color:var(--text-muted)]">
+                                No model running yet. Open the llama.cpp config to pick one of your models and start it locally.
+                                <button type="button" onClick={openConfig} className="mt-2 block w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110">
+                                  Configure llama.cpp
+                                </button>
+                              </div>
+                            );
+                          }
                           if (endpointProviders.includes(provider) && !hasBaseUrl) {
                             return (
                               <div className="px-2 py-3 text-[11px] leading-relaxed text-[color:var(--text-muted)]">
@@ -6247,7 +6367,7 @@ export default function ChatApp() {
                                   : 'No server connected. Set the endpoint URL - then this list fills with its models.'}
                                 <button
                                   type="button"
-                                  onClick={() => { setIsModelMenuOpen(false); setIsProviderMenuOpen(false); setIsProviderConfigOpen(true); }}
+                                  onClick={openConfig}
                                   className="mt-2 block w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110"
                                 >
                                   Configure endpoint

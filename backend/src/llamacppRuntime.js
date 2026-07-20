@@ -48,6 +48,7 @@ export function resolveOllamaGguf(model) {
   const home = os.homedir();
   const root = resolve(process.env.OLLAMA_MODELS || join(home, '.ollama', 'models'));
   const blobsRoot = join(root, 'blobs');
+  const hadTag = raw.includes(':');
   const [name, tag = 'latest'] = raw.split(':');
   // Manifests live under manifests/registry.ollama.ai/library/<name>/<tag> (or a
   // namespaced path for non-library models); search both shapes.
@@ -57,14 +58,22 @@ export function resolveOllamaGguf(model) {
   ];
   let manifestPath = manifestDirs.find((p) => existsSync(p));
   if (!manifestPath) {
-    // Fallback: scan for a manifest file matching name/tag anywhere under manifests.
+    // Fallback: scan for a manifest file under manifests. Match an exact name/tag;
+    // and when the caller gave no explicit tag (e.g. "qwen2.5"), accept whatever
+    // tag is actually installed for that name (prefer "latest") so a base name
+    // still resolves to the one downloaded version (e.g. qwen2.5:0.5b).
     try {
       const base = join(root, 'manifests', 'registry.ollama.ai');
       const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
         const p = join(dir, e.name);
         return e.isDirectory() ? walk(p) : [p];
       });
-      manifestPath = walk(base).find((p) => p.endsWith(join(name, tag)));
+      const all = walk(base);
+      manifestPath = all.find((p) => p.endsWith(join(name, tag)));
+      if (!manifestPath && !hadTag) {
+        const forName = all.filter((p) => { const parts = p.split(sep); return parts[parts.length - 2] === name; });
+        manifestPath = forName.find((p) => p.endsWith(sep + 'latest')) || forName[0];
+      }
     } catch { /* ignore */ }
   }
   if (!manifestPath || !existsSync(manifestPath)) return null;

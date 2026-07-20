@@ -261,6 +261,13 @@ export async function getEffectiveModel({ provider, model, config }) {
     if (preferred && preferred !== 'auto') return preferred;
     return 'koboldcpp';
   }
+  if (provider === 'llamacpp') {
+    // The managed llama.cpp server serves whatever model was launched; the
+    // effective model is just whatever the caller selected.
+    const preferred = model && model !== 'auto' ? model : config.openAIModel;
+    if (preferred && preferred !== 'auto') return preferred;
+    return 'llama.cpp';
+  }
 
   // For ollama: verify requested/configured model is installed; fall back to first installed model
   const preferred = model || config.ollamaModel;
@@ -396,6 +403,23 @@ export async function listModels(config, provider = config.aiProvider, options =
       selected: true,
       paramSize: null
     }];
+  }
+
+  if (provider === 'llamacpp') {
+    // First-class local llama.cpp engine (managed by /api/runtimes/llamacpp).
+    // Its model list is whatever the managed server currently serves, plus any
+    // local GGUF files. When nothing is running, return empty so the UI shows
+    // the launch control (pick a model + Start) instead of a phantom entry.
+    const baseUrl = overrideBaseUrl || 'http://127.0.0.1:8080/v1';
+    const remote = await listOpenAICompatibleModels({ baseUrl, apiKey: '' }).catch(() => []);
+    const locals = await listLocalGgufModels();
+    if (remote.length > 0) {
+      return buildEndpointCatalog({ remoteModels: remote, selectedModelId: remote[0]?.id, localModels: locals });
+    }
+    if (locals.length > 0) {
+      return buildEndpointCatalog({ remoteModels: [], selectedModelId: locals[0]?.id, localModels: locals });
+    }
+    return [];
   }
 
   const discoveredModels = await listOllamaModels(config.ollamaBaseUrl);
@@ -541,7 +565,7 @@ export async function streamWithProvider({ provider, model, messages, config, si
 
   if (provider === 'koboldcpp' || provider === 'llamacpp') {
     return streamOpenAICompatibleChat({
-      baseUrl: overrideBaseUrl || config.koboldBaseUrl,
+      baseUrl: overrideBaseUrl || (provider === 'llamacpp' ? 'http://127.0.0.1:8080/v1' : config.koboldBaseUrl),
       apiKey: overrideApiKey !== undefined ? overrideApiKey : '',
       model,
       messages,
