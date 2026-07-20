@@ -5760,8 +5760,14 @@ export default function ChatApp() {
                       <div className="min-h-0 flex-1 overflow-y-auto p-1">
                         {(() => {
                           const q = providerSearch.trim().toLowerCase();
+                          // vLLM is grouped by intent: "Local" until you point it at a
+                          // remote server URL, then it moves to "Remote". (On Apple Silicon
+                          // local vLLM can't actually launch - the config panel explains
+                          // that and offers llama.cpp/MLX or a remote URL instead.)
+                          const vllmHasRemote = !!String(providerConfigs?.vllm?.baseUrl || '').trim();
+                          const effGroup = (o) => (o.id === 'vllm' ? (vllmHasRemote ? 'Remote' : 'Local') : o.group);
                           const groups = PROVIDER_GROUPS
-                            .map((g) => ({ group: g, items: PROVIDER_OPTIONS.filter((o) => o.group === g && (!q || o.label.toLowerCase().includes(q) || o.id.includes(q))) }))
+                            .map((g) => ({ group: g, items: PROVIDER_OPTIONS.filter((o) => effGroup(o) === g && (!q || o.label.toLowerCase().includes(q) || o.id.includes(q))) }))
                             .filter((g) => g.items.length);
                           if (!groups.length) {
                             return <div className="px-2 py-3 text-center text-[11px] text-[color:var(--text-muted)]">No providers match "{providerSearch}"</div>;
@@ -5802,7 +5808,7 @@ export default function ChatApp() {
                                     >
                                       <span className="flex min-w-0 flex-col">
                                         <span className="truncate">{opt.label}</span>
-                                        <span className="text-[10px] opacity-60">{binaryMissing ? 'Not installed' : opt.scope}</span>
+                                        <span className="text-[10px] opacity-60">{binaryMissing ? 'Not installed' : opt.id === 'vllm' ? (vllmHasRemote ? 'Remote server' : 'Local (or set a remote URL)') : opt.scope}</span>
                                       </span>
                                       {!disabled && provider === opt.id ? <span className="ml-2 shrink-0 text-[10px] opacity-70">active</span> : null}
                                     </button>
