@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -15,6 +15,7 @@ import CommitmentRadar from './shell/CommitmentRadar';
 import VoiceChat from './shell/VoiceChat';
 import { playSend, playReceive, playError } from '../lib/sounds';
 import { postJSON } from '../lib/api';
+import { getSessionToken } from '../lib/sessionToken';
 import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -342,8 +343,16 @@ function isImageRequest(text) {
 }
 
 async function api(path, options = {}) {
+  // Privileged routes (remote control, workspace, vault) require the local
+  // session token. Sending it on every call keeps the call sites unchanged;
+  // unguarded routes simply ignore the header.
+  const token = await getSessionToken();
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'x-mirabilis-mcp-token': token } : {}),
+      ...(options.headers || {})
+    },
     ...options
   });
 
@@ -635,8 +644,121 @@ const MD_STATIC_COMPONENTS = {
   td: ({ children }) => <td className="px-3 py-1.5 text-[color:var(--text-main)]">{children}</td>,
 };
 
-function renderMessageContent(content, message = {}, remoteCtx = {}) {
-  const { remoteConnectedRef, remoteTargetRef, execResultsRef, onRunCommand } = remoteCtx;
+// Remote Control state for code blocks, delivered by context rather than by
+// threading refs down through renderMessageContent.
+//
+// The refs were a correctness bug, not just a style choice: `execResults` is
+// state, but the renderer read it through a ref, and MessageRow's memo
+// comparator does not include it. A ref mutation changes nothing the comparator
+// can see, so the row never re-rendered and the output of a remote "Run" was
+// never displayed. Context updates bypass React.memo, so only the rows holding
+// an affected code block re-render.
+const RemoteExecContext = createContext({
+  remoteConnected: false,
+  remoteTarget: '',
+  execResults: {},
+  onRunCommand: () => {}
+});
+
+// The id of the message currently being rendered, used to key its code blocks.
+// Provided by MessageRow so the code renderer can live at module scope.
+const MessageIdContext = createContext('msg');
+
+const SHELL_LANGS = ['bash', 'sh', 'shell', 'zsh', 'fish', 'cmd', 'powershell', 'ps1'];
+const isShellLang = (l) => SHELL_LANGS.includes(l);
+
+// Module-scope code renderer.
+//
+// This used to be defined inline inside renderMessageContent, which rebuilt the
+// components object on every render. React keys reconciliation on component
+// IDENTITY, so a fresh `code` function each time meant every fenced block was a
+// new element type: React unmounted and remounted the whole figure, Prism
+// re-tokenized from scratch, any text selection inside a streaming code block
+// was destroyed each frame, and CopyButton lost its own "Copied" state.
+function MarkdownCode({ inline, className, children, ...props }) {
+  const { remoteConnected, remoteTarget, execResults, onRunCommand } = useContext(RemoteExecContext);
+  const messageId = useContext(MessageIdContext);
+
+  const lang = (className || '').replace('language-', '') || '';
+  const displayLang = lang || 'code';
+  const codeText = String(children).replace(/\n$/, '');
+  // react-markdown v9+ no longer passes `inline` - detect it ourselves: inline
+  // code has no language class and no newlines inside it.
+  const isInline = inline || (!className?.includes('language-') && !codeText.includes('\n'));
+  if (isInline) {
+    return (
+      <code
+        className="rounded-md border px-1 py-0.5 font-mono text-[0.82em]"
+        style={{
+          background: 'var(--accent-soft)',
+          borderColor: 'color-mix(in srgb, var(--accent) 30%, transparent)',
+          color: 'var(--accent)',
+        }}
+        {...props}
+      >
+        {children}
+      </code>
+    );
+  }
+
+  const blockKey = `${messageId || 'msg'}-${displayLang}-${codeText.slice(0, 40)}`;
+  const execResult = execResults[blockKey];
+  const canRun = isShellLang(lang) && remoteConnected;
+
+  return (
+    <figure className="relative overflow-clip rounded-xl border" style={{ background: 'var(--code-bg)', borderColor: 'var(--code-border)', color: 'var(--code-text)' }}>
+      <figcaption className="sticky top-0 z-10 flex items-center border-b px-3 py-1 backdrop-blur-sm" style={{ background: 'var(--code-header)', borderColor: 'var(--code-border)' }}>
+        <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--code-lang)' }}>{displayLang}</span>
+        {canRun && (
+          <button
+            type="button"
+            onClick={() => onRunCommand(codeText, blockKey)}
+            disabled={execResult?.running}
+            className="ml-2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400 transition hover:bg-[var(--material-thin)] hover:text-emerald-300 disabled:opacity-50"
+            title={`Run on ${remoteTarget}`}
+          >
+            {execResult?.running ? '◌ Running…' : '▶ Run'}
+          </button>
+        )}
+        <CopyButton text={codeText} />
+      </figcaption>
+      <div className="overflow-x-auto p-3 text-[12px] leading-5 sm:text-[13px]">
+        <SyntaxHighlighter
+          language={lang || 'text'}
+          style={SYNTAX_THEME}
+          showLineNumbers
+          lineNumberStyle={{ color: 'color-mix(in srgb, var(--code-text) 28%, transparent)', minWidth: '2.2em', userSelect: 'none', paddingRight: '1em' }}
+          PreTag="div"
+          CodeTag="code"
+          customStyle={{ background: 'none', margin: 0, padding: 0, fontFamily: 'var(--font-mono), monospace' }}
+          codeTagProps={{ className: 'font-mono' }}
+          wrapLongLines={false}
+        >
+          {codeText}
+        </SyntaxHighlighter>
+      </div>
+      {execResult && !execResult.running && (
+        <div className="border-t border-white/10 bg-black/40 px-3 py-2 font-mono text-[11px]">
+          {execResult.stdout && (
+            <pre className="whitespace-pre-wrap text-emerald-300">{execResult.stdout}</pre>
+          )}
+          {execResult.stderr && (
+            <pre className="whitespace-pre-wrap text-red-400">{execResult.stderr}</pre>
+          )}
+          <div className={`mt-1 text-[10px] ${execResult.exitCode === 0 ? 'text-[color:var(--text-muted)]' : 'text-red-400'}`}>
+            exit {execResult.exitCode} · {execResult.duration != null ? `${execResult.duration}ms` : ''}
+          </div>
+        </div>
+      )}
+    </figure>
+  );
+}
+
+// The full components map, frozen at module scope so ReactMarkdown always sees
+// the same component identities and never remounts a block.
+const MD_COMPONENTS = Object.freeze({ ...MD_STATIC_COMPONENTS, code: MarkdownCode });
+
+function renderMessageContent(content, message = {}) {
   if (message.imageGenerating) {
     return (
       <div
@@ -678,86 +800,6 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
   }
 
   const text = content || '';
-  const isShellLang = (l) => ['bash', 'sh', 'shell', 'zsh', 'fish', 'cmd', 'powershell', 'ps1'].includes(l);
-
-  const mdComponents = {
-    ...MD_STATIC_COMPONENTS,
-    code({ inline, className, children, ...props }) {
-      const lang = (className || '').replace('language-', '') || '';
-      const displayLang = lang || 'code';
-      const codeText = String(children).replace(/\n$/, '');
-      // react-markdown v9+ no longer passes `inline` prop - detect it ourselves:
-      // inline code has no language class and no newlines inside it.
-      const isInline = inline || (!className?.includes('language-') && !codeText.includes('\n'));
-      if (isInline) {
-        return (
-          <code
-            className="rounded-md border px-1 py-0.5 font-mono text-[0.82em]"
-            style={{
-              background: 'var(--accent-soft)',
-              borderColor: 'color-mix(in srgb, var(--accent) 30%, transparent)',
-              color: 'var(--accent)',
-            }}
-            {...props}
-          >
-            {children}
-          </code>
-        );
-      }
-      // Unique key for this code block within this message
-      const blockKey = `${message?.id || 'msg'}-${displayLang}-${codeText.slice(0, 40)}`;
-      const execResult = execResultsRef.current[blockKey];
-      const canRun = !isInline && isShellLang(lang) && remoteConnectedRef.current;
-
-      return (
-        <figure className="relative overflow-clip rounded-xl border" style={{ background: 'var(--code-bg)', borderColor: 'var(--code-border)', color: 'var(--code-text)' }}>
-          <figcaption className="sticky top-0 z-10 flex items-center border-b px-3 py-1 backdrop-blur-sm" style={{ background: 'var(--code-header)', borderColor: 'var(--code-border)' }}>
-            <span className="text-[10px] uppercase tracking-[0.12em]" style={{ color: 'var(--code-lang)' }}>{displayLang}</span>
-            {canRun && (
-              <button
-                type="button"
-                onClick={() => onRunCommand(codeText, blockKey)}
-                disabled={execResult?.running}
-                className="ml-2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400 transition hover:bg-[var(--material-thin)] hover:text-emerald-300 disabled:opacity-50"
-                title={`Run on ${remoteTargetRef.current}`}
-              >
-                {execResult?.running ? '◌ Running…' : '▶ Run'}
-              </button>
-            )}
-            <CopyButton text={codeText} />
-          </figcaption>
-          <div className="overflow-x-auto p-3 text-[12px] leading-5 sm:text-[13px]">
-            <SyntaxHighlighter
-              language={lang || 'text'}
-              style={SYNTAX_THEME}
-              showLineNumbers
-              lineNumberStyle={{ color: 'color-mix(in srgb, var(--code-text) 28%, transparent)', minWidth: '2.2em', userSelect: 'none', paddingRight: '1em' }}
-              PreTag="div"
-              CodeTag="code"
-              customStyle={{ background: 'none', margin: 0, padding: 0, fontFamily: 'var(--font-mono), monospace' }}
-              codeTagProps={{ className: 'font-mono' }}
-              wrapLongLines={false}
-            >
-              {codeText}
-            </SyntaxHighlighter>
-          </div>
-          {execResult && !execResult.running && (
-            <div className="border-t border-white/10 bg-black/40 px-3 py-2 font-mono text-[11px]">
-              {execResult.stdout && (
-                <pre className="whitespace-pre-wrap text-emerald-300">{execResult.stdout}</pre>
-              )}
-              {execResult.stderr && (
-                <pre className="whitespace-pre-wrap text-red-400">{execResult.stderr}</pre>
-              )}
-              <div className={`mt-1 text-[10px] ${execResult.exitCode === 0 ? 'text-[color:var(--text-muted)]' : 'text-red-400'}`}>
-                exit {execResult.exitCode} · {execResult.duration != null ? `${execResult.duration}ms` : ''}
-              </div>
-            </div>
-          )}
-        </figure>
-      );
-    },
-  };
 
   // Detect RTL once from the full text so the entire block - including list
   // containers - gets a concrete direction that all descendants inherit.
@@ -765,7 +807,7 @@ function renderMessageContent(content, message = {}, remoteCtx = {}) {
 
   return (
     <div className="markdown-body text-sm" dir={dir}>
-      <ReactMarkdown components={mdComponents} remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{text}</ReactMarkdown>
+      <ReactMarkdown components={MD_COMPONENTS} remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{text}</ReactMarkdown>
     </div>
   );
 }
@@ -943,16 +985,11 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
 const MessageRow = memo(function MessageRow({
   message,
   isLast,
-  isStreaming,
-  streamingLabel,
+  busy,
   speakingMessageId,
   isSpeaking,
   voiceEngine,
   voiceSupported,
-  remoteConnectedRef,
-  remoteTargetRef,
-  execResultsRef,
-  runCommand,
   stopSpeaking,
   speakText,
   regenerate,
@@ -975,16 +1012,11 @@ const MessageRow = memo(function MessageRow({
           : { background: 'color-mix(in srgb, var(--text-main) 4%, transparent)' }
       }
     >
-      {isStreaming && !message.content && message.role === 'assistant' && isLast && !message.imageGenerating
-        ? (
-          <div className="flex items-center gap-2 py-1" style={{ color: 'var(--accent)' }}>
-            <span className="au-typing" role="status" aria-label="Assistant is typing"><i /><i /><i /></span>
-            {streamingLabel && (
-              <span className="ml-0.5 text-[length:var(--text-2xs)] font-medium uppercase tracking-[0.1em] text-[color:var(--text-muted)]">{streamingLabel}</span>
-            )}
-          </div>
-        )
-        : renderMessageContent(message.content, message, { remoteConnectedRef, remoteTargetRef, execResultsRef, onRunCommand: runCommand })}
+      {/* Scope the message id so the module-scope code renderer can key its
+          blocks without the id being threaded through as an argument. */}
+      <MessageIdContext.Provider value={message.id}>
+        {renderMessageContent(message.content, message)}
+      </MessageIdContext.Provider>
       {Array.isArray(message.attachments) && message.attachments.length > 0 && (
         <div className="mt-2 grid gap-2">
           {message.attachments.map((file) => {
@@ -1123,7 +1155,7 @@ const MessageRow = memo(function MessageRow({
             {isLastAssistant && (
               <button
                 onClick={regenerate}
-                disabled={isStreaming}
+                disabled={busy}
                 title="Regenerate response"
                 className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:opacity-40 dark:text-[color:var(--text-muted)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
               >
@@ -1144,8 +1176,7 @@ const MessageRow = memo(function MessageRow({
 }, (prev, next) => (
   prev.message === next.message &&
   prev.isLast === next.isLast &&
-  prev.isStreaming === next.isStreaming &&
-  prev.streamingLabel === next.streamingLabel &&
+  prev.busy === next.busy &&
   prev.speakingMessageId === next.speakingMessageId &&
   prev.isSpeaking === next.isSpeaking &&
   prev.voiceEngine === next.voiceEngine &&
@@ -1171,9 +1202,6 @@ export default function ChatApp() {
   // before the clear (and resolve after it) bail out instead of resurrecting deleted chats.
   const chatListEpochRef = useRef(0);
   // Refs for renderMessageContent (stable across renders without re-passing as props)
-  const remoteConnectedRef = useRef(false);
-  const remoteTargetRef = useRef('');
-  const execResultsRef = useRef({});
   const lastKeyboardMenuTriggerRef = useRef(null);
   const streamAbortRef = useRef(null);
   const shortcutRef = useRef({});
@@ -1184,7 +1212,6 @@ export default function ChatApp() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamingLabel, setStreamingLabel] = useState('');
   const [isCommittingToLedger, setIsCommittingToLedger] = useState(false);
   // Commitment Radar: read-only preview of commitments/asks/decisions in the
   // current chat. Nothing is persisted until the user files them.
@@ -1401,6 +1428,12 @@ export default function ChatApp() {
   const voiceSpeakRef = useRef(null);
   const voiceStopSpeakRef = useRef(null);
   const messagesRef = useRef([]);
+  // Current active chat id, mirrored for handlers that a memoized row may have
+  // captured in an older closure. ChatItem's comparator deliberately ignores its
+  // callback props, so a row that does not re-render keeps a STALE loadChat, and
+  // reading activeChatId from that closure saved the scroll position under the
+  // previously-open chat instead of the one being left.
+  const activeChatIdRef = useRef(null);
   // Always-fresh voice settings so a retained speakText closure uses current values.
   const voiceSettingsRef = useRef({});
 
@@ -2130,6 +2163,7 @@ export default function ChatApp() {
     voiceSpeakRef.current = speakText;
     voiceStopSpeakRef.current = stopSpeaking;
     messagesRef.current = messages;
+    activeChatIdRef.current = activeChatId;
     // Voice settings, mirrored to refs so a memoized message row that captured an
     // older speakText closure still speaks with the CURRENT voice/rate/pitch.
     voiceSettingsRef.current = { voiceEngine, selectedVoiceUri, voiceRate, voicePitch, selectedPiperModelId, availableVoices };
@@ -2667,19 +2701,6 @@ export default function ChatApp() {
     safeStorageSet('mirabilis-color-scheme', colorScheme);
   }, [colorScheme]);
 
-  useEffect(() => {
-    if (!isStreaming) { setStreamingLabel(''); return; }
-    const phases = [
-      [0,     'Processing…'],
-      [1800,  'Thinking…'],
-      [5500,  'Generating…'],
-      [13000, 'Loading model…'],
-      [28000, 'Still working…'],
-    ];
-    const timers = phases.map(([delay, label]) => setTimeout(() => setStreamingLabel(label), delay));
-    return () => timers.forEach(clearTimeout);
-  }, [isStreaming]);
-
   // Drive the Aurora StatusOrb's "busy" breathing from the real streaming state.
   // AuroraChrome listens for these; without them the orb never showed activity.
   useEffect(() => {
@@ -2861,6 +2882,28 @@ export default function ChatApp() {
       setExecResults((prev) => ({ ...prev, [key]: { running: false, stdout: '', stderr: err.message, exitCode: 1 } }));
     }
   }
+
+  // A stable identity for runCommand, via a ref that is refreshed on every
+  // render. Without this the context value below would be new on every render
+  // and the memoisation would buy nothing.
+  const runCommandRef = useRef(runCommand);
+  runCommandRef.current = runCommand;
+  const stableRunCommand = useCallback((command, key) => runCommandRef.current(command, key), []);
+
+  // Recomputed only when something a code block actually displays changes.
+  const remoteExecValue = useMemo(
+    () => ({ remoteConnected, remoteTarget, execResults, onRunCommand: stableRunCommand }),
+    [remoteConnected, remoteTarget, execResults, stableRunCommand]
+  );
+
+  // True while the assistant has been asked but has not produced any text yet.
+  // Drives the standalone typing indicator that replaced the per-row one.
+  const lastMessage = messages[messages.length - 1];
+  const showTypingIndicator = isStreaming
+    && !!lastMessage
+    && lastMessage.role === 'assistant'
+    && !lastMessage.content
+    && !lastMessage.imageGenerating;
 
   async function refreshMcpServers() {
     try {
@@ -3394,8 +3437,9 @@ export default function ChatApp() {
     if (streamAbortRef.current) stopStreaming();
     setIsTeachPanelOpen(false);
     // Save scroll position of the current chat before switching
-    if (activeChatId && messagesScrollRef.current) {
-      chatScrollPositions.current[activeChatId] = messagesScrollRef.current.scrollTop;
+    const leavingChatId = activeChatIdRef.current;
+    if (leavingChatId && messagesScrollRef.current) {
+      chatScrollPositions.current[leavingChatId] = messagesScrollRef.current.scrollTop;
     }
     const payload = await api(`/api/chats/${chatId}`);
     setActiveChatId(chatId);
@@ -3533,11 +3577,15 @@ export default function ChatApp() {
   }
 
   async function removeChat(chatId) {
+    // Read from the ref, not the closure: a memoized ChatItem may be holding an
+    // older removeChat whose captured activeChatId is stale, which would skip
+    // aborting the stream for the chat actually being deleted.
+    const currentChatId = activeChatIdRef.current;
     // Abort any in-flight stream so the post-stream saveChat doesn't resurrect the chat
-    if (activeChatId === chatId) stopStreaming();
+    if (currentChatId === chatId) stopStreaming();
     await api(`/api/chats/${chatId}`, { method: 'DELETE' });
     setOpenChatMenuId((current) => (current === chatId ? null : current));
-    if (activeChatId === chatId) {
+    if (currentChatId === chatId) {
       setActiveChatId(null);
       setActiveChatMeta(null);
       setSelectedSnapshotId('');
@@ -4057,9 +4105,6 @@ export default function ChatApp() {
   }
 
   // Keep refs in sync so renderMessageContent always sees latest values
-  useEffect(() => { remoteConnectedRef.current = remoteConnected; }, [remoteConnected]);
-  useEffect(() => { remoteTargetRef.current = remoteTarget; }, [remoteTarget]);
-  useEffect(() => { execResultsRef.current = execResults; }, [execResults]);
 
     // Close all dropdown/panel menus
     function closeAllDropdowns() {
@@ -4788,13 +4833,19 @@ export default function ChatApp() {
       ].join(' ');
       outboundContent = `${outboundContent}\n\n[System: ${disclaimer}]`;
     }
-    if (deepWebEnabled && classifyWebSearch(content) === 'search') {
+    // Go Dark blocks web search regardless of which model is selected: the query
+    // is the user's raw text and would go to a third-party search API. The
+    // provider check above only covers the model call, not this one.
+    if (deepWebEnabled && appStore.getGoDark()) {
+      appStore.toast('Go Dark is on - web search is off, so this answer uses local knowledge only.', { kind: 'warn' });
+    }
+    if (deepWebEnabled && !appStore.getGoDark() && classifyWebSearch(content) === 'search') {
       setStatusText('Searching the web...');
       setWebSearchStatus('searching');
       try {
         const payload = await api('/api/web-search', {
           method: 'POST',
-          body: JSON.stringify({ query: content, maxResults: 5 })
+          body: JSON.stringify({ query: content, maxResults: 5, localOnly: appStore.getGoDark() })
         });
 
         const sources = Array.isArray(payload.sources) ? payload.sources : [];
@@ -5453,6 +5504,8 @@ export default function ChatApp() {
                         <button
                           type="button"
                           data-menu-trigger={`hardware-${key}`}
+                          aria-haspopup="true"
+                          aria-expanded={openHardwarePopover === key}
                           onClick={() => {
                             setIsContextPanelOpen(false);
                             setIsEngineMenuOpen(false);
@@ -5476,7 +5529,7 @@ export default function ChatApp() {
                           <span className="relative whitespace-nowrap">{shortLabel}</span>
                         </button>
                         {openHardwarePopover === key ? (
-                          <div data-menu-panel={`hardware-${key}`} role="menu" tabIndex={-1} className="absolute left-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] au-chrome au-elev-2 p-2 text-[11px] text-[color:var(--text-muted)]">
+                          <div data-menu-panel={`hardware-${key}`} role="group" aria-label={`${shortLabel} details`} tabIndex={-1} className="absolute left-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] au-chrome au-elev-2 p-2 text-[11px] text-[color:var(--text-muted)]">
                             <div className="font-semibold text-[color:var(--text-main)] mb-1">{item.label}</div>
                             {item.expanded ? item.expanded.split('\n').map((line, i) => (
                               <div key={i} className="text-[color:var(--text-muted)]">{line}</div>
@@ -5536,6 +5589,8 @@ export default function ChatApp() {
                   <button
                     type="button"
                     data-menu-trigger="context"
+                    aria-haspopup="true"
+                    aria-expanded={isContextPanelOpen}
                     onClick={() => {
                       setIsEngineMenuOpen(false);
                       setOpenHardwarePopover(null);
@@ -5549,7 +5604,7 @@ export default function ChatApp() {
                   </button>
 
                   {isContextPanelOpen && (
-                    <div data-menu-panel="context" role="menu" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="context" role="group" aria-label="Context usage details" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="mb-2 flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Token Limit</span>
                         <span className="text-[10px] text-[color:var(--text-muted)]">{contextUsage.usedPct}% used</span>
@@ -5759,26 +5814,41 @@ export default function ChatApp() {
               </div>
             )}
 
-            {messages.map((message, idx) => (
+            <RemoteExecContext.Provider value={remoteExecValue}>
+            {messages.map((message, idx) => {
+              // While the reply is still empty the trailing assistant turn is
+              // represented by the typing indicator below, not by an empty bubble.
+              if (showTypingIndicator && idx === messages.length - 1) return null;
+              return (
               <MessageRow
                 key={message.id}
                 message={message}
                 isLast={idx === messages.length - 1}
-                isStreaming={isStreaming}
-                streamingLabel={streamingLabel}
+                busy={isStreaming && idx === messages.length - 1}
                 speakingMessageId={speakingMessageId}
                 isSpeaking={isSpeaking}
                 voiceEngine={voiceEngine}
                 voiceSupported={voiceSupported}
-                remoteConnectedRef={remoteConnectedRef}
-                remoteTargetRef={remoteTargetRef}
-                execResultsRef={execResultsRef}
-                runCommand={runCommand}
                 stopSpeaking={stopSpeaking}
                 speakText={speakText}
                 regenerate={regenerate}
               />
-            ))}
+              );
+            })}
+            {/* Rendered as a sibling rather than inside the last MessageRow, so
+                the streaming flags never have to be broadcast to every row and
+                invalidate their memo on each transition. */}
+            {showTypingIndicator && (
+              <div
+                className="w-full rounded-[var(--r-lg)] px-4 py-2.5"
+                style={{ background: 'color-mix(in srgb, var(--text-main) 4%, transparent)' }}
+              >
+                <div className="flex items-center gap-2 py-1" style={{ color: 'var(--accent)' }}>
+                  <span className="au-typing" role="status" aria-label="Assistant is typing"><i /><i /><i /></span>
+                </div>
+              </div>
+            )}
+            </RemoteExecContext.Provider>
             </div>
           </div>
 
@@ -5846,6 +5916,8 @@ export default function ChatApp() {
                   <button
                     type="button"
                     data-menu-trigger="provider"
+                    aria-haspopup="true"
+                    aria-expanded={isProviderMenuOpen}
                     onClick={() => {
                       setIsModelMenuOpen(false);
                       setIsTrainingMenuOpen(false);
@@ -5871,7 +5943,7 @@ export default function ChatApp() {
                   </button>
 
                   {isProviderMenuOpen && (
-                    <div data-menu-panel="provider" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 flex max-h-[min(70vh,460px)] w-72 flex-col overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="provider" role="group" aria-label="Provider and runtime" tabIndex={-1} className="absolute bottom-9 left-0 z-20 flex max-h-[min(70vh,460px)] w-72 flex-col overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       {/* Search box - keeps the picker usable as providers grow */}
                       <div className="shrink-0 border-b border-black/10 p-2">
                         <input
@@ -6237,6 +6309,8 @@ export default function ChatApp() {
                   <button
                     type="button"
                     data-menu-trigger="model"
+                    aria-haspopup="true"
+                    aria-expanded={isModelMenuOpen}
                     onClick={() => { setIsProviderMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsModelMenuOpen((prev) => !prev); }}
                     className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
                     title="Choose model"
@@ -6250,7 +6324,7 @@ export default function ChatApp() {
                   </button>
 
                   {isModelMenuOpen && (
-                  <div data-menu-panel="model" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-96 w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                  <div data-menu-panel="model" role="group" aria-label="Model selection" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-96 w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       {models.length > 0 ? (
                         <>
                         {/* Auto mode entry - no group header, divider separates it from model groups */}
@@ -6628,6 +6702,8 @@ export default function ChatApp() {
                   <button
                     type="button"
                     data-menu-trigger="effort"
+                    aria-haspopup="true"
+                    aria-expanded={isEffortMenuOpen}
                     onClick={() => { const open = !isEffortMenuOpen; closeAllDropdowns(); setIsEffortMenuOpen(open); }}
                     className="inline-flex h-7 items-center gap-1 rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
                     title="Answer effort level"
@@ -6638,7 +6714,7 @@ export default function ChatApp() {
                     </svg>
                   </button>
                   {isEffortMenuOpen && (
-                    <div data-menu-panel="effort" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-44 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="effort" role="group" aria-label="Answer effort" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-44 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       {[
                         { value: 'instant', label: 'Instant', hint: 'one line' },
                         { value: 'fast', label: 'Fast', hint: 'concise' },
@@ -6712,6 +6788,8 @@ export default function ChatApp() {
                   <button
                     type="button"
                     data-menu-trigger="options"
+                    aria-haspopup="true"
+                    aria-expanded={isOptionsMenuOpen}
                     onClick={() => { const open = !isOptionsMenuOpen; closeAllDropdowns(); setIsOptionsMenuOpen(open); }}
                     className="inline-flex h-7 items-center gap-1.5 rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
                     title="Tools, training, modes, and voice"
@@ -6726,7 +6804,7 @@ export default function ChatApp() {
                     </svg>
                   </button>
                   {isOptionsMenuOpen && (
-                    <div data-menu-panel="options" role="menu" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="options" role="group" aria-label="Tools, training, modes and voice" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="px-1 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Tools</div>
                       <button
                         type="button"
@@ -6984,6 +7062,8 @@ export default function ChatApp() {
                         <button
                           type="button"
                           data-menu-trigger="control"
+                    aria-haspopup="true"
+                    aria-expanded={isControlPanelOpen}
                           onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsControlPanelOpen((prev) => !prev); }}
                           className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                           title="Remote Control"
@@ -6995,7 +7075,7 @@ export default function ChatApp() {
                           <span className="text-[10px] opacity-60">{remoteConnected ? 'connected' : 'off'}</span>
                         </button>
                   {isControlPanelOpen && (
-                    <div data-menu-panel="control" role="menu" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="control" role="group" aria-label="Inference controls" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="mb-2 flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Remote Control</span>
                         {remoteConnected && (
@@ -7100,6 +7180,8 @@ export default function ChatApp() {
                         <button
                           type="button"
                           data-menu-trigger="mcp"
+                    aria-haspopup="true"
+                    aria-expanded={isMcpPanelOpen}
                           onClick={() => { setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsMcpPanelOpen((prev) => !prev); }}
                           className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                           title="MCP Connector"
@@ -7111,7 +7193,7 @@ export default function ChatApp() {
                           <span className="text-[10px] opacity-60">{selectedMcpServer ? selectedMcpServer.id : 'off'}</span>
                         </button>
                   {isMcpPanelOpen && (
-                    <div data-menu-panel="mcp" role="menu" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="mcp" role="group" aria-label="MCP servers" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="mb-2 flex items-center justify-between">
                         <span className="text-[11px] font-semibold text-[color:var(--text-main)]">MCP Connector</span>
                         <button
@@ -7320,6 +7402,8 @@ export default function ChatApp() {
                         <button
                           type="button"
                           data-menu-trigger="voice"
+                    aria-haspopup="true"
+                    aria-expanded={isVoiceMenuOpen}
                           onClick={() => { setIsContextPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); checkVoiceTools(); fetchPiperModels(); setIsVoiceMenuOpen((prev) => !prev); }}
                           className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                           title="Voice settings"
@@ -7333,7 +7417,7 @@ export default function ChatApp() {
                           <span className="text-[10px] opacity-60">{voiceEngine === 'piper' ? 'Piper' : 'Browser'}</span>
                         </button>
                 {isVoiceMenuOpen && (
-                  <div data-menu-panel="voice" role="menu" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                  <div data-menu-panel="voice" role="group" aria-label="Voice settings" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Voice Settings</span>
                       <span className="text-[10px] text-[color:var(--text-muted)]">{voiceSupported ? 'TTS ready' : 'Unavailable'}</span>

@@ -41,11 +41,17 @@ export async function apiFetch(path, { method = 'GET', body, signal, timeoutMs =
     if (signal.aborted) controller.abort();
     else signal.addEventListener('abort', () => controller.abort(), { once: true });
   }
+  // Privileged routes require the local session token; unguarded routes ignore
+  // it. Imported lazily to keep this module free of an import cycle, since
+  // sessionToken.js reads API_BASE from here.
+  const { getSessionToken } = await import('./sessionToken.js');
+  const token = await getSessionToken();
   try {
     const res = await fetch(url, {
       method,
       headers: {
         ...(body != null ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { 'x-mirabilis-mcp-token': token } : {}),
         ...(headers || {})
       },
       body: body != null ? JSON.stringify(body) : undefined,

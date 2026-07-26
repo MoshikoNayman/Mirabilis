@@ -1409,6 +1409,10 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                   return (
                 <div
                   key={session.id}
+                  // Stable hook for the e2e spec. Selecting this card by its CSS
+                  // classes broke silently when `rounded-2xl` became a token, and
+                  // nothing caught it because the spec never ran in CI.
+                  data-testid="session-card"
                   className={`group rounded-[var(--r-lg)] border text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_-18px_rgba(15,23,42,0.35)] ${
                     isSelected
                       ? 'border-[color:color-mix(in_srgb,var(--accent)_50%,transparent)] bg-[color:color-mix(in_srgb,var(--accent)_8%,transparent)]'
