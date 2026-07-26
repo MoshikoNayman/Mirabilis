@@ -171,8 +171,17 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     }
   }
 
-  // Pick an embedding model once: try the preferred embed model, then fall back
-  // to the first chat model reported by /api/tags. Cached after the first pick.
+  // Pick an embedding model once, and only ever a REAL embedding model.
+  //
+  // This used to probe the preferred model and then walk every entry from
+  // /api/tags until one answered /api/embeddings. Every chat model answers that
+  // endpoint, so the winner was simply whichever model Ollama happened to list
+  // first: recall could end up driving a 70B chat model through hundreds of
+  // embedding calls per query. That is orders of magnitude slower than a real
+  // embedder, produces worse vectors for retrieval, and evicts the user's actual
+  // chat model from memory. Better to fail with an actionable message.
+  const EMBED_NAME_RE = /embed|bge|gte|minilm|e5|nomic/i;
+
   async function ensureModel() {
     if (chosenModel) return chosenModel;
     try {
@@ -180,19 +189,22 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
       chosenModel = PREFERRED_EMBED_MODEL;
       return chosenModel;
     } catch {
-      /* preferred model unavailable - fall through to the tag list */
+      /* preferred model unavailable - look for another purpose-built embedder */
     }
     const tags = await listTagModels();
-    for (const name of tags) {
+    const candidates = tags.filter((name) => EMBED_NAME_RE.test(String(name)));
+    for (const name of candidates) {
       try {
         await embedOnce(name, 'probe');
         chosenModel = name;
         return chosenModel;
       } catch {
-        /* try the next model */
+        /* try the next embedding model */
       }
     }
-    throw new Error('no local embedding model is available');
+    throw new Error(
+      `No embedding model is installed. Run: ollama pull ${PREFERRED_EMBED_MODEL}`
+    );
   }
 
   async function embedText(text) {

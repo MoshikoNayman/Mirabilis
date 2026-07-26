@@ -159,6 +159,8 @@ export interface RuntimeStatus {
   baseUrl?: string;
   model?: string;
   startedAt?: number;
+  /** Bounded tail of the engine's stdout+stderr, for diagnosing a failed launch. */
+  logTail?: string[];
 }
 
 /** vLLM local-capability probe result. */

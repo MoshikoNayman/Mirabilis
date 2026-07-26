@@ -51,8 +51,14 @@ export function deriveInferenceDefaults({ profileRaw = {}, availableGb = null, m
   // num_ctx: spend the leftover budget (after weights) on KV cache, capped at the
   // model's real window. If weights already eat the budget, fall back to a small ctx.
   const kvBudgetBytes = Math.max(0, budgetGb - weightsGb) * 1e9;
-  let ctx = kvBudgetBytes > 0 ? Math.floor(kvBudgetBytes / kvBytesPerToken(paramsB)) : MIN_CTX;
-  ctx = Math.min(ctx || DEFAULT_CTX, modelContextWindow || DEFAULT_CTX);
+  // Clamp UP to the floor, never out to DEFAULT_CTX. When the weights consume
+  // the whole budget the KV allowance rounds down to 0 tokens, and the previous
+  // `ctx || DEFAULT_CTX` fallback read that 0 as "unknown" and granted 8192.
+  // That handed the largest window out exactly when memory was tightest, so a
+  // model a hair under the budget got 4x the context of one a hair over it.
+  const kvTokens = kvBudgetBytes > 0 ? Math.floor(kvBudgetBytes / kvBytesPerToken(paramsB)) : 0;
+  let ctx = Math.max(kvTokens, MIN_CTX);
+  ctx = Math.min(ctx, modelContextWindow || DEFAULT_CTX);
   ctx = snapCtx(ctx);
   options.num_ctx = ctx;
 

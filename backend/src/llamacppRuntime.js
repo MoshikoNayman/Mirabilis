@@ -28,6 +28,35 @@ let _proc = null;      // the running llama-server child, or null
 /** @type {{ pid?: number, port: number, baseUrl: string, model: string, startedAt: number, flags: string[] } | null} */
 let _state = null;     // { pid, port, baseUrl, model, startedAt, flags }
 
+// Bounded tail of the child's stdout+stderr. Two jobs: it keeps the pipes
+// DRAINED (a spawn with stdio 'pipe' and no reader deadlocks the child once the
+// OS pipe buffer fills, which for a chatty llama-server is well inside model
+// load), and it gives startServer real launch-failure text instead of a generic
+// timeout message.
+const LOG_TAIL_MAX = 200;
+/** @type {string[]} */
+let _log = [];
+
+function attachLogDrain(child) {
+  _log = [];
+  const append = (chunk) => {
+    const text = String(chunk);
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      _log.push(line);
+      if (_log.length > LOG_TAIL_MAX) _log.shift();
+    }
+  };
+  child.stdout?.on('data', append);
+  child.stderr?.on('data', append);
+  child.stdout?.on('error', () => { /* pipe closed on exit */ });
+  child.stderr?.on('error', () => { /* pipe closed on exit */ });
+}
+
+export function logTail(limit = 40) {
+  return _log.slice(-limit);
+}
+
 function findBinary() {
   const rt = getRuntime('llamacpp');
   for (const cand of (rt?.binaryCandidates || [])) {
@@ -133,8 +162,8 @@ function buildFlags({ modelPath, port, numCtx, ngl, kvQuant, flashAttn, parallel
 }
 
 export function status() {
-  if (!_proc || !_state) return { running: false, installed: isLlamaCppInstalled() };
-  return { running: true, installed: true, ...(_state) };
+  if (!_proc || !_state) return { running: false, installed: isLlamaCppInstalled(), logTail: logTail(12) };
+  return { running: true, installed: true, ...(_state), logTail: logTail(12) };
 }
 
 /** @param {{ modelPath?: string, model?: string, numCtx?: number, port?: number, ngl?: number|null, kvQuant?: string, flashAttn?: boolean, parallel?: number, timeoutMs?: number }} [args] */
@@ -167,13 +196,19 @@ export async function startServer({ modelPath, model, numCtx = 8192, port, ngl, 
   let stopping = false;
   const child = spawn(bin, flags, { stdio: ['ignore', 'pipe', 'pipe'] });
   _proc = child;
+  attachLogDrain(child);
   child.on('exit', () => { if (_proc === child) { _proc = null; _state = null; } });
   child.on('error', () => { stopping = true; });
 
   const healthy = await pollHealth(rtPort, timeoutMs, () => stopping || !_proc);
   if (!healthy) {
+    const tail = logTail(8).join(' | ');
     await stopServer();
-    return { ok: false, error: `llama-server did not become healthy within ${Math.round(timeoutMs / 1000)}s (model may be too large for memory, or the port is busy).` };
+    return {
+      ok: false,
+      error: `llama-server did not become healthy within ${Math.round(timeoutMs / 1000)}s (model may be too large for memory, or the port is busy).`
+        + (tail ? ` Last output: ${tail}` : '')
+    };
   }
   _state = { pid: child.pid, port: rtPort, baseUrl: `http://127.0.0.1:${rtPort}/v1`, model: model || resolvedPath, startedAt: Date.now(), flags };
   return { ok: true, ...(_state) };

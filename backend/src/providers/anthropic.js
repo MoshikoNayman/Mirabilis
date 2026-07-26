@@ -30,7 +30,7 @@ export async function listAnthropicModels({ baseUrl, apiKey }) {
   }
 }
 
-export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, signal, onToken, temperature, maxTokens, providerLabel = 'Claude' }) {
+export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, signal, onToken, onStats, temperature, maxTokens, providerLabel = 'Claude' }) {
   const base = String(baseUrl || ANTHROPIC_BASE_URL).replace(/\/$/, '');
   const system = messages
     .filter((message) => message.role === 'system' && message.content)
@@ -68,7 +68,12 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
     // Anthropic requires max_tokens. Default high so replies are not silently
     // truncated (Ollama/OpenAI-compatible send no cap); the user override still wins.
     max_tokens: maxTokens != null ? maxTokens : 8192,
-    stream: false,
+    // Stream properly. With stream:false the whole reply arrived as one blob and
+    // was handed to onToken in a single call, so the UI showed nothing at all
+    // until the model was completely finished. It also made the performance
+    // receipt meaningless: time-to-first-token was recorded at the moment the
+    // LAST token arrived, so generation time always computed as roughly zero.
+    stream: true,
     ...(system ? { system } : {}),
     ...(clampedTemp != null ? { temperature: clampedTemp } : {})
   };
@@ -96,18 +101,56 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
       throw new Error(`${providerLabel} API error: ${res.status}${detail ? ` - ${detail}` : ''}`);
     }
 
-    const data = await res.json();
-    const text = (data?.content || [])
-      .filter((block) => block?.type === 'text' && typeof block?.text === 'string')
-      .map((block) => block.text)
-      .join('');
+    if (!res.body) throw new Error(`${providerLabel} returned no response body.`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let emitted = false;
+    /** @type {{outputTokens: number|null, inputTokens: number|null}} */
+    const usage = { outputTokens: null, inputTokens: null };
 
-    if (text) {
-      onToken(text);
-      return;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const payloadText = trimmed.slice(5).trim();
+        if (!payloadText || payloadText === '[DONE]') continue;
+        let frame;
+        try {
+          frame = JSON.parse(payloadText);
+        } catch {
+          continue; // partial frame; the next chunk completes it
+        }
+
+        // Anthropic reports mid-stream failures as an `error` event on an
+        // already-200 response, the same trap the other adapters had.
+        if (frame.type === 'error') {
+          const detail = frame.error?.message || 'stream error';
+          throw new Error(`${providerLabel} API error: ${detail}`);
+        }
+        if (frame.type === 'content_block_delta' && typeof frame.delta?.text === 'string') {
+          if (frame.delta.text) { onToken(frame.delta.text); emitted = true; }
+        }
+        // Exact counts, so the receipt stops guessing from character length.
+        if (frame.type === 'message_start' && frame.message?.usage) {
+          usage.inputTokens = frame.message.usage.input_tokens ?? null;
+        }
+        if (frame.type === 'message_delta' && frame.usage) {
+          usage.outputTokens = frame.usage.output_tokens ?? null;
+        }
+      }
     }
 
-    throw new Error(`${providerLabel} returned no text content.`);
+    if (typeof onStats === 'function' && (usage.outputTokens != null || usage.inputTokens != null)) {
+      onStats({ evalCount: usage.outputTokens, promptEvalCount: usage.inputTokens });
+    }
+    if (!emitted) throw new Error(`${providerLabel} returned no text content.`);
   } catch (error) {
     // Propagate real failures (aborts are user-initiated) so the stream handler
     // sends an `error` event and rolls back instead of saving the error as reply.

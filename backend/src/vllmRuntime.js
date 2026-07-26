@@ -30,6 +30,34 @@ let _proc = null;   // running vLLM child, or null
 /** @type {{ pid?: number, port: number, baseUrl: string, model: string, startedAt: number } | null} */
 let _state = null;  // { pid, port, baseUrl, model, startedAt }
 
+// Bounded tail of the child's stdout+stderr. Draining matters more here than for
+// llama.cpp: vLLM is extremely verbose during weight load, so an unread pipe
+// fills its OS buffer and deadlocks the process before it ever serves a request.
+// The tail also turns an opaque health timeout into the actual CUDA or OOM error.
+const LOG_TAIL_MAX = 200;
+/** @type {string[]} */
+let _log = [];
+
+function attachLogDrain(child) {
+  _log = [];
+  const append = (chunk) => {
+    const text = String(chunk);
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      _log.push(line);
+      if (_log.length > LOG_TAIL_MAX) _log.shift();
+    }
+  };
+  child.stdout?.on('data', append);
+  child.stderr?.on('data', append);
+  child.stdout?.on('error', () => { /* pipe closed on exit */ });
+  child.stderr?.on('error', () => { /* pipe closed on exit */ });
+}
+
+export function logTail(limit = 40) {
+  return _log.slice(-limit);
+}
+
 function isAppleSilicon() {
   return os.platform() === 'darwin' && os.arch() === 'arm64';
 }
@@ -106,7 +134,9 @@ function pollHealth(port, timeoutMs, signalStop) {
 
 /** @returns {RuntimeStatus} */
 export function status() {
-  return _proc && _state ? { running: true, ...(_state) } : { running: false };
+  return _proc && _state
+    ? { running: true, ...(_state), logTail: logTail(12) }
+    : { running: false, logTail: logTail(12) };
 }
 
 // Launch a local vLLM OpenAI-compatible server for `model` (a HF repo id or a
@@ -142,13 +172,19 @@ export async function startServer({ model, port, gpuMemoryUtilization, maxModelL
   let stopping = false;
   const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   _proc = child;
+  attachLogDrain(child);
   child.on('exit', () => { if (_proc === child) { _proc = null; _state = null; } });
   child.on('error', () => { stopping = true; });
 
   const healthy = await pollHealth(rtPort, timeoutMs, () => stopping || !_proc);
   if (!healthy) {
+    const tail = logTail(8).join(' | ');
     await stopServer();
-    return { ok: false, error: `vLLM did not become healthy within ${Math.round(timeoutMs / 1000)}s (a first-time weight download or load can exceed this, or the GPU is out of memory).` };
+    return {
+      ok: false,
+      error: `vLLM did not become healthy within ${Math.round(timeoutMs / 1000)}s (a first-time weight download or load can exceed this, or the GPU is out of memory).`
+        + (tail ? ` Last output: ${tail}` : '')
+    };
   }
   _state = { pid: child.pid, port: rtPort, baseUrl: `http://127.0.0.1:${rtPort}/v1`, model: raw, startedAt: Date.now() };
   return { ok: true, ...(_state) };

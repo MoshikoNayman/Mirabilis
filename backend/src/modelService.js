@@ -597,6 +597,7 @@ export async function streamWithProvider({ provider, model, messages, config, si
       messages,
       signal,
       onToken,
+      onStats,
       temperature,
       maxTokens,
       providerLabel: 'Claude',
