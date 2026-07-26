@@ -8,12 +8,22 @@ on:
     tags-ignore: ['**']
   pull_request:
   workflow_call:
+    inputs:
+      # The release workflow passes the tag it is about to build, so the gate
+      # tests exactly the commit that ships. Defaults to the caller's SHA for
+      # ordinary push and pull_request runs.
+      ref:
+        description: Git ref to check out and test
+        required: false
+        type: string
 
 jobs:
   test:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -26,14 +36,78 @@ jobs:
       - name: Version files are in sync
         run: node scripts/sync-version.mjs --check
 
-      - name: Backend install + tests
+      - name: Backend install
         working-directory: backend
-        run: |
-          npm ci --no-audit --no-fund
-          npm test
+        run: npm ci --no-audit --no-fund
 
-      - name: Frontend install + production build
+      # Type checking runs BEFORE the tests: it is fast, and a type error is a
+      # clearer failure than whatever the tests would report downstream of it.
+      # Without this step the opt-in `// @ts-check` coverage rots the first time
+      # someone edits a checked file.
+      - name: Backend typecheck
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Backend tests
+        working-directory: backend
+        run: npm test
+
+      - name: Frontend install
         working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      # exhaustive-deps is a warning today, so this gates on errors only: an
+      # actual rules-of-hooks violation or an undefined variable.
+      - name: Frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Frontend production build
+        working-directory: frontend
+        run: npx next build
+
+  # End-to-end against the real backend and a real browser. Kept as its own job
+  # so a UI regression is distinguishable at a glance from a unit failure, and so
+  # it can fail without hiding the faster signal above.
+  e2e:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install dependencies
         run: |
-          npm ci --no-audit --no-fund
-          npx next build
+          npm ci --no-audit --no-fund --prefix backend
+          npm ci --no-audit --no-fund --prefix frontend
+
+      - name: Install Playwright browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      # playwright.config.mjs boots the backend and the Next dev server itself.
+      - name: Run end-to-end tests
+        working-directory: frontend
+        run: npm run test:e2e
+        env:
+          MIRABILIS_DATA_DIR: ${{ runner.temp }}/mirabilis-e2e
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 7

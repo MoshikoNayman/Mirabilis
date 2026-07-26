@@ -1,9 +1,12 @@
 import { test, expect } from '@playwright/test';
 
+// The tab is labelled "Ledger" and the view heading is "IntelLedger". This spec
+// previously looked for a title="InteLedger" that the app has not rendered for a
+// long time; because nothing ever ran the spec, the rot went unnoticed.
 async function openIntelLedger(page) {
   await page.goto('/');
-  await page.getByTitle('InteLedger').click();
-  await expect(page.getByRole('heading', { name: 'InteLedger' })).toBeVisible();
+  await page.getByRole('button', { name: 'Ledger', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'IntelLedger', exact: true })).toBeVisible();
 }
 
 async function createSession(page, title) {
@@ -24,9 +27,10 @@ test('create and delete one session without deleting others after refresh', asyn
   await createSession(page, keepTitle);
   await createSession(page, deleteTitle);
 
-  const deleteCard = page
-    .getByRole('button', { name: deleteTitle, exact: true })
-    .locator('xpath=ancestor::div[contains(@class,"group") and contains(@class,"rounded-2xl")][1]');
+  // Select by test id, not by CSS class: the previous XPath keyed on
+  // `rounded-2xl`, which became `rounded-[var(--r-lg)]` and silently stopped
+  // matching anything.
+  const deleteCard = page.getByTestId('session-card').filter({ hasText: deleteTitle });
 
   await expect(deleteCard).toBeVisible();
   await deleteCard.getByRole('button', { name: 'Delete', exact: true }).click();
@@ -35,7 +39,7 @@ test('create and delete one session without deleting others after refresh', asyn
   await expect(page.getByRole('button', { name: keepTitle, exact: true })).toBeVisible();
 
   await page.reload();
-  await page.getByTitle('InteLedger').click();
+  await page.getByRole('button', { name: 'Ledger', exact: true }).click();
 
   await expect(page.getByRole('button', { name: keepTitle, exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: deleteTitle, exact: true })).toHaveCount(0);

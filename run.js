@@ -239,6 +239,24 @@ function npmArgs(args) {
   return args;
 }
 
+// Choose the install command for a package directory.
+//
+// This used to be an unconditional `npm install --legacy-peer-deps`, which is
+// the reason the committed lockfiles kept drifting: `npm install` REWRITES
+// package-lock.json, and --legacy-peer-deps skips peer resolution entirely, so
+// peer-only packages get pruned from the tree it writes. A later `npm ci` in CI
+// then rejects the truncated lockfile and the release fails. `npm ci` installs
+// exactly what the lockfile says and never edits it, which is what a local run
+// of an already-locked project wants.
+function installArgs(dir) {
+  if (fs.existsSync(path.join(dir, 'package-lock.json'))) {
+    return ['ci', '--no-audit', '--no-fund'];
+  }
+  // No lockfile yet (fresh clone of an unlocked project): fall back to install,
+  // which will create one.
+  return ['install', '--no-audit', '--no-fund'];
+}
+
 // `validate` lets a caller require more than HTTP 200 - e.g. the image service
 // returns 200 from /health even while the model failed to load, so its readiness
 // check must inspect the JSON `status` field.
@@ -835,14 +853,14 @@ async function runInstall() {
 
   // Install backend
   statusLine('INFO', 'Installing backend dependencies...');
-  const backendCode = await runForeground(npmCommand(), npmArgs(['install', '--legacy-peer-deps']), BACKEND_DIR);
+  const backendCode = await runForeground(npmCommand(), npmArgs(installArgs(BACKEND_DIR)), BACKEND_DIR);
   if (backendCode !== 0) {
     throw new Error('Backend npm install failed');
   }
 
   // Install frontend
   statusLine('INFO', 'Installing frontend dependencies...');
-  const frontendCode = await runForeground(npmCommand(), npmArgs(['install', '--legacy-peer-deps']), FRONTEND_DIR);
+  const frontendCode = await runForeground(npmCommand(), npmArgs(installArgs(FRONTEND_DIR)), FRONTEND_DIR);
   if (frontendCode !== 0) {
     throw new Error('Frontend npm install failed');
   }

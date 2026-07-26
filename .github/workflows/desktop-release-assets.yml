@@ -22,8 +22,15 @@ concurrency:
 jobs:
   # Gate: backend tests + frontend build + version-sync check must pass before we
   # build or upload any installer. A tag on a broken commit now fails here.
+  #
+  # The ref must be passed explicitly. A reusable workflow checks out the CALLER's
+  # SHA by default, which on workflow_dispatch is the branch the dispatch ran from,
+  # not the tag being released. That let the gate test one commit while the build
+  # jobs below shipped a different one.
   test:
     uses: ./.github/workflows/test.yml
+    with:
+      ref: ${{ github.event.inputs.tag || github.ref_name }}
 
   macos:
     needs: test
