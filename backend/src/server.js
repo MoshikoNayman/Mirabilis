@@ -9,7 +9,7 @@ import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
-import { mkdir, writeFile, readFile, appendFile, unlink, readdir, rename, chmod } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, appendFile, unlink, readdir, rename, chmod, open, copyFile, stat } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { exec as cpExec, spawn } from 'node:child_process';
@@ -44,7 +44,14 @@ import { createMcpServerHandler } from './mcp/mcpServer.js';
 import { createIntelLedgerStorage } from './storage/intelLedger.js';
 import { createRecall } from './recall.js';
 import { createConfigVault } from './configVault.js';
-import { makeHostGuard, makeMcpAuthGuard, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
+import { makeHostGuard, makeMcpAuthGuard, makePrivilegedGuard, isLoopbackRequest, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
+import { classifyProviderScope } from './providerScope.js';
+import { commandExists, runCommand, extractAudioTrack } from './services/proc.js';
+import {
+  WHISPER_MODEL_CATALOG, getWhisperModelsDir, getInstalledWhisperModelIds,
+  resolveWhisperCppBinary, resolveWhisperCppModel, cleanTranscript, transcribeWithWhisperCpp
+} from './services/whisperCpp.js';
+import { selectHistoryWindow } from './historyWindow.js';
 import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
 import { shouldSuppressReminder, buildReminderWebhookHeaders } from './intelLedgerReminderUtils.js';
 
@@ -86,6 +93,16 @@ app.use(helmet({
 
 app.use(compression({
   filter: (req, res) => {
+    // Never compress an SSE response: gzip buffers until it has enough bytes to
+    // emit a block, which stalls token-by-token delivery.
+    //
+    // Test the RESPONSE content type, not the request Accept header. The chat
+    // stream is a fetch() POST that sends only Content-Type: application/json,
+    // so its Accept is */* and an Accept-based guard never fired, meaning every
+    // token stream was being buffered. The filter runs from on-headers, so the
+    // route's Content-Type is already set by this point.
+    const responseType = String(res.getHeader('Content-Type') || '');
+    if (responseType.includes('text/event-stream')) return false;
     if (String(req.headers.accept || '').includes('text/event-stream')) return false;
     return compression.filter(req, res);
   }
@@ -120,7 +137,43 @@ if (isProduction && !isLoopbackBind) {
   app.use('/api', apiLimiter);
 }
 
-app.use(express.json({ limit: '1mb' }));
+// Body parsing. The image-messages route carries base64 image payloads and
+// mounts its own 24mb parser, but a route-level parser is a no-op once the body
+// has already been read: body-parser skips when req._body is set. So that route
+// has to be excluded here, or its larger limit never applies and a legitimate
+// image upload fails at 1mb.
+const IMAGE_MESSAGE_PATH_RE = /^\/api\/chats\/[^/]+\/image-messages\/?$/;
+const jsonParser = express.json({ limit: '1mb' });
+app.use((req, res, next) => {
+  if (IMAGE_MESSAGE_PATH_RE.test(req.path)) return next();
+  return jsonParser(req, res, next);
+});
+
+// Local session token. Created here (rather than next to the /mcp mount further
+// down) because the privileged app routes defined below need it at definition
+// time: SSH connect/exec, the workspace file routes and the vault indexer.
+const mcpToken = loadOrCreateMcpToken(config.mcpTokenPath, config.mcpToken);
+const guardRemote = makePrivilegedGuard(mcpToken, 'remote control');
+const guardWorkspace = makePrivilegedGuard(mcpToken, 'workspace access');
+const guardVault = makePrivilegedGuard(mcpToken, 'config vault');
+
+// Token bootstrap for the app's own UI. Answers only loopback callers presenting
+// an allowed Origin, so a page on another origin cannot read the token and a
+// non-local caller cannot either. This does not defend against another process
+// running as the same user, which can read the token file directly; it closes
+// the remote and cross-origin paths, which is what the guard needs.
+app.get('/api/session/token', (req, res) => {
+  if (!isLoopbackRequest(req)) {
+    res.status(403).json({ error: 'The session token is only available to local callers.' });
+    return;
+  }
+  const origin = req.headers.origin;
+  if (origin && !isAllowedOrigin(origin)) {
+    res.status(403).json({ error: 'Origin not allowed.' });
+    return;
+  }
+  res.json({ token: mcpToken });
+});
 
 function nowIso() {
   return new Date().toISOString();
@@ -244,9 +297,13 @@ async function pickMostUncensoredOllamaModel(cfg) {
   return installed.find((item) => isUncensoredModelRecord(item))?.id || null;
 }
 
+// Write one SSE frame. Returns false when the socket is already gone, so a
+// caller streaming tokens can stop rather than writing into a dead connection
+// (which throws EPIPE and turns a normal user navigation into a logged crash).
 function sendSSE(res, event, payload) {
+  if (res.writableEnded || res.destroyed || !res.writable) return false;
   res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  return res.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
 function estimateTokens(text) {
@@ -445,59 +502,6 @@ async function findLocalModelPath(modelId, modelPathHint = '') {
 }
 const execAsync = promisify(cpExec);
 
-async function commandExists(command) {
-  const probe = process.platform === 'win32' ? `where ${command}` : `command -v ${command}`;
-  try {
-    await execAsync(probe, { timeout: 5000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 60 * 10 } = {}) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, {
-      cwd,
-      env: env ? { ...process.env, ...env } : process.env,
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    let stdout = '';
-    let stderr = '';
-    const timeout = timeoutMs > 0 ? setTimeout(() => {
-      try { proc.kill('SIGKILL'); } catch {}
-      reject(new Error(`${command} timed out after ${timeoutMs}ms`));
-    }, timeoutMs) : null;
-
-    proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    proc.on('error', (error) => {
-      if (timeout) clearTimeout(timeout);
-      reject(error);
-    });
-    proc.on('close', (code) => {
-      if (timeout) clearTimeout(timeout);
-      if (code === 0) {
-        resolve({ stdout, stderr });
-        return;
-      }
-      reject(new Error(`${command} exited with code ${code}${stderr ? `: ${stderr.trim()}` : ''}`));
-    });
-  });
-}
-
-async function extractAudioTrack(inputPath, outputPath) {
-  await runCommand('ffmpeg', [
-    '-y',
-    '-i', inputPath,
-    '-vn',
-    '-acodec', 'pcm_s16le',
-    '-ar', '16000',
-    '-ac', '1',
-    outputPath
-  ]);
-}
 
 async function transcribeWithOpenAI({ audioPath, apiKey, baseUrl, model }) {
   const fileBuffer = await readFile(audioPath);
@@ -674,76 +678,12 @@ async function downloadPiperVoiceModel(modelId) {
 // (webkitSpeechRecognition) streams to Google's cloud endpoint and is dead in a
 // packaged Electron build, so the voice loop records audio and posts it here.
 // Mirrors the Piper pattern: a small model catalog, a models dir, and helpers.
-const WHISPER_MODEL_CATALOG = [
-  { id: 'base.en', label: 'Base English (fast, ~142MB)', sizeMb: 142, url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin' },
-  { id: 'small.en', label: 'Small English (more accurate, ~466MB)', sizeMb: 466, url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin' }
-];
-
-function getWhisperModelsDir() {
-  if (process.platform === 'darwin') {
-    return join(os.homedir(), 'Library', 'Application Support', 'whisper', 'models');
-  }
-  return join(os.homedir(), '.local', 'share', 'whisper', 'models');
-}
-
-function getInstalledWhisperModelIds() {
-  const dir = getWhisperModelsDir();
-  return WHISPER_MODEL_CATALOG
-    .filter((m) => existsSync(join(dir, `ggml-${m.id}.bin`)))
-    .map((m) => m.id);
-}
-
 async function downloadWhisperModel(modelId) {
   const model = WHISPER_MODEL_CATALOG.find((m) => m.id === modelId);
   if (!model) throw new Error(`Unknown Whisper model: ${modelId}`);
   const dir = getWhisperModelsDir();
   await mkdir(dir, { recursive: true });
   await downloadFile(model.url, join(dir, `ggml-${model.id}.bin`));
-}
-
-// whisper.cpp ships its CLI under a few names across versions/distros.
-const WHISPER_CPP_BINARIES = ['whisper-cli', 'whisper-cpp', 'main'];
-
-async function resolveWhisperCppBinary() {
-  const override = process.env.WHISPER_CPP_BINARY;
-  if (override) return (override.includes('/') ? existsSync(override) : await commandExists(override)) ? override : null;
-  for (const cand of WHISPER_CPP_BINARIES) {
-    if (await commandExists(cand)) return cand;
-  }
-  return null;
-}
-
-function resolveWhisperCppModel() {
-  const override = process.env.WHISPER_CPP_MODEL;
-  if (override && existsSync(override)) return override;
-  const dir = getWhisperModelsDir();
-  for (const m of WHISPER_MODEL_CATALOG) {
-    const p = join(dir, `ggml-${m.id}.bin`);
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
-
-// Strip whisper.cpp non-speech markers like [BLANK_AUDIO], (music), [ Silence ].
-function cleanTranscript(text) {
-  return String(text || '')
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/\((?:blank audio|music|silence|inaudible|noise)\)/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-async function transcribeWithWhisperCpp({ wavPath, binary, model, outStem }) {
-  // whisper-cli writes <outStem>.txt with -otxt/-of; -nt strips timestamps.
-  await runCommand(binary, [
-    '-m', model,
-    '-f', wavPath,
-    '-otxt',
-    '-of', outStem,
-    '-nt'
-  ], { timeoutMs: 1000 * 60 * 5 });
-  const txt = await readFile(`${outStem}.txt`, 'utf8').catch(() => '');
-  return cleanTranscript(txt);
 }
 
 async function getSttStatus() {
@@ -869,7 +809,8 @@ async function probeProviderTargets(targets, options = {}) {
 
 // Providers that send data off-device. "Go Dark" (local-only lockdown) blocks
 // these so a session can be guaranteed to never leave the machine.
-const REMOTE_PROVIDERS = new Set(['openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'gpuaas', 'claude']);
+// Provider locality now lives in providerScope.js so the server and its tests
+// share one definition. See the import at the top of this file.
 
 // Model Warmth as Presence: report which Ollama models are currently loaded in
 // memory (warm in VRAM), so local model "buddies" can show a truthful green dot
@@ -1947,7 +1888,7 @@ function runSsh(sshClient, command, timeoutMs) {
   });
 }
 
-app.post('/api/remote/connect', async (req, res) => {
+app.post('/api/remote/connect', guardRemote, async (req, res) => {
   const { type, host, port, user, authType, password, privateKeyPath } = req.body || {};
 
   // Disconnect any existing connection first
@@ -2028,7 +1969,7 @@ app.get('/api/remote/status', (_req, res) => {
   });
 });
 
-app.post('/api/remote/exec', async (req, res) => {
+app.post('/api/remote/exec', guardRemote, async (req, res) => {
   const { command, timeout = 30000 } = req.body || {};
 
   if (!remoteState) return res.status(400).json({ error: 'Not connected. Connect first.' });
@@ -2051,7 +1992,7 @@ app.post('/api/remote/exec', async (req, res) => {
   }
 });
 
-app.delete('/api/remote/disconnect', (_req, res) => {
+app.delete('/api/remote/disconnect', guardRemote, (_req, res) => {
   if (remoteState?.sshClient) {
     try { remoteState.sshClient.end(); } catch { /* ignore */ }
   }
@@ -2065,7 +2006,7 @@ app.delete('/api/remote/disconnect', (_req, res) => {
 // workspace.js (relative paths that escape the root are rejected). Only one root
 // is watched at a time, held in memory like remoteState above.
 
-app.post('/api/workspace/watch', async (req, res) => {
+app.post('/api/workspace/watch', guardWorkspace, async (req, res) => {
   const { path: dir } = req.body || {};
   if (!dir || typeof dir !== 'string') {
     return res.status(400).json({ error: 'path is required' });
@@ -2079,7 +2020,7 @@ app.post('/api/workspace/watch', async (req, res) => {
   }
 });
 
-app.get('/api/workspace/files', async (_req, res) => {
+app.get('/api/workspace/files', guardWorkspace, async (_req, res) => {
   const root = workspace.getRoot();
   if (!root) return res.status(400).json({ error: 'No workspace is being watched.' });
   try {
@@ -2090,7 +2031,7 @@ app.get('/api/workspace/files', async (_req, res) => {
   }
 });
 
-app.get('/api/workspace/file', async (req, res) => {
+app.get('/api/workspace/file', guardWorkspace, async (req, res) => {
   const rel = req.query?.path;
   if (!rel || typeof rel !== 'string') {
     return res.status(400).json({ error: 'path query parameter is required' });
@@ -2471,14 +2412,38 @@ async function listMemoryItems() {
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed.items) ? parsed.items : [];
-  } catch {
-    return [];
+  } catch (parseError) {
+    // Returning [] here used to combine with saveMemoryItems below to erase the
+    // file: a corrupt read reported "no memories", and the next save wrote that
+    // empty list over the user's real data. Recover, else fail loud.
+    try {
+      const parsed = JSON.parse(await readFile(`${memoryStorePath}.bak`, 'utf8'));
+      console.warn(`[memory] ${memoryStorePath} was corrupt; recovered from .bak`);
+      return Array.isArray(parsed.items) ? parsed.items : [];
+    } catch { /* no usable backup */ }
+    const quarantine = `${memoryStorePath}.corrupt-${Date.now()}`;
+    try { await rename(memoryStorePath, quarantine); } catch { /* best effort */ }
+    throw new Error(
+      `Personal memory store at ${memoryStorePath} is corrupt and no usable backup exists. ` +
+      `The unreadable file was moved to ${quarantine}. Original error: ${parseError.message}`
+    );
   }
 }
 
+// Atomic write with a rolling backup, matching the discipline in storage/*.js.
 async function saveMemoryItems(items) {
   await ensureMemoryStoreFile();
-  await writeFile(memoryStorePath, JSON.stringify({ items }, null, 2), 'utf8');
+  const serialized = JSON.stringify({ items }, null, 2);
+  const tmpPath = `${memoryStorePath}.tmp-${process.pid}`;
+  const handle = await open(tmpPath, 'w');
+  try {
+    await handle.writeFile(serialized, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try { await copyFile(memoryStorePath, `${memoryStorePath}.bak`); } catch { /* first write */ }
+  await rename(tmpPath, memoryStorePath);
 }
 
 app.get('/api/training/status', async (_req, res) => {
@@ -2556,7 +2521,15 @@ app.post('/api/web-search', async (req, res) => {
     if (now - ts > 60_000) webSearchLastCall.delete(key);
   }
 
-  const { query, maxResults } = req.body || {};
+  const { query, maxResults, localOnly } = req.body || {};
+  // Go Dark means no egress, and a search query is the most sensitive thing the
+  // app could leak: it is the user's raw message text, sent to a third party.
+  // The client-side check only covered remote MODEL providers, so searching with
+  // a local model selected still reached out. Enforce it here as well.
+  if (localOnly === true) {
+    res.status(403).json({ error: 'Go Dark is on: web search is disabled because it would send your query to a third-party service.' });
+    return;
+  }
   if (!query || typeof query !== 'string' || !query.trim()) {
     res.status(400).json({ error: 'query is required' });
     return;
@@ -2870,9 +2843,18 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   // Go Dark (local-only lockdown): hard-block any remote provider before a single
   // byte leaves the machine. The frontend also greys these out, but this is the
   // real guarantee - the promise is enforced here, in the send path.
-  if (localOnly === true && REMOTE_PROVIDERS.has(provider || config.aiProvider)) {
-    res.status(403).json({ error: `Go Dark is on - "${provider || config.aiProvider}" is a remote provider and was blocked. Pick a local model (Ollama or KoboldCpp).` });
-    return;
+  if (localOnly === true) {
+    const activeProvider = provider || config.aiProvider;
+    // Judged by resolved host, not by provider ID: openai-compatible, vllm and
+    // llamacpp accept an arbitrary base URL, so any of them can point at a cloud
+    // endpoint while looking local in the picker. Fails closed on anything unknown.
+    const scope = classifyProviderScope(activeProvider, providerBaseUrl);
+    if (scope.offDevice) {
+      res.status(403).json({
+        error: `Go Dark is on - ${scope.reason} Pick a local model (Ollama or KoboldCpp), point the endpoint at localhost, or turn Go Dark off.`
+      });
+      return;
+    }
   }
 
   const chat = await getChat(config.chatStorePath, chatId);
@@ -2915,7 +2897,25 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   res.flushHeaders();
 
   const abortController = new AbortController();
-  req.on('close', () => abortController.abort());
+  // Stop generating when the client goes away, and remember that it happened.
+  //
+  // This listens on the RESPONSE, not the request. `req` here is a fully-read
+  // POST body, so its 'close' fires once the body has been consumed rather than
+  // when the socket drops: wiring the abort to it meant a user who navigated
+  // away mid-reply left the engine generating the entire remaining answer into a
+  // dead socket. res 'close' is the documented signal for a connection that
+  // ended before the response completed.
+  //
+  // The flag matters separately: the provider adapters swallow AbortError and
+  // return normally, so without it the route cannot tell a finished reply from
+  // an abandoned one, and would save half an answer as though it were whole.
+  let clientGone = false;
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      clientGone = true;
+      abortController.abort();
+    }
+  });
 
   const effectiveProvider = provider || config.aiProvider;
   let effectiveModel = await getEffectiveModel({ provider: effectiveProvider, model, config });
@@ -3006,24 +3006,34 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     baseUrl: ollamaBaseUrl
   });
   // History token budget = a fraction of the resolved context window (headroom left
-  // for system prompt + RAG + reply), or the static floor when the window is unknown.
+  // for system prompt + RAG + reply), capped by the static ceiling.
+  //
+  // This was Math.max, which made MAX_HISTORY_TOKENS a FLOOR: with a 2048-token
+  // window the budget became 8000, so the sliding window below happily packed a
+  // prompt four times larger than the context the engine was configured for,
+  // and the engine silently truncated the front (losing the system prompt) or
+  // failed outright. Math.min makes the constant do what its name says.
   const historyBudget = tuning.numCtx
-    ? Math.max(MAX_HISTORY_TOKENS, Math.floor(tuning.numCtx * HISTORY_CTX_FRACTION))
+    ? Math.min(MAX_HISTORY_TOKENS, Math.floor(tuning.numCtx * HISTORY_CTX_FRACTION))
     : MAX_HISTORY_TOKENS;
 
-  // Use a sliding history window to keep prefill bounded by the budget above.
-  const selectedHistory = [];
-  let historyTokenBudget = 0;
-  for (let i = chat.messages.length - 1; i >= 0; i -= 1) {
-    const msg = chat.messages[i];
-    const t = estimateTokens(msg.content);
-    const wouldExceed = (historyTokenBudget + t) > historyBudget;
-    if (wouldExceed && selectedHistory.length >= 6) break;
-    selectedHistory.push(msg);
-    historyTokenBudget += t;
-    if (selectedHistory.length >= MAX_HISTORY_MESSAGES) break;
-  }
-  selectedHistory.reverse();
+  // Anchored history window. The start index is remembered on the chat and held
+  // still while the prompt fits, so the prompt PREFIX stays byte-identical
+  // across turns and the engine's KV cache keeps hitting. Recomputing the window
+  // from the newest message every turn (the previous behaviour) shifted the
+  // front constantly and forced a full re-prefill of the whole history on every
+  // single message.
+  const windowed = selectHistoryWindow(chat.messages, {
+    budgetTokens: historyBudget,
+    startIndex: chat.historyStartIndex,
+    maxMessages: MAX_HISTORY_MESSAGES,
+    minMessages: 6,
+    estimateTokens
+  });
+  const selectedHistory = windowed.messages;
+  const historyTokenBudget = windowed.tokens;
+  // Persist the anchor so the next turn reuses the same prefix.
+  chat.historyStartIndex = windowed.startIndex;
 
   let outgoingHasImages = false;
   for (const msg of selectedHistory) {
@@ -3086,6 +3096,28 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       onNotice: (message) => { tunedNotice = message; sendSSE(res, 'notice', { message }); }
     });
 
+    // A stream that produced no text is a failure, not an empty answer. Engines
+    // can close a 200 response without emitting content (runner died, prompt
+    // rejected, model unloaded); persisting that as an assistant turn leaves a
+    // blank bubble in the transcript and poisons the next request's history.
+    // The `notice` path is exempt: it explains a deliberate no-output case.
+    // A stream the user walked away from is not a failure: keep whatever was
+    // generated so it is still in the transcript when they come back, but mark
+    // it so the UI (and the next turn's history) knows it was cut short.
+    if (!assistantText.trim() && clientGone) {
+      // Nothing was produced before they left; drop the empty turn entirely.
+      chat.messages = chat.messages.filter((m) => m.id !== userMessage.id);
+      chat.updatedAt = prevChatUpdatedAt;
+      if (getEpoch() === requestEpoch) await saveChat(config.chatStorePath, chat).catch(() => {});
+      return;
+    }
+    if (!assistantText.trim() && !tunedNotice) {
+      throw new Error(
+        'The model returned no output. The engine may have run out of memory or stopped early. ' +
+        'Check the engine is still running, then try a shorter prompt or a smaller model.'
+      );
+    }
+
     const perfReceipt = buildPerformanceReceipt({
       streamStartedAt,
       firstTokenAt,
@@ -3109,7 +3141,8 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       },
       model: effectiveModel,
       provider: effectiveProvider,
-      performance: perfReceipt
+      performance: perfReceipt,
+      ...(clientGone ? { truncated: true, stopReason: 'client-disconnect' } : {})
     };
 
     chat.messages.push(assistantMessage);
@@ -3190,18 +3223,75 @@ async function collectMessageImages(msg) {
 
 // Best-effort removal of a chat's on-disk backing files (uploaded attachments +
 // generated images) when the chat is deleted or all chats are cleared.
-async function purgeChatBackingFiles(chat) {
-  if (!chat || !Array.isArray(chat.messages)) return;
-  for (const m of chat.messages) {
-    for (const a of (Array.isArray(m.attachments) ? m.attachments : [])) {
-      if (a && a.storedName && SAFE_STORED_NAME.test(a.storedName)) {
-        await unlink(join(uploadDir, a.storedName)).catch(() => {});
+// Every file a chat references, across BOTH its live messages and its snapshots.
+// Snapshots clone whole messages into state.messages (see buildSnapshotRecord),
+// so a restore point keeps images and attachments alive that the live thread no
+// longer mentions. Walking only chat.messages both leaked files on delete and
+// would delete still-referenced ones during a sweep.
+function collectChatFileRefs(chat, images = new Set(), uploads = new Set()) {
+  const scanMessages = (list) => {
+    for (const m of (Array.isArray(list) ? list : [])) {
+      for (const a of (Array.isArray(m?.attachments) ? m.attachments : [])) {
+        if (a?.storedName && SAFE_STORED_NAME.test(a.storedName)) uploads.add(a.storedName);
+      }
+      if (typeof m?.imageUrl === 'string' && m.imageUrl.startsWith('/api/images/')) {
+        const fname = m.imageUrl.slice('/api/images/'.length);
+        if (SAFE_STORED_NAME.test(fname)) images.add(fname);
       }
     }
-    if (typeof m.imageUrl === 'string' && m.imageUrl.startsWith('/api/images/')) {
-      const fname = m.imageUrl.slice('/api/images/'.length);
-      if (SAFE_STORED_NAME.test(fname)) await unlink(join(imageDir, fname)).catch(() => {});
+  };
+  scanMessages(chat?.messages);
+  for (const snap of (Array.isArray(chat?.snapshots) ? chat.snapshots : [])) {
+    scanMessages(snap?.state?.messages);
+  }
+  return { images, uploads };
+}
+
+async function purgeChatBackingFiles(chat) {
+  if (!chat) return;
+  const { images, uploads } = collectChatFileRefs(chat);
+  for (const name of uploads) await unlink(join(uploadDir, name)).catch(() => {});
+  for (const name of images) await unlink(join(imageDir, name)).catch(() => {});
+}
+
+// Mark-and-sweep over the image and upload directories.
+//
+// Targeted purging on delete cannot catch every path: the PATCH handler replaces
+// a chat's messages wholesale, snapshot restore drops references, and
+// Off-the-Record chats write files while never being persisted, so nothing knows
+// to clean up after them. Rather than patch each site and hope the list is
+// complete, sweep once at boot, when no request is in flight and no ephemeral
+// chat exists yet. Anything on disk that no stored chat references is garbage.
+async function sweepOrphanedChatFiles() {
+  try {
+    const summaries = await listChats(config.chatStorePath).catch(() => []);
+    const images = new Set();
+    const uploads = new Set();
+    for (const summary of (Array.isArray(summaries) ? summaries : [])) {
+      const full = await getChat(config.chatStorePath, summary.id).catch(() => null);
+      if (full) collectChatFileRefs(full, images, uploads);
     }
+
+    // Skip very recent files as a guard against a second instance mid-write.
+    const cutoff = Date.now() - 60_000;
+    let removed = 0;
+    for (const [dir, keep] of [[imageDir, images], [uploadDir, uploads]]) {
+      const entries = await readdir(dir).catch(() => []);
+      for (const name of entries) {
+        if (keep.has(name)) continue;
+        const full = join(dir, name);
+        try {
+          const info = await stat(full);
+          if (!info.isFile() || info.mtimeMs > cutoff) continue;
+          await unlink(full);
+          removed += 1;
+        } catch { /* raced with another delete; fine */ }
+      }
+    }
+    if (removed > 0) console.log(`[cleanup] removed ${removed} orphaned image/upload file(s)`);
+  } catch (error) {
+    // Never let housekeeping stop the server from starting.
+    console.warn('[cleanup] orphan sweep skipped:', error?.message || error);
   }
 }
 
@@ -3395,7 +3485,8 @@ const mcpServerHandler = createMcpServerHandler({
 });
 // Gate the machine-facing /mcp surface (run_command/write_file/read_file) with a
 // local bearer token so it is never callable by an unauthenticated caller.
-const mcpToken = loadOrCreateMcpToken(config.mcpTokenPath, config.mcpToken);
+// (The token itself is created near the top of this file, because the privileged
+// app routes defined above also need it.)
 app.post('/mcp', makeMcpAuthGuard(mcpToken), mcpServerHandler);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3554,7 +3645,7 @@ app.get('/api/vault/status', async (req, res) => {
   }
 });
 
-app.post('/api/vault/index', async (req, res) => {
+app.post('/api/vault/index', guardVault, async (req, res) => {
   const folder = String(req.body?.path || '').trim();
   if (!folder) {
     res.status(400).json({ ok: false, error: 'path is required' });
@@ -3568,7 +3659,7 @@ app.post('/api/vault/index', async (req, res) => {
   }
 });
 
-app.post('/api/vault/query', async (req, res) => {
+app.post('/api/vault/query', guardVault, async (req, res) => {
   const query = String(req.body?.query || '').trim();
   const limit = Number(req.body?.limit) || undefined;
   if (!query) {
@@ -3977,12 +4068,24 @@ app.use((error, _req, res, _next) => {
     return res.status(403).json({ error: 'Origin not allowed' });
   }
 
-  const message = isProduction
+  // Honor a status carried on the error. Flattening everything to 500 reported
+  // client mistakes as server faults: an oversized body (413 from body-parser)
+  // and malformed JSON (400) both showed up as "Internal server error", which
+  // sends the user hunting for a backend problem that does not exist. It also
+  // means a 4xx is not masked in production, where the message is withheld.
+  const status = Number(error?.status || error?.statusCode) || 500;
+  const isClientError = status >= 400 && status < 500;
+
+  // Client errors keep their message (it is about their request, not our
+  // internals). Server errors stay opaque in production.
+  const message = (isProduction && !isClientError)
     ? 'Internal server error'
     : (error?.message || 'Internal server error');
 
-  console.error('[backend error]', error?.stack || error?.message || error);
-  return res.status(500).json({ error: message });
+  if (status >= 500) {
+    console.error('[backend error]', error?.stack || error?.message || error);
+  }
+  return res.status(status).json({ error: message });
 });
 
 if (INTELLEDGER_REMINDER_WORKER_ENABLED) {
@@ -4001,10 +4104,17 @@ if (INTELLEDGER_REMINDER_WORKER_ENABLED) {
 const server = app.listen(config.port, config.bindHost, () => {
   console.log(`Backend listening on http://${config.bindHost}:${config.port} (host=${config.bindHost})`);
   console.log(`MCP server endpoint: http://${config.bindHost}:${config.port}/mcp`);
-  console.log(`MCP token (for external MCP clients): ${mcpToken}  [also saved at ${config.mcpTokenPath}]`);
+  // Print only a fingerprint and the path. The desktop app pipes backend stdout
+  // into a mode-0644 backend.log, so logging the value put a working bearer
+  // token in world-readable cleartext on every start.
+  console.log(`MCP token (for external MCP clients): ${String(mcpToken).slice(0, 4)}... [read the full token from ${config.mcpTokenPath}]`);
   if (config.bindHost === '0.0.0.0' || config.bindHost === '::') {
     console.warn('[security] Backend is bound to a non-loopback interface. Privileged endpoints (/mcp, /api/remote/*) are reachable from the network. Put an authenticating proxy in front, or unset MIRABILIS_BIND_HOST to bind loopback only.');
   }
+  // Reclaim images and uploads left behind by wholesale message edits, snapshot
+  // restores and Off-the-Record chats. Deliberately at boot: nothing is in
+  // flight and no ephemeral chat exists yet, so "unreferenced" is unambiguous.
+  sweepOrphanedChatFiles();
 });
 
 server.on('error', (error) => {

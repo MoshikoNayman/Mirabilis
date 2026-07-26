@@ -129,14 +129,24 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
         if (!line.trim() || line.trim() === '[DONE]') continue;
         if (!line.startsWith('data: ')) continue;
 
+        let json;
         try {
-          const json = JSON.parse(line.slice(6));
-          const delta = json.choices?.[0]?.delta?.content;
-          if (delta) {
-            onToken(delta);
-          }
+          json = JSON.parse(line.slice(6));
         } catch {
-          // Ignore JSON parse errors for partial lines
+          // Partial frame: the next chunk will complete it.
+          continue;
+        }
+        // llama-server, vLLM and most OpenAI-compatible servers report a
+        // mid-generation failure as a `data: {"error":...}` frame on an
+        // already-200 response. Discarding it left the reply empty and the
+        // route saved that emptiness as success.
+        if (json.error) {
+          const detail = json.error?.message || json.error;
+          throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
+        }
+        const delta = json.choices?.[0]?.delta?.content;
+        if (delta) {
+          onToken(delta);
         }
       }
     }

@@ -61,6 +61,71 @@ export function makeMcpAuthGuard(expectedToken) {
   };
 }
 
+// Same token check, applied to the app's OWN privileged routes rather than /mcp.
+// These endpoints run shell commands over SSH, read and write arbitrary
+// workspace paths, and index folders from disk. Before this guard they were
+// reachable by anything that knew the port: the host guard blocks a foreign Host
+// header and CORS blocks a browser on another origin, but neither stops a plain
+// local HTTP client. The app's own UI gets the token from GET /api/session/token,
+// which answers only loopback requests carrying an allowed Origin.
+/** @param {string} expectedToken @param {string} label */
+export function makePrivilegedGuard(expectedToken, label) {
+  return function privilegedGuard(req, res, next) {
+    const auth = String(req.headers.authorization || '');
+    const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    const header = String(req.headers['x-mirabilis-mcp-token'] || '').trim();
+    const provided = bearer || header;
+    if (provided && provided === expectedToken) return next();
+    res.status(401).json({
+      error: `Unauthorized: ${label} is a privileged local route and requires the Mirabilis session token. ` +
+        'The app sends it automatically. To call this route directly, send ' +
+        'Authorization: Bearer <token> using the token file named in the startup log.'
+    });
+  };
+}
+
+// Is this URL served by a host on the user's own machine or LAN?
+//
+// Go Dark and the Privacy Receipt both need to answer "does this leave the
+// device", and the provider ID cannot answer it: openai-compatible, vllm and
+// llamacpp all take an arbitrary base URL, so the same provider ID can point at
+// localhost or at a cloud endpoint. Decide from the resolved host instead.
+// Loopback and RFC1918 private ranges count as local; anything else does not.
+// An unparseable or empty URL is treated as NOT local, so the safe answer wins.
+/** @param {string} url @returns {boolean} */
+export function isLocalHostUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return false;
+  let host;
+  try {
+    host = new URL(raw).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+  if (host === '::1' || host === '[::1]') return true;
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (!v4) return false;
+  const [a, b] = [Number(v4[1]), Number(v4[2])];
+  if (a === 127) return true;                          // loopback
+  if (a === 10) return true;                           // 10.0.0.0/8
+  if (a === 192 && b === 168) return true;             // 192.168.0.0/16
+  if (a === 172 && b >= 16 && b <= 31) return true;    // 172.16.0.0/12
+  if (a === 169 && b === 254) return false;            // link-local: not a trusted LAN peer
+  return false;
+}
+
+// True only for requests that arrived over loopback. Used to gate the token
+// bootstrap route, so the token is never handed to a non-local caller even if
+// the server has been bound more widely.
+/** @param {import('express').Request} req */
+export function isLoopbackRequest(req) {
+  const raw = String(req.socket?.remoteAddress || '');
+  // Node reports IPv4-mapped IPv6 as ::ffff:127.0.0.1
+  const addr = raw.replace(/^::ffff:/, '');
+  return addr === '127.0.0.1' || addr === '::1' || addr.startsWith('127.');
+}
+
 // ── Outbound SSRF guard (cloud metadata only) ───────────────────────────────
 // Local AI legitimately targets loopback (Ollama, llama-server) and the user's
 // own LAN hosts, so we deliberately do NOT block private ranges. We block only

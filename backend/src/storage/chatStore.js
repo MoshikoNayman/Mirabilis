@@ -87,7 +87,13 @@ export async function readStore(filePath) {
 // Atomic write: serialize to a temp file, fsync, then rename over the target
 // (atomic on POSIX). A crash mid-write leaves either the old file or the new
 // file intact - never a truncated one. The previous good copy is kept as .bak.
-export async function writeStore(filePath, data) {
+//
+// Pass { shred: true } when the write REMOVES data the user asked to be gone
+// (delete, clear, retention purge). Rolling a .bak there would defeat the
+// deletion: the full pre-delete store would survive in a sibling file forever,
+// since nothing else ever removes a .bak. Shredding writes no backup and drops
+// any existing one, so "delete" actually deletes.
+export async function writeStore(filePath, data, { shred = false } = {}) {
   invalidateCache();
   const serialized = JSON.stringify(data);
   const tmpPath = `${filePath}.tmp-${process.pid}`;
@@ -98,9 +104,14 @@ export async function writeStore(filePath, data) {
   } finally {
     await handle.close();
   }
-  // Roll the current good file to .bak before replacing it.
-  try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write: no prior file */ }
-  await fs.rename(tmpPath, filePath);
+  if (shred) {
+    await fs.rename(tmpPath, filePath);
+    await fs.unlink(`${filePath}.bak`).catch(() => { /* no prior backup */ });
+  } else {
+    // Roll the current good file to .bak before replacing it.
+    try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write: no prior file */ }
+    await fs.rename(tmpPath, filePath);
+  }
   _cache = data;
   _cachePath = filePath;
 }
@@ -161,7 +172,7 @@ export function deleteChat(filePath, chatId) {
     const store = await readStore(filePath);
     const before = store.chats.length;
     store.chats = store.chats.filter((chat) => chat.id !== chatId);
-    await writeStore(filePath, store);
+    await writeStore(filePath, store, { shred: true });
     return store.chats.length < before;
   });
 }
@@ -173,7 +184,7 @@ export function clearChats(filePath) {
     // emptyStore: `{ ...emptyStore }` aliases emptyStore.chats, and a later
     // saveChat push()es onto that shared array, permanently polluting the
     // "empty" template so subsequent clears silently keep old chats on disk.
-    await writeStore(filePath, { chats: [] });
+    await writeStore(filePath, { chats: [] }, { shred: true });
   });
 }
 

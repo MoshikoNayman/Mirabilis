@@ -392,7 +392,10 @@ async function readStore(filePath) {
 
 // Atomic write (temp file + fsync + rename) with a rolling .bak of the prior
 // good copy, so a crash mid-write can never truncate the store.
-async function writeStore(filePath, data) {
+// Pass { shred: true } on writes that REMOVE data by intent (delete, PII purge,
+// retention sweep). A rolled .bak would keep the full pre-purge store on disk
+// forever, since nothing ever removes one.
+async function writeStore(filePath, data, { shred = false } = {}) {
   invalidateCache();
   const serialized = JSON.stringify(data, null, 2);
   const tmpPath = `${filePath}.tmp-${process.pid}`;
@@ -403,15 +406,20 @@ async function writeStore(filePath, data) {
   } finally {
     await handle.close();
   }
-  try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write */ }
-  await fs.rename(tmpPath, filePath);
+  if (shred) {
+    await fs.rename(tmpPath, filePath);
+    await fs.unlink(`${filePath}.bak`).catch(() => { /* no prior backup */ });
+  } else {
+    try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write */ }
+    await fs.rename(tmpPath, filePath);
+  }
   _cache = data;
   _cachePath = filePath;
 }
 
 export function createIntelLedgerStorage(filePath) {
   const get = () => readStore(filePath);
-  const set = (data) => writeStore(filePath, data);
+  const set = (data, opts) => writeStore(filePath, data, opts);
 
   return {
     async ensureStore() { return ensureStore(filePath); },
@@ -805,7 +813,9 @@ export function createIntelLedgerStorage(filePath) {
         });
 
         session.updated_at = new Date().toISOString();
-        await set(store);
+        // Retention exists to remove data past its cutoff; a rolled .bak would
+        // keep every purged record on disk indefinitely.
+        await set(store, { shred: true });
 
         const after = {
           interactions: store.interactions.length,

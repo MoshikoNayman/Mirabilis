@@ -6,8 +6,9 @@ import multer from 'multer';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { randomUUID, createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { resolveIntelLedgerIdentity } from '../intelLedgerIdentity.js';
+import { whisperCppAvailable, transcribeWithWhisperCpp } from '../services/whisperCpp.js';
+import { runCommand as sharedRunCommand } from '../services/proc.js';
 
 const INTELLEDGER_SIGNAL_EXTRACTOR_VERSION = 'intelledger-signals-v2.4';
 const DEFAULT_PROMPT_PROFILES = {
@@ -360,20 +361,12 @@ function computeNextReminderAt({ priority, dueDate, isOverdue }) {
   return reminder.toISOString();
 }
 
+// Delegates to the shared implementation, which is always bounded by a timeout.
+// The copy that used to live here accepted no timeout at all, so a hung ffmpeg
+// or whisper process kept its media job running forever; with the media queue
+// defaulting to one concurrent slot, that stalled every queued job behind it.
 function runCommand(command, args = [], options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], ...options });
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) return resolve({ stdout, stderr });
-      reject(new Error(`${command} exited with code ${code}: ${stderr || stdout}`));
-    });
-  });
+  return sharedRunCommand(command, args, options);
 }
 
 function formatTimestampMs(ms) {
@@ -1304,11 +1297,27 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
           model: transcribeModel
         });
       } else {
-        transcription = await transcribeWithWhisperCli({
-          audioPath,
-          outputPrefix: sourcePath,
-          model: whisperCliModel
-        });
+        // Prefer whisper.cpp, exactly as the chat dictation path does. This tier
+        // was missing here, so on a machine where whisper.cpp is the only
+        // installed engine, media ingest skipped it entirely and fell through to
+        // the Python CLI (usually absent, failing with a raw spawn ENOENT) even
+        // though the app reported local speech-to-text as ready.
+        const whisperCpp = await whisperCppAvailable();
+        if (whisperCpp) {
+          const text = await transcribeWithWhisperCpp({
+            wavPath: audioPath,
+            binary: whisperCpp.binary,
+            model: whisperCpp.model,
+            outStem: sourcePath
+          });
+          transcription = { text, segments: [] };
+        } else {
+          transcription = await transcribeWithWhisperCli({
+            audioPath,
+            outputPrefix: sourcePath,
+            model: whisperCliModel
+          });
+        }
       }
 
       let segments = normalizeTranscriptSegments(transcription.segments || []);

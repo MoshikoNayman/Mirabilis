@@ -80,8 +80,9 @@ async function readStore(filePath) {
 }
 
 // Atomic write: serialize to a temp file, fsync, then rename over the target
-// (atomic on POSIX). The previous good copy is kept as .bak.
-async function writeStore(filePath, data) {
+// (atomic on POSIX). The previous good copy is kept as .bak, except on a
+// { shred: true } write, which removes data by intent and must not leave a copy.
+async function writeStore(filePath, data, { shred = false } = {}) {
   invalidateCache();
   const serialized = JSON.stringify(data, null, 2);
   const tmpPath = `${filePath}.tmp-${process.pid}`;
@@ -92,8 +93,13 @@ async function writeStore(filePath, data) {
   } finally {
     await handle.close();
   }
-  try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write: no prior file */ }
-  await fs.rename(tmpPath, filePath);
+  if (shred) {
+    await fs.rename(tmpPath, filePath);
+    await fs.unlink(`${filePath}.bak`).catch(() => { /* no prior backup */ });
+  } else {
+    try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write: no prior file */ }
+    await fs.rename(tmpPath, filePath);
+  }
   _cache = data;
   _cachePath = filePath;
 }
@@ -150,7 +156,7 @@ export function deleteHost(filePath, id) {
     const store = await readStore(filePath);
     const before = store.hosts.length;
     store.hosts = store.hosts.filter((h) => h.id !== id);
-    await writeStore(filePath, store);
+    await writeStore(filePath, store, { shred: true });
     return store.hosts.length < before;
   });
 }

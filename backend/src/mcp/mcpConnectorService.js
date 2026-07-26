@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, open, copyFile, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { APP_VERSION } from '../version.js';
 
@@ -216,8 +216,16 @@ export class McpConnectorService {
 
   async init() {
     await mkdir(dirname(this.filePath), { recursive: true });
+    let raw;
     try {
-      const raw = await readFile(this.filePath, 'utf8');
+      raw = await readFile(this.filePath, 'utf8');
+    } catch {
+      // No file yet: a genuinely fresh install. Start empty and write it.
+      this.state.servers = [];
+      await this.persist();
+      return;
+    }
+    try {
       const parsed = JSON.parse(raw);
       this.state.servers = Array.isArray(parsed.servers)
         ? parsed.servers.map((server) => ({
@@ -225,14 +233,43 @@ export class McpConnectorService {
             toolPolicy: normalizeToolPolicy(server.toolPolicy)
           }))
         : [];
-    } catch {
-      this.state.servers = [];
-      await this.persist();
+    } catch (parseError) {
+      // The file exists but is corrupt. Previously this reset to an empty list
+      // and immediately persisted it, destroying every configured MCP server
+      // (and its tool policy) on a single bad read. Recover from the backup,
+      // else quarantine and fail loud rather than silently wiping the config.
+      try {
+        const parsed = JSON.parse(await readFile(`${this.filePath}.bak`, 'utf8'));
+        this.state.servers = Array.isArray(parsed.servers)
+          ? parsed.servers.map((server) => ({ ...server, toolPolicy: normalizeToolPolicy(server.toolPolicy) }))
+          : [];
+        console.warn(`[mcpConnectorService] ${this.filePath} was corrupt; recovered from .bak`);
+        return;
+      } catch { /* no usable backup */ }
+      const quarantine = `${this.filePath}.corrupt-${Date.now()}`;
+      try { await rename(this.filePath, quarantine); } catch { /* best effort */ }
+      throw new Error(
+        `MCP server config at ${this.filePath} is corrupt and no usable backup exists. ` +
+        `The unreadable file was moved to ${quarantine}. Original error: ${parseError.message}`
+      );
     }
   }
 
+  // Atomic write: temp file, fsync, rename, keeping the prior good copy as .bak.
+  // A bare writeFile could be interrupted mid-write and leave truncated JSON,
+  // which init() would then treat as corrupt.
   async persist() {
-    await writeFile(this.filePath, JSON.stringify(this.state, null, 2), 'utf8');
+    const serialized = JSON.stringify(this.state, null, 2);
+    const tmpPath = `${this.filePath}.tmp-${process.pid}`;
+    const handle = await open(tmpPath, 'w');
+    try {
+      await handle.writeFile(serialized, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    try { await copyFile(this.filePath, `${this.filePath}.bak`); } catch { /* first write */ }
+    await rename(tmpPath, this.filePath);
   }
 
   listServers() {
