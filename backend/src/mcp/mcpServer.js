@@ -20,6 +20,7 @@ import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import os from 'node:os';
+import { isSafeCommand, safeResolvePath } from '../agent/sandbox.js';
 
 const execAsync = promisify(exec);
 
@@ -258,36 +259,9 @@ async function callMirabilisHealth(config) {
   };
 }
 
-// ── Safety blocklist for run_command ────────────────────────────────────────
-const BLOCKED_COMMAND_PATTERNS = [
-  /rm\s+-[a-z]*r[a-z]*f?\s+(\/|~\/?\s*$|~\s*$)/i, // rm -rf / or rm -rf ~
-  /mkfs(\.\w+)?\s/i,                                // mkfs.ext4 /dev/...
-  /dd\s+if=/i,                                       // dd if=... (disk wipe)
-  /format\s+[a-z]:/i,                               // format C: (Windows)
-  /:\s*\(\s*\)\s*\{.*\|.*&.*\}/,                  // fork bomb
-  /\b(shutdown|reboot|halt|poweroff)\b/i            // system power ops
-];
-
-function isSafeCommand(command) {
-  return !BLOCKED_COMMAND_PATTERNS.some((re) => re.test(command));
-}
-
-// Optional filesystem jail for the MCP file tools. By default the tools operate
-// system-wide (the advertised "system control" capability, now reachable only
-// with the local MCP token). Setting MIRABILIS_MCP_FS_ROOT confines read/write/
-// list to that subtree - for users who want a locked-down MCP server.
-const MCP_FS_ROOT = process.env.MIRABILIS_MCP_FS_ROOT
-  ? resolve(String(process.env.MIRABILIS_MCP_FS_ROOT))
-  : null;
-
-function safeResolvePath(inputPath) {
-  const cleaned = normalize(String(inputPath || '').replace(/\0/g, ''));
-  const resolved = resolve(MCP_FS_ROOT || process.cwd(), cleaned);
-  if (MCP_FS_ROOT && resolved !== MCP_FS_ROOT && !resolved.startsWith(MCP_FS_ROOT + sep)) {
-    throw new Error(`Path escapes the configured MCP filesystem root (${MCP_FS_ROOT})`);
-  }
-  return resolved;
-}
+// Safety primitives (destructive-command blocklist, path jail) now live in
+// agent/sandbox.js so the MCP server and the autonomous agent enforce exactly
+// the same rules. See the import at the top of this file.
 
 async function callSystemInfo() {
   return {

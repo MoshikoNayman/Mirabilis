@@ -52,6 +52,7 @@ import {
   resolveWhisperCppBinary, resolveWhisperCppModel, cleanTranscript, transcribeWithWhisperCpp
 } from './services/whisperCpp.js';
 import { selectHistoryWindow } from './historyWindow.js';
+import { createAgentRouter } from './agent/routes.js';
 import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
 import { shouldSuppressReminder, buildReminderWebhookHeaders } from './intelLedgerReminderUtils.js';
 
@@ -3488,6 +3489,17 @@ const mcpServerHandler = createMcpServerHandler({
 // (The token itself is created near the top of this file, because the privileged
 // app routes defined above also need it.)
 app.post('/mcp', makeMcpAuthGuard(mcpToken), mcpServerHandler);
+
+// Autonomous agent runs. Behind the same privileged guard as remote control:
+// a run can execute shell commands unattended for hours, so it is emphatically
+// not something an unauthenticated local caller should be able to start.
+app.use('/api/agent', createAgentRouter({
+  config,
+  streamWithProvider,
+  getEffectiveModel,
+  chats: { getChat, saveChat, getEpoch, chatStorePath: config.chatStorePath, nowIso, uuid: uuidv4 },
+  guard: makePrivilegedGuard(mcpToken, 'agent runs')
+}));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Local provider binary management

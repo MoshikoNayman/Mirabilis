@@ -30,21 +30,43 @@ export async function commandExists(command) {
  * between a failed job and a permanently stuck queue.
  * @param {string} command
  * @param {string[]} args
- * @param {{cwd?: string, env?: Record<string,string>, timeoutMs?: number}} [opts]
+ * @param {{cwd?: string, env?: Record<string,string>, timeoutMs?: number, signal?: AbortSignal}} [opts]
  * @returns {Promise<{stdout: string, stderr: string}>}
  */
-export async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 60 * 10 } = {}) {
+export async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 60 * 10, signal } = {}) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new Error(`${command} aborted before it started`)); return; }
+    // detached puts the child in its own process GROUP. A shell command that
+    // forks (npm install, a build, anything backgrounded) leaves children that
+    // outlive a plain proc.kill, so stopping a run has to signal the group.
     const proc = spawn(command, args, {
       cwd,
       env: env ? { ...process.env, ...env } : process.env,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true
     });
+
+    /** SIGTERM the group, then SIGKILL anything still alive. */
+    const killGroup = () => {
+      const pid = proc.pid;
+      if (pid == null) return;
+      try { process.kill(-pid, 'SIGTERM'); } catch { /* already gone */ }
+      setTimeout(() => {
+        try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone */ }
+      }, 2000).unref?.();
+    };
+
+    const onAbort = () => {
+      killGroup();
+      reject(new Error(`${command} was cancelled`));
+    };
+    if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    const detach = () => { if (signal) signal.removeEventListener('abort', onAbort); };
 
     let stdout = '';
     let stderr = '';
     const timeout = timeoutMs > 0 ? setTimeout(() => {
-      try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+      killGroup();
       reject(new Error(`${command} timed out after ${timeoutMs}ms`));
     }, timeoutMs) : null;
 
@@ -52,10 +74,12 @@ export async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 6
     proc.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
     proc.on('error', (error) => {
       if (timeout) clearTimeout(timeout);
+      detach();
       reject(error);
     });
     proc.on('close', (code) => {
       if (timeout) clearTimeout(timeout);
+      detach();
       if (code === 0) {
         resolve({ stdout, stderr });
         return;
