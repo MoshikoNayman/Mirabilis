@@ -227,6 +227,12 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **Chat** | Chat branching and restore snapshots for safe experimentation |
 | **Chat** | File attachments and image messages per conversation |
 | **Chat** | Canvas mode, Deep Thinking mode, Guided Learning mode |
+| **Effort** | Answer style (Instant, Fast, Balanced, Thorough, Deep): controls how the model answers, single request |
+| **Effort** | Autonomous work (High effort, 1 hour, 5 hours): controls how much work it does, with a hard budget |
+| **Autonomous runs** | Plan, act with tools, observe, validate, repair; live progress with a stop button |
+| **Autonomous runs** | Budget enforced in code (wall clock, steps, tool calls, tokens); exhausting it still returns the work done so far |
+| **Autonomous runs** | Least-privilege tools: read-only by default, `write` and `full` are explicit grants |
+| **Autonomous runs** | Optional parallel sub-agents that share the parent budget rather than adding to it |
 | **Config Vault** | Cited local retrieval (RAG) over your own config folder; on-device embeddings, jailed reads, `file:line` citations |
 | **Inference Cockpit** | Per-model Ollama controls: temperature, top-p, top-k, repeat penalty, context window, GPU layers, fixed seed |
 | **Performance Receipt** | Real tokens/sec and time-to-first-token per reply; pre-pull Fits / Tight / Will-swap model-fit estimate vs device memory |
@@ -252,6 +258,54 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 | **Desktop App** | Native installers for macOS, Windows, and Linux - download from Releases or build from the `desktop/` folder |
 
 ---
+
+## Effort: answering vs working
+
+Mirabilis separates two things most tools conflate.
+
+**Answer style** (Instant, Fast, Balanced, Thorough, Deep) changes how the model
+replies. It is a single request, and it is what you want for a question.
+
+**Autonomous work** (High effort, 1 hour, 5 hours) changes how much work happens.
+Picking one changes what Send does: instead of sending a message, it starts a job
+that plans, uses tools, checks its own result and repairs it, until the goal is
+met or the budget runs out. A live panel shows the current step, every tool call
+and how much of each budget is gone, with a stop button that stays reachable.
+
+| Tier | Wall clock | Steps | Tool calls | Sub-agents |
+|---|---|---|---|---|
+| High effort | 30 min | 12 | 60 | none |
+| 1 hour | 60 min | 80 | 500 | up to 3 |
+| 5 hours | 5 hours | 400 | 2500 | up to 6 |
+
+The budget is enforced in code, not requested of the model, and running out of it
+still returns whatever was established rather than an empty failure.
+
+### What a run may touch
+
+A run gets **read-only** tools unless you grant more, because the long tiers run
+with nobody watching.
+
+| Policy | Tools |
+|---|---|
+| Read only (default) | `list_dir`, `read_file`, `search_files` |
+| Read + write | adds `write_file` |
+| Full | adds `run_command` |
+
+`Full` is a real shell. A destructive-command blocklist and a filesystem jail are
+in place, but the jail sets where a command *starts*, not what it can reach.
+Treat granting `Full` the same way you would treat handing over a terminal.
+
+### Notes
+
+- Runs are held in memory, so restarting the backend loses one that is in flight.
+- Sub-agents run at most two at a time. Against a single local engine more is not
+  faster (Ollama serialises per model) but does hold more live contexts, which is
+  how a 16 GB machine ends up swapping. Raise with
+  `MIRABILIS_AGENT_FANOUT_CONCURRENCY` if your engine can genuinely serve in
+  parallel.
+- A small model will struggle to hold the tool-calling format. Something in the
+  12B class or larger is a much better experience.
 
 ## Desktop App
 

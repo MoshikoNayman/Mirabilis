@@ -2,6 +2,58 @@
 
 Versioning follows Junos-style tags.
 
+## [Unreleased]
+
+### Controllable execution effort (autonomous agent)
+
+Effort used to control only how the model ANSWERS: five levels that appended a
+sentence to the system prompt. It could not control how much WORK happened,
+because the chat path was single-shot. There are now two axes.
+
+- **Answer style** (Instant, Fast, Balanced, Thorough, Deep) is unchanged. These
+  stay single-shot, so an ordinary question still answers in one request.
+- **Autonomous work** (High effort, 1 hour, 5 hours) runs a real loop: plan,
+  act with tools, observe, validate, repair. Each tier is a hard budget on wall
+  clock, iterations, tool calls, tokens, repairs and sub-agents.
+
+Notes on how it behaves:
+
+- **The budget is enforced in code, not asked of the model.** The model is told
+  what remains so it can prioritise, and nothing more. Request overrides can only
+  ever LOWER a tier, never raise it.
+- **Running out of budget still returns work.** Hitting a ceiling triggers a
+  wrap-up from what was actually established, plus an explicit note about what
+  was left undone.
+- **A result that fails validation is never returned as though it passed.** The
+  rejection and its reason travel with the text.
+- **Tools are least privilege by default.** A run gets read-only tools unless it
+  is explicitly granted `write` or `full`. Note that `full` is a real shell:
+  the filesystem root sets where a command starts, not what it can reach.
+- **Sub-agents** share the parent budget rather than adding to it, are capped at
+  one level of depth, and run at most two at a time. Six at once against a single
+  local engine is not faster (Ollama serialises per model) but does hold six live
+  contexts, which is how a 16 GB machine ends up swapping. Raise with
+  `MIRABILIS_AGENT_FANOUT_CONCURRENCY` on hardware that can serve in parallel.
+- **Runs are their own surface**: `POST /api/agent/runs` streams progress and can
+  be stopped. Stopping kills the whole process group, so a forked build or
+  install does not outlive the run. Runs are held in memory, so a backend restart
+  loses one that is in flight.
+- The run panel shows the live phase, every tool call, and a meter per budget
+  axis. It is collapsed to one line by default.
+- The context chip is now the flower inside a usage ring: it fills as the context
+  window does, amber at 70 percent and red at 90.
+
+### Hardening found while building it
+
+- The destructive-command blocklist anchored on a leading `/` or `~`, so
+  `cd / && rm -rf .`, `rm -rf $HOME` and `rm -rf --no-preserve-root /` all passed.
+- The filesystem jail was lexical only: a single symlink inside the root exposed
+  everything it pointed at. Paths are now checked against their real location,
+  including write targets that do not exist yet.
+- `search_files` was case-sensitive, so a search for `error` missed `ERROR` and an
+  agent reported that an application had no errors when it had two. Now
+  case-insensitive by default.
+
 ## [26.3R1-S1] - 2026-07-19
 
 ### Local-First Engine + Capability Routing + Security Hardening
