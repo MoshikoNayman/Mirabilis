@@ -13,6 +13,7 @@ import { IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon } from './ui/primitives
 import TabSwitch from './shell/TabSwitch';
 import CommitmentRadar from './shell/CommitmentRadar';
 import VoiceChat from './shell/VoiceChat';
+import AgentRunPanel from './shell/AgentRunPanel';
 import { playSend, playReceive, playError } from '../lib/sounds';
 import { postJSON } from '../lib/api';
 import { getSessionToken } from '../lib/sessionToken';
@@ -31,7 +32,36 @@ const BROWSER_VOICE_HINTS = {
 };
 
 // Effort levels shown in the composer toolbar dropdown (least to most effort).
-const EFFORT_LABELS = { instant: 'Instant', fast: 'Fast', balanced: 'Balanced', thorough: 'Thorough', deep: 'Deep' };
+//
+// The first five control how the model ANSWERS: they are prompt hints and the
+// send stays a single request. The last three control how much WORK it does:
+// they run the autonomous loop on the backend with a hard budget, so they are
+// marked `agentic` and routed to /api/agent/runs instead of the chat stream.
+const EFFORT_LABELS = {
+  instant: 'Instant', fast: 'Fast', balanced: 'Balanced', thorough: 'Thorough', deep: 'Deep',
+  high: 'High effort', hour: '1 hour', session: '5 hours'
+};
+
+const EFFORT_OPTIONS = [
+  { value: 'instant',  label: 'Instant',     hint: 'one line' },
+  { value: 'fast',     label: 'Fast',        hint: 'concise' },
+  { value: 'balanced', label: 'Balanced',    hint: 'default' },
+  { value: 'thorough', label: 'Thorough',    hint: 'complete' },
+  { value: 'deep',     label: 'Deep',        hint: 'reason first' },
+  { value: 'high',     label: 'High effort', hint: 'plan, act, validate', agentic: true },
+  { value: 'hour',     label: '1 hour',      hint: 'keeps working', agentic: true },
+  { value: 'session',  label: '5 hours',     hint: 'long session', agentic: true }
+];
+
+const AGENTIC_EFFORTS = new Set(EFFORT_OPTIONS.filter((o) => o.agentic).map((o) => o.value));
+
+// What an autonomous run is allowed to touch. Read-only by default: the long
+// tiers run unattended, so write and exec are a deliberate grant, not a default.
+const TOOL_POLICY_OPTIONS = [
+  { value: 'read-only', label: 'Read only', hint: 'inspect files' },
+  { value: 'write',     label: 'Read + write', hint: 'can edit files' },
+  { value: 'full',      label: 'Full', hint: 'can run commands' }
+];
 
 function safeStorageGet(key, fallback = null) {
   try {
@@ -1334,6 +1364,11 @@ export default function ChatApp() {
   const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
   const [isTrainingMenuOpen, setIsTrainingMenuOpen] = useState(false);
   const [isEffortMenuOpen, setIsEffortMenuOpen] = useState(false);
+  // Autonomous run state. Null when no run is in flight or finished.
+  const [agentRun, setAgentRun] = useState(null);
+  const agentAbortRef = useRef(null);
+  const agentRunRef = useRef(null);
+  const [toolPolicy, setToolPolicy] = useState(() => safeStorageGet('mirabilis-tool-policy', 'read-only'));
   const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
   const [canvasEnabled, setCanvasEnabled] = useState(false);
   const [canvasText, setCanvasText] = useState('');
@@ -2042,6 +2077,12 @@ export default function ChatApp() {
   }
 
   function stopStreaming() {
+    // During an autonomous run there is no chat stream to abort, so this button
+    // was a no-op while the most prominent Stop on screen. Route it to the run.
+    if (agentAbortRef.current) {
+      stopAgentRun();
+      return;
+    }
     streamAbortRef.current?.abort();
     streamAbortRef.current = null;
   }
@@ -2778,6 +2819,10 @@ export default function ChatApp() {
   }, [effortLevel]);
 
   useEffect(() => {
+    safeStorageSet('mirabilis-tool-policy', toolPolicy);
+  }, [toolPolicy]);
+
+  useEffect(() => {
     safeStorageSet('local-ai-training-mode', trainingMode);
   }, [trainingMode]);
 
@@ -3435,6 +3480,11 @@ export default function ChatApp() {
     // A stream is bound to the chat it started in; switching away while it runs
     // would let its tokens land in the newly opened chat. Stop it first.
     if (streamAbortRef.current) stopStreaming();
+    // Clear a FINISHED run's panel on navigation: its result is already in its
+    // own chat, so leaving it pinned above an unrelated conversation is wrong.
+    // A live run keeps its panel, because it is still spending the budget and
+    // the stop button has to stay reachable.
+    if (!agentAbortRef.current) setAgentRun(null);
     setIsTeachPanelOpen(false);
     // Save scroll position of the current chat before switching
     const leavingChatId = activeChatIdRef.current;
@@ -4754,10 +4804,190 @@ export default function ChatApp() {
     await sendMessageWithContent(content);
   }
 
+
+  // ── Autonomous runs ────────────────────────────────────────────────────────
+  // An agentic effort tier does not send a chat message: it starts a job on the
+  // backend and streams its progress. The transcript still gets the goal and the
+  // final result, so the conversation reads normally afterwards, but everything
+  // in between belongs to the run panel.
+  function stopAgentRun() {
+    const run = agentRunRef.current;
+    if (run?.id) {
+      api(`/api/agent/runs/${run.id}/stop`, { method: 'POST' }).catch(() => {});
+    }
+    // Abort locally too, so the panel stops even if the stop call cannot land.
+    try { agentAbortRef.current?.abort(); } catch { /* already gone */ }
+    setAgentRun((prev) => (prev ? { ...prev, status: 'stopping' } : prev));
+  }
+
+  async function runAgentGoal(goal) {
+    // One run at a time. Two concurrent runs would share agentRunRef, so only
+    // the newer one could be stopped and the older would keep burning budget
+    // invisibly.
+    if (agentAbortRef.current) {
+      appStore.toast('A run is already in progress. Stop it before starting another.', { kind: 'warn' });
+      return;
+    }
+    const controller = new AbortController();
+    agentAbortRef.current = controller;
+
+    const started = {
+      id: null, goal, effort: effortLevel, policy: toolPolicy,
+      status: 'running', phase: 'plan', events: [], budget: null, answer: '', stopReason: null, error: ''
+    };
+    setAgentRun(started);
+    agentRunRef.current = started;
+    setIsStreaming(true);
+
+    const pushEvent = (text, at) => setAgentRun((prev) => (
+      prev ? { ...prev, events: [...prev.events, { text, at: at || 0 }].slice(-200) } : prev
+    ));
+
+    try {
+      // Create the chat up front so the backend can write the result into it.
+      let targetChatId = activeChatIdRef.current;
+      if (!targetChatId) {
+        const created = await api('/api/chats', {
+          method: 'POST', body: JSON.stringify({ title: goal.slice(0, 60) })
+        }).catch(() => null);
+        targetChatId = created?.chat?.id || null;
+        if (targetChatId) {
+          setActiveChatId(targetChatId);
+          await refreshChats().catch(() => {});
+        }
+      }
+
+      const token = await getSessionToken();
+      const res = await fetch(`${API_BASE}/api/agent/runs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'x-mirabilis-mcp-token': token } : {})
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          goal,
+          chatId: targetChatId || undefined,
+          effort: effortLevel,
+          provider,
+          model: model || undefined,
+          providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
+          providerApiKey: providerConfigs[provider]?.apiKey || undefined,
+          toolPolicy,
+          localOnly: appStore.getGoDark(),
+          systemPrompt
+        })
+      });
+
+      if (!res.ok || !res.body) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(detail || `Agent run failed (${res.status})`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let currentEvent = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('event: ')) { currentEvent = line.slice(7).trim(); continue; }
+          if (!line.startsWith('data: ')) continue;
+          let payload;
+          try { payload = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (currentEvent === 'run-accepted') {
+            setAgentRun((prev) => (prev ? { ...prev, id: payload.id } : prev));
+            agentRunRef.current = { ...agentRunRef.current, id: payload.id };
+            continue;
+          }
+          if (currentEvent === 'error') {
+            setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: payload.error } : prev));
+            continue;
+          }
+          if (currentEvent === 'result') {
+            setAgentRun((prev) => (prev ? {
+              ...prev,
+              status: payload.ok ? 'completed' : 'stopped',
+              stopReason: payload.stopReason,
+              answer: payload.answer,
+              budget: payload.budget
+            } : prev));
+            // The backend writes the run into the chat; reload to show it.
+            if (payload.persistedTo) {
+              // Only reload if the user is still in the run's chat. An hour-long
+              // run finishing used to force-navigate them out of whatever they
+              // had moved on to, discarding an in-progress draft.
+              if (activeChatIdRef.current === payload.persistedTo) {
+                await loadChat(payload.persistedTo).catch(() => {});
+              }
+              await refreshChats().catch(() => {});
+            }
+            continue;
+          }
+          if (currentEvent !== 'progress') continue;
+
+          // Progress: keep the meters current and narrate what happened.
+          if (payload.budget) {
+            setAgentRun((prev) => (prev ? { ...prev, budget: payload.budget } : prev));
+          }
+          const at = payload.at;
+          switch (payload.type) {
+            case 'phase':
+              setAgentRun((prev) => (prev ? { ...prev, phase: payload.phase } : prev));
+              pushEvent(`phase: ${payload.phase}`, at);
+              break;
+            case 'plan': pushEvent(`plan: ${String(payload.plan).slice(0, 120)}`, at); break;
+            case 'iteration': setAgentRun((prev) => (prev ? { ...prev, phase: 'act' } : prev)); break;
+            case 'tool-call': pushEvent(`${payload.tool}(${JSON.stringify(payload.args).slice(0, 60)})`, at); break;
+            case 'tool-result': pushEvent(`  ${payload.ok ? 'ok' : 'ERROR'}: ${String(payload.observation).slice(0, 90)}`, at); break;
+            case 'invalid-action': pushEvent(`  retrying: ${payload.error}`, at); break;
+            case 'finish-proposed': pushEvent('proposed a result', at); break;
+            case 'validation': pushEvent(`validation ${payload.passed ? 'passed' : 'failed'}${payload.reason ? `: ${String(payload.reason).slice(0, 70)}` : ''}`, at); break;
+            case 'repair': pushEvent(`repairing: ${String(payload.reason).slice(0, 80)}`, at); break;
+            case 'fanout-start': pushEvent(`spawned ${payload.count} sub-agent(s)`, at); break;
+            case 'fanout-end': pushEvent(`sub-agents done (${payload.spentToolCalls} tool calls)`, at); break;
+            default: break;
+          }
+        }
+      }
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: err.message } : prev));
+        appStore.toast(`Agent run failed: ${err.message}`, { kind: 'error' });
+      } else {
+        setAgentRun((prev) => (prev ? { ...prev, status: 'stopped', stopReason: 'cancelled' } : prev));
+      }
+    } finally {
+      setIsStreaming(false);
+      agentAbortRef.current = null;
+    }
+  }
+
   async function sendMessageWithContent(content) {
     // If the user recently attached an image, they are analyzing it (vision),
     // not asking to generate one - don't let the "show/make ... image" wording
     // heuristic misfire into image generation.
+    // An autonomous effort tier is a job, not a message: hand it to the agent
+    // runner and return. The run panel takes over from here.
+    //
+    // This is checked BEFORE the image-wording heuristic on purpose. A goal like
+    // "show me a snapshot of which services are listening" contains image words,
+    // and the heuristic used to win, silently turning a chosen 5-hour run into
+    // an image generation. An explicit tier beats a guess.
+    if (AGENTIC_EFFORTS.has(effortLevel)) {
+      setInput('');
+      playSend();
+      runAgentGoal(content);
+      return;
+    }
+
     const recentImage = (messages || []).slice(-4).some(
       (m) => Array.isArray(m.attachments) && m.attachments.some((a) => /^image\//i.test(a?.mimeType || ''))
     );
@@ -5597,10 +5827,25 @@ export default function ChatApp() {
                       setIsVoiceMenuOpen(false);
                       setIsContextPanelOpen((prev) => !prev);
                     }}
-                    className="inline-flex items-center justify-center rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium tracking-wide text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                    title={`Context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens`}
+                    className="group inline-flex items-center justify-center rounded-full p-0.5 transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                    title={`Context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens (${contextUsage.usedPct}%). Click for details.`}
+                    aria-label={`Context ${contextUsage.usedPct} percent used`}
                   >
-                    Context {contextUsage.usedPct}%
+                    {/* The flower doubles as the usage dial: the ring fills as the
+                        window does, and turns amber then red as it runs out. */}
+                    <span className="relative inline-flex h-6 w-6 items-center justify-center">
+                      <svg viewBox="0 0 36 36" className="absolute inset-0 h-6 w-6 -rotate-90" aria-hidden="true">
+                        <circle cx="18" cy="18" r="15.5" fill="none" strokeWidth="3"
+                          className="stroke-black/10 dark:stroke-white/15" />
+                        <circle
+                          cx="18" cy="18" r="15.5" fill="none" strokeWidth="3" strokeLinecap="round"
+                          stroke={contextUsage.usedPct >= 90 ? '#dc2626' : contextUsage.usedPct >= 70 ? '#d97706' : 'var(--accent)'}
+                          strokeDasharray={`${Math.min(contextUsage.usedPct, 100) * 0.974} 100`}
+                          className="transition-[stroke-dasharray] duration-500"
+                        />
+                      </svg>
+                      <FlowerMark className="h-3.5 w-3.5 opacity-90" />
+                    </span>
                   </button>
 
                   {isContextPanelOpen && (
@@ -5906,6 +6151,10 @@ export default function ChatApp() {
           )}
 
           <footer className="mt-3 border-t border-black/10 pt-3">
+            {agentRun && (
+              <AgentRunPanel run={agentRun} onStop={stopAgentRun} />
+            )}
+
             {/* ROW 1: slim toolbar. Left: model, effort, options. Right: status + tokens. */}
             <div className="mb-2 flex items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -6715,13 +6964,10 @@ export default function ChatApp() {
                   </button>
                   {isEffortMenuOpen && (
                     <div data-menu-panel="effort" role="group" aria-label="Answer effort" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-44 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                      {[
-                        { value: 'instant', label: 'Instant', hint: 'one line' },
-                        { value: 'fast', label: 'Fast', hint: 'concise' },
-                        { value: 'balanced', label: 'Balanced', hint: 'default' },
-                        { value: 'thorough', label: 'Thorough', hint: 'complete' },
-                        { value: 'deep', label: 'Deep', hint: 'reason first' }
-                      ].map((opt) => (
+                      <div className="px-2 pb-1 pt-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
+                        Answer style
+                      </div>
+                      {EFFORT_OPTIONS.filter((o) => !o.agentic).map((opt) => (
                         <button
                           key={opt.value}
                           type="button"
@@ -6736,6 +6982,50 @@ export default function ChatApp() {
                           <span className="text-[10px] opacity-60">{opt.hint}</span>
                         </button>
                       ))}
+
+                      {/* Autonomous tiers. Separated because picking one changes
+                          what SEND does: it starts a budgeted job, not a turn. */}
+                      <div className="mt-1 border-t border-[var(--hairline)] px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
+                        Autonomous work
+                      </div>
+                      {EFFORT_OPTIONS.filter((o) => o.agentic).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => { setEffortLevel(opt.value); setIsEffortMenuOpen(false); }}
+                          className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                            effortLevel === opt.value
+                              ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                              : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                          }`}
+                        >
+                          <span>{opt.label}</span>
+                          <span className="text-[10px] opacity-60">{opt.hint}</span>
+                        </button>
+                      ))}
+
+                      {AGENTIC_EFFORTS.has(effortLevel) && (
+                        <div className="mt-1 border-t border-[var(--hairline)] pt-1.5">
+                          <div className="px-2 pb-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
+                            What it may touch
+                          </div>
+                          {TOOL_POLICY_OPTIONS.map((opt) => (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => setToolPolicy(opt.value)}
+                              className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                                toolPolicy === opt.value
+                                  ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                                  : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                              }`}
+                            >
+                              <span>{opt.label}</span>
+                              <span className="text-[10px] opacity-60">{opt.hint}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

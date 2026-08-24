@@ -226,11 +226,20 @@ export default function MirabilisApp() {
 
       {/* Content area */}
       <div className={`h-full w-full overflow-hidden ${activeTab === 'intel' ? 'pb-7 sm:pb-8' : ''}`}>
-        {activeTab === 'chat' && (
+        {/* ChatApp stays MOUNTED when the Ledger tab is active, hidden rather
+            than unmounted. It owns the autonomous run: unmounting it tore down
+            the SSE reader and the AbortController, so a 5-hour run at the full
+            tool policy kept executing shell commands on the backend with no
+            panel, no stop button, and the one-run-at-a-time guard reset. */}
+        <div
+          className="h-full w-full"
+          style={activeTab === 'chat' ? undefined : { display: 'none' }}
+          aria-hidden={activeTab !== 'chat'}
+        >
           <AppErrorBoundary>
             <ChatApp />
           </AppErrorBoundary>
-        )}
+        </div>
         {activeTab === 'intel' && (
           <AppErrorBoundary>
             <IntelLedgerApp
