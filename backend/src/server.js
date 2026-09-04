@@ -46,6 +46,7 @@ import { createRecall } from './recall.js';
 import { createConfigVault } from './configVault.js';
 import { makeHostGuard, makeMcpAuthGuard, makePrivilegedGuard, isLoopbackRequest, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
 import { classifyProviderScope } from './providerScope.js';
+import { describeEngineError } from './engineErrors.js';
 import { commandExists, runCommand, extractAudioTrack } from './services/proc.js';
 import {
   WHISPER_MODEL_CATALOG, getWhisperModelsDir, getInstalledWhisperModelIds,
@@ -3193,7 +3194,15 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
         await saveChat(config.chatStorePath, chat).catch(() => {});
       }
     }
-    sendSSE(res, 'error', { error: error.message || 'Unknown error' });
+    // Translate transport failures into something actionable. A new user whose
+    // engine is not running used to see only "Error: fetch failed".
+    sendSSE(res, 'error', {
+      error: describeEngineError(error, {
+        provider: effectiveProvider,
+        baseUrl: providerBaseUrl || undefined,
+        model: effectiveModel
+      })
+    });
     res.end();
   }
 });

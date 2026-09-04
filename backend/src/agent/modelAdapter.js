@@ -8,6 +8,8 @@
 // and because it keeps the abort signal wired all the way down to the engine:
 // stopping a five-hour run has to actually stop the model, not just stop reading it.
 
+import { describeEngineError } from '../engineErrors.js';
+
 /**
  * @param {object} deps
  * @param {Function} deps.streamWithProvider
@@ -56,15 +58,12 @@ export function createModelAdapter({ streamWithProvider, config, request, signal
       // A run that dies on its first call should say WHY. Bare "fetch failed"
       // from undici is the most common failure here (the local engine is not
       // running) and is the least useful thing to show someone.
-      const raw = String(error?.message || error);
-      if (/fetch failed|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up/i.test(raw)) {
-        const where = request.baseUrl || 'its default address';
-        throw new Error(
-          `Could not reach the "${request.provider}" engine at ${where}. `
-          + 'Start the engine (for Ollama: run `ollama serve`), or pick a provider that is running. '
-          + `Original error: ${raw}`
-        );
-      }
+      // Shared translator, so the chat path and an agent run explain an
+      // unreachable engine the same way.
+      const friendly = describeEngineError(error, {
+        provider: request.provider, baseUrl: request.baseUrl, model: request.model
+      });
+      if (friendly !== String(error?.message || error)) throw new Error(friendly);
       throw error;
     }
 

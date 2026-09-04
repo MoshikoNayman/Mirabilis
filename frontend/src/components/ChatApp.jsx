@@ -1327,6 +1327,9 @@ export default function ChatApp() {
   });
   const [systemPrompt, setSystemPrompt] = useState(buildDefaultSystemPrompt(provider));
   const [statusText, setStatusText] = useState('Ready');
+  // Ambient engine reachability. null while unknown, so a brand new user is not
+  // told anything is wrong before the first check has answered.
+  const [engineUp, setEngineUp] = useState(null);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
   const [clearArmed, setClearArmed] = useState(false); // two-click confirm for "clear all"
   const [imageServiceAvailable, setImageServiceAvailable] = useState(false);
@@ -2197,6 +2200,34 @@ export default function ChatApp() {
     voicePhaseRef.current = next;
     setVoicePhase(next);
   }
+
+  // Is the selected engine actually reachable? The status chip used to read
+  // "Ready" on a machine with nothing running, and the welcome text invited the
+  // user to start talking, so the first thing a new install did was fail with a
+  // transport error. Checked on mount, on provider change, and on a slow timer.
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const query = new URLSearchParams({ provider });
+        const configured = providerConfigs[provider]?.baseUrl;
+        if (configured) query.set('baseUrl', configured);
+        const payload = await api(`/api/providers/health?${query.toString()}`);
+        if (cancelled) return;
+        const up = Boolean(payload?.reachable);
+        setEngineUp(up);
+        // Clear a stale failure label once the engine is back, so the header
+        // does not keep reporting a problem the user has already fixed.
+        if (up) setStatusText((prev) => (prev === 'No engine' || prev === 'Error' ? 'Ready' : prev));
+      } catch {
+        if (!cancelled) setEngineUp(false);
+      }
+    };
+    check();
+    const timer = setInterval(check, 30_000);
+    return () => { cancelled = true; clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider]);
 
   // Keep the loop's send/speak handles pointing at the latest closures.
   useEffect(() => {
@@ -5470,15 +5501,19 @@ export default function ChatApp() {
           return next;
         });
       } else {
-        setStatusText(`Error: ${error.message}`);
+        // Short label only. The full explanation is in the message bubble, and
+        // the status line is a fixed-width chip in a crowded header: putting a
+        // sentence there overflowed it into the hardware chips.
+        setStatusText(/Could not reach/i.test(String(error.message)) ? 'No engine' : 'Error');
         playError(); // ICQ error cue
         setMessages((prev) => {
           const next = [...prev];
           if (next.length > 0 && next[next.length - 1].role === 'assistant' && !next[next.length - 1].content) {
-            next[next.length - 1] = {
-              ...next[next.length - 1],
-              content: `Error: ${error.message}`
-            };
+            // Drop the provider/model stamp on a failed turn. Nothing ran, so
+            // badging it "On-device llama3" claimed a model that was never used
+            // and, on a fresh install, is not even installed.
+            const { effectiveProvider, effectiveModel, provider: _p, model: _m, performance, ...rest } = next[next.length - 1];
+            next[next.length - 1] = { ...rest, failed: true, content: `Error: ${error.message}` };
           }
           return next;
         });
@@ -5706,7 +5741,17 @@ export default function ChatApp() {
                     }
                   </svg>
                 </button>
-                <p role="status" aria-live="polite" aria-atomic="true" className="shrink-0 font-mono text-xs text-[color:var(--text-muted)]">{statusText}</p>
+                <p
+                  role="status" aria-live="polite" aria-atomic="true"
+                  title={statusText}
+                  className={`min-w-0 max-w-[16ch] truncate font-mono text-xs ${
+                    (engineUp === false || statusText === 'No engine' || statusText === 'Error')
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-[color:var(--text-muted)]'
+                  }`}
+                >
+                  {engineUp === false && statusText === 'Ready' ? 'No engine' : statusText}
+                </p>
 
                 {/* hardware chips - one per logic/memory/compute/npu, live utilization + per-chip popover.
                     No overflow wrapper: it would clip each chip's absolute popover. The chips are
@@ -6035,8 +6080,38 @@ export default function ChatApp() {
                   {activeChatId ? 'New Conversation' : 'Welcome to Mirabilis AI'}
                 </h2>
                 <p className="max-w-md text-[length:var(--text-md)] leading-relaxed text-[color:var(--text-muted)]">
-                  {activeChatId ? 'Type a message below to get started.' : 'See who is online in the flower, pick a model in the bar, and start talking.'}
+                  {engineUp === false
+                    ? 'No local engine is running yet, so there is nothing to answer you.'
+                    : activeChatId ? 'Type a message below to get started.' : 'See who is online in the flower, pick a model in the bar, and start talking.'}
                 </p>
+
+                {/* First run: a fresh install has no engine, so inviting the user
+                    to "start talking" sent them straight into a transport error
+                    with no idea what to do. Say what is missing and how to fix it. */}
+                {engineUp === false && (
+                  <div className="w-full max-w-md rounded-[var(--r-lg)] border border-amber-400/40 bg-amber-50/70 p-4 text-left dark:border-amber-400/25 dark:bg-amber-950/20">
+                    <p className="mb-2 text-[length:var(--text-sm)] font-semibold text-amber-900 dark:text-amber-200">
+                      Set up a local model
+                    </p>
+                    <ol className="space-y-2 text-[length:var(--text-sm)] leading-relaxed text-amber-900/90 dark:text-amber-200/90">
+                      <li>
+                        1. Install Ollama from{' '}
+                        <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">ollama.com</a>
+                        {' '}if you have not already.
+                      </li>
+                      <li>
+                        2. Start it, then pull a model:
+                        <code className="mt-1 block whitespace-pre rounded-md bg-black/10 px-2 py-1 font-mono text-[length:var(--text-xs)] dark:bg-black/30">
+                          {'ollama serve\nollama pull gemma3:12b'}
+                        </code>
+                      </li>
+                      <li>3. This page picks it up on its own within 30 seconds.</li>
+                    </ol>
+                    <p className="mt-2 text-[length:var(--text-xs)] text-amber-900/70 dark:text-amber-200/70">
+                      Already using a cloud provider? Pick it in the bar below and add your API key.
+                    </p>
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   {!activeChatId && (
                     <button
