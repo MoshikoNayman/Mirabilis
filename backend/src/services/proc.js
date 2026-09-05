@@ -46,14 +46,30 @@ export async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 6
       detached: true
     });
 
-    /** SIGTERM the group, then SIGKILL anything still alive. */
+    /**
+     * SIGTERM the group, then SIGKILL anything still alive, and let go of the
+     * child's pipes either way.
+     *
+     * Releasing the streams is not optional. A backgrounded grandchild can
+     * escape the process group (shells differ: dash and bash do not agree), and
+     * it inherits stdout and stderr. Those handles keep OUR event loop alive, so
+     * a leaked `sleep` in a test hung the whole suite on Linux while passing on
+     * macOS. Detaching from the pipes means a survivor is at worst an orphan,
+     * never something that pins this process open.
+     */
     const killGroup = () => {
       const pid = proc.pid;
-      if (pid == null) return;
-      try { process.kill(-pid, 'SIGTERM'); } catch { /* already gone */ }
-      setTimeout(() => {
-        try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone */ }
-      }, 2000).unref?.();
+      if (pid != null) {
+        try { process.kill(-pid, 'SIGTERM'); } catch { /* already gone, or not a group leader */ }
+        try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+        setTimeout(() => {
+          try { process.kill(-pid, 'SIGKILL'); } catch { /* already gone */ }
+          try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+        }, 2000).unref?.();
+      }
+      try { proc.stdout?.destroy(); } catch { /* already closed */ }
+      try { proc.stderr?.destroy(); } catch { /* already closed */ }
+      try { proc.unref(); } catch { /* nothing to release */ }
     };
 
     const onAbort = () => {

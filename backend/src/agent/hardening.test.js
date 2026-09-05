@@ -83,7 +83,10 @@ test('an aborted signal stops a shell command and kills its children', async () 
   const ac = new AbortController();
   const started = Date.now();
   // A command that outlives its parent unless the whole group is signalled.
-  const p = runCommand('/bin/sh', ['-c', 'sleep 30 & sleep 30'], { signal: ac.signal, timeoutMs: 60_000 });
+  // Short sleeps on purpose: a backgrounded grandchild can escape the process
+  // group depending on the shell, so the test must not depend on the kill
+  // landing in order to terminate.
+  const p = runCommand('/bin/sh', ['-c', 'sleep 5 & sleep 5'], { signal: ac.signal, timeoutMs: 20_000 });
   setTimeout(() => ac.abort(), 200);
   await assert.rejects(() => p, /cancelled/);
   assert.ok(Date.now() - started < 5_000, 'abort must not wait for the command to finish');
