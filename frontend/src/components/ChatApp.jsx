@@ -1377,6 +1377,10 @@ export default function ChatApp() {
   // granting a background process a terminal should be a decision each session,
   // not something a setting quietly remembers from last week.
   const [fullPolicyAcknowledged, setFullPolicyAcknowledged] = useState(false);
+  // Masked hints for the keys the BACKEND holds. The page never sees a value.
+  const [keyHints, setKeyHints] = useState({});
+  // What the user is currently typing, before it is saved. Never persisted.
+  const [keyDraft, setKeyDraft] = useState('');
   const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
   const [canvasEnabled, setCanvasEnabled] = useState(false);
   const [canvasText, setCanvasText] = useState('');
@@ -1841,9 +1845,53 @@ export default function ChatApp() {
     });
   }, []);
 
+  // Persist provider settings WITHOUT the API keys. Keys live in the backend
+  // now (see backend/src/providerKeys.js): keeping them in local storage exposed
+  // them to any script in the page and to anything that can read the browser
+  // profile directory. A key typed here is pushed to the backend and dropped
+  // from the object that gets persisted.
   useEffect(() => {
-    safeStorageSet('mirabilis-provider-configs', JSON.stringify(providerConfigs));
+    const withoutKeys = Object.fromEntries(
+      Object.entries(providerConfigs || {}).map(([id, cfg]) => {
+        const { apiKey, ...rest } = cfg || {};
+        return [id, rest];
+      })
+    );
+    safeStorageSet('mirabilis-provider-configs', JSON.stringify(withoutKeys));
   }, [providerConfigs]);
+
+  // One-time migration: existing installs have keys sitting in local storage.
+  // Move them to the backend and erase the originals, otherwise the exposure
+  // this change is meant to remove simply stays behind on every current machine.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let stored;
+      try {
+        stored = JSON.parse(safeStorageGet('mirabilis-provider-configs', '{}') || '{}');
+      } catch { return; }
+      const withKeys = Object.entries(stored).filter(([, cfg]) => cfg && cfg.apiKey);
+      if (!withKeys.length) return;
+      for (const [providerId, cfg] of withKeys) {
+        try {
+          await api(`/api/provider-keys/${encodeURIComponent(providerId)}`, {
+            method: 'PUT', body: JSON.stringify({ apiKey: cfg.apiKey })
+          });
+        } catch { return; } // leave local storage alone if the move failed
+      }
+      if (cancelled) return;
+      const cleaned = Object.fromEntries(
+        Object.entries(stored).map(([id, cfg]) => {
+          const { apiKey, ...rest } = cfg || {};
+          return [id, rest];
+        })
+      );
+      safeStorageSet('mirabilis-provider-configs', JSON.stringify(cleaned));
+      appStore.toast(`Moved ${withKeys.length} API key(s) out of browser storage into the app.`, { kind: 'info' });
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     safeStorageSet('mirabilis-openclaw', openClawMode ? 'true' : 'false');
@@ -2233,6 +2281,40 @@ export default function ChatApp() {
     return () => { cancelled = true; clearInterval(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider]);
+
+  const refreshKeyHints = useCallback(async () => {
+    try {
+      const payload = await api('/api/provider-keys');
+      const next = {};
+      for (const k of (payload?.keys || [])) next[k.provider] = k;
+      setKeyHints(next);
+    } catch { /* the settings panel simply shows nothing stored */ }
+  }, []);
+
+  useEffect(() => { refreshKeyHints(); }, [refreshKeyHints]);
+
+  async function saveProviderKey(providerId, value) {
+    try {
+      await api(`/api/provider-keys/${encodeURIComponent(providerId)}`, {
+        method: 'PUT', body: JSON.stringify({ apiKey: value })
+      });
+      setKeyDraft('');
+      await refreshKeyHints();
+      appStore.toast('API key saved in the app, not the browser.', { kind: 'success' });
+    } catch (err) {
+      appStore.toast(`Could not save the key: ${err.message}`, { kind: 'error' });
+    }
+  }
+
+  async function clearProviderKey(providerId) {
+    try {
+      await api(`/api/provider-keys/${encodeURIComponent(providerId)}`, { method: 'DELETE' });
+      setKeyDraft('');
+      await refreshKeyHints();
+    } catch (err) {
+      appStore.toast(`Could not clear the key: ${err.message}`, { kind: 'error' });
+    }
+  }
 
   // Keep the loop's send/speak handles pointing at the latest closures.
   useEffect(() => {
@@ -4051,7 +4133,7 @@ export default function ChatApp() {
           provider,
           model: effectiveNonOllamaModel,
           providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
-          providerApiKey: providerConfigs[provider]?.apiKey || undefined
+          providerApiKey: undefined, // held by the backend; never sent from the page
         };
       }
 
@@ -4062,7 +4144,7 @@ export default function ChatApp() {
         provider,
         model: effectiveNonOllamaModel,
         providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
-        providerApiKey: providerConfigs[provider]?.apiKey || undefined
+        providerApiKey: undefined, // held by the backend; never sent from the page
       };
     } catch (error) {
       setStatusText(`Provider check failed: ${error.message}`);
@@ -4070,7 +4152,7 @@ export default function ChatApp() {
         provider,
         model: effectiveNonOllamaModel,
         providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
-        providerApiKey: providerConfigs[provider]?.apiKey || undefined
+        providerApiKey: undefined // held by the backend; never sent from the page
       };
     }
   }
@@ -4908,7 +4990,7 @@ export default function ChatApp() {
           provider,
           model: model || undefined,
           providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
-          providerApiKey: providerConfigs[provider]?.apiKey || undefined,
+          providerApiKey: undefined, // held by the backend; never sent from the page
           toolPolicy,
           acknowledgeFullPolicy: toolPolicy === 'full' ? fullPolicyAcknowledged : undefined,
           localOnly: appStore.getGoDark(),
@@ -6581,20 +6663,37 @@ export default function ChatApp() {
                             type="password"
                             className="min-w-0 flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
                             placeholder={provider === 'openai' ? 'sk-... (required)' : provider === 'grok' ? 'xai-... (required)' : provider === 'groq' ? 'gsk_... (required)' : provider === 'openrouter' ? 'sk-or-... (required)' : provider === 'gemini' ? 'AIza... (required)' : provider === 'cerebras' ? 'csk-... (required)' : provider === 'claude' ? 'sk-ant-... (required)' : provider === 'gpuaas' ? 'provider key (required)' : 'sk-... (optional for local)'}
-                            value={providerConfigs[provider]?.apiKey || ''}
-                            onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], apiKey: e.target.value } }))}
+                            value={keyDraft}
+                            onChange={(e) => setKeyDraft(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && keyDraft.trim()) saveProviderKey(provider, keyDraft.trim()); }}
                           />
-                          {providerConfigs[provider]?.apiKey ? (
+                          {keyDraft.trim() ? (
                             <button
                               type="button"
-                              title="Clear API key"
-                              onClick={() => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], apiKey: '' } }))}
+                              title="Save API key"
+                              onClick={() => saveProviderKey(provider, keyDraft.trim())}
+                              className="flex-shrink-0 rounded-lg bg-accent px-2 py-1 text-xs font-semibold text-white transition hover:brightness-95"
+                            >
+                              Save
+                            </button>
+                          ) : keyHints[provider]?.hasKey ? (
+                            <button
+                              type="button"
+                              title="Remove the stored API key"
+                              onClick={() => clearProviderKey(provider)}
                               className="flex-shrink-0 rounded-lg border border-[var(--hairline)] px-2 py-1 text-xs text-[color:var(--text-muted)] transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:text-[color:var(--text-muted)] dark:hover:border-red-500/40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                             >
                               Clear
                             </button>
                           ) : null}
                         </div>
+                        {/* The value is never sent back to the page, so show only
+                            what is stored and enough of it to recognise. */}
+                        <p className="mb-2 text-[10px] text-[color:var(--text-muted)]">
+                          {keyHints[provider]?.hasKey
+                            ? `Stored in the app: ${keyHints[provider].hint}. Keys are held by the backend, not the browser.`
+                            : 'No key stored. Keys are held by the backend, never in browser storage.'}
+                        </p>
                       </>
                     )}
                     {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas') && (

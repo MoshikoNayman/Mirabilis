@@ -126,7 +126,18 @@ Web search is blocked entirely while Go Dark is on, regardless of this key.
 
 ## A note on secrets
 
-API keys given here are read by the backend process. Keys entered in the UI are
-stored in browser local storage instead and sent with each request. Neither is
-written to an agent run's audit log: credential-shaped strings are redacted
-before anything reaches disk.
+API keys given here are read by the backend process.
+
+Keys entered in the UI are also held by the backend, in `provider-keys.json` in
+the data directory, written `0600`. They are never stored in the browser and
+never sent from the page: the UI can set a key and see a masked hint of it, and
+that is all. An install that predates this change has its keys moved out of
+browser storage automatically the first time it runs.
+
+Be clear about the limit. This is not protection from something already running
+as you on this machine, which could read an OS keychain just as easily. What it
+removes is the far wider set of things that can read a browser profile
+directory or run script in the page.
+
+Neither kind of key is written to an agent run's audit log: credential-shaped
+strings are redacted before anything reaches disk.

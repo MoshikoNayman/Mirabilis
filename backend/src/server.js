@@ -47,6 +47,7 @@ import { createConfigVault } from './configVault.js';
 import { makeHostGuard, makeMcpAuthGuard, makePrivilegedGuard, isLoopbackRequest, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
 import { classifyProviderScope } from './providerScope.js';
 import { describeEngineError } from './engineErrors.js';
+import { createProviderKeyStore } from './providerKeys.js';
 import { commandExists, runCommand, extractAudioTrack } from './services/proc.js';
 import {
   WHISPER_MODEL_CATALOG, getWhisperModelsDir, getInstalledWhisperModelIds,
@@ -155,6 +156,10 @@ app.use((req, res, next) => {
 // down) because the privileged app routes defined below need it at definition
 // time: SSH connect/exec, the workspace file routes and the vault indexer.
 const mcpToken = loadOrCreateMcpToken(config.mcpTokenPath, config.mcpToken);
+
+// Provider API keys live here, not in the browser. See providerKeys.js.
+const providerKeys = createProviderKeyStore(join(dirname(config.chatStorePath), 'provider-keys.json'));
+const providerKeysReady = providerKeys.init().catch(() => {});
 const guardRemote = makePrivilegedGuard(mcpToken, 'remote control');
 const guardWorkspace = makePrivilegedGuard(mcpToken, 'workspace access');
 const guardVault = makePrivilegedGuard(mcpToken, 'config vault');
@@ -892,7 +897,16 @@ app.get('/api/providers/health', async (req, res) => {
     ? ''
     : config.openAIBaseUrl;
   const normalizedBase = String(overrideBaseUrl || configuredBaseUrl || '').replace(/\/$/, '');
-  const apiKey = String(req.get('x-provider-key') || req.query?.apiKey || config.openAIApiKey || '').trim();
+  // Fall back to the key the backend holds. The app no longer sends one, so
+  // without this a health check for a cloud provider would always report
+  // unreachable even with a key configured.
+  const apiKey = String(
+    req.get('x-provider-key')
+    || req.query?.apiKey
+    || providerKeys.get(String(req.query?.provider || config.aiProvider))
+    || config.openAIApiKey
+    || ''
+  ).trim();
 
   if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas') && !apiKey) {
     res.status(400).json({
@@ -1326,7 +1340,12 @@ app.get('/api/models', async (req, res) => {
   const headerKey = req.get('x-provider-key');
   const overrideApiKey = (typeof headerKey === 'string' && headerKey.length)
     ? headerKey
-    : (typeof req.query.apiKey === 'string' ? req.query.apiKey : undefined);
+    : (typeof req.query.apiKey === 'string' && req.query.apiKey)
+      ? req.query.apiKey
+      // The app stopped sending keys from the page, so fall back to the one the
+      // backend holds; otherwise listing a cloud provider's models would fail
+      // for a user who has a key configured.
+      : (providerKeys.get(String(provider)) || undefined);
   if (overrideBaseUrl) {
     try { assertSafeProviderUrl(overrideBaseUrl); }
     catch (ssrfError) { return res.status(400).json({ provider, models: [], error: ssrfError.message }); }
@@ -3083,7 +3102,12 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       config,
       signal: abortController.signal,
       overrideBaseUrl: typeof providerBaseUrl === 'string' && providerBaseUrl.trim() ? providerBaseUrl.trim() : undefined,
-      overrideApiKey: typeof providerApiKey === 'string' ? providerApiKey.trim() : undefined,
+      // Prefer the key the backend holds. A client may still pass one (an
+      // external caller with its own credentials), but the app no longer does:
+      // its keys never leave this process.
+      overrideApiKey: (typeof providerApiKey === 'string' && providerApiKey.trim())
+        ? providerApiKey.trim()
+        : (providerKeys.get(effectiveProvider) || undefined),
       temperature: typeof temperature === 'number' && isFinite(temperature) ? temperature : undefined,
       maxTokens: typeof maxTokens === 'number' && isFinite(maxTokens) && maxTokens > 0 ? Math.round(maxTokens) : undefined,
       ollamaOptions: tuning.options,
@@ -3497,6 +3521,28 @@ const mcpServerHandler = createMcpServerHandler({
 // local bearer token so it is never callable by an unauthenticated caller.
 // (The token itself is created near the top of this file, because the privileged
 // app routes defined above also need it.)
+// Provider keys. The UI may set one and see a masked hint; it can never read a
+// value back, which is the entire point of moving them off the renderer.
+app.get('/api/provider-keys', makePrivilegedGuard(mcpToken, 'provider keys'), async (_req, res) => {
+  await providerKeysReady;
+  res.json({ keys: providerKeys.listMasked() });
+});
+
+app.put('/api/provider-keys/:provider', makePrivilegedGuard(mcpToken, 'provider keys'), async (req, res) => {
+  await providerKeysReady;
+  const { apiKey } = req.body || {};
+  if (typeof apiKey !== 'string') {
+    res.status(400).json({ error: 'apiKey must be a string' });
+    return;
+  }
+  res.json(await providerKeys.set(req.params.provider, apiKey));
+});
+
+app.delete('/api/provider-keys/:provider', makePrivilegedGuard(mcpToken, 'provider keys'), async (req, res) => {
+  await providerKeysReady;
+  res.json(await providerKeys.remove(req.params.provider));
+});
+
 app.post('/mcp', makeMcpAuthGuard(mcpToken), mcpServerHandler);
 
 // Autonomous agent runs. Behind the same privileged guard as remote control:
@@ -3507,6 +3553,7 @@ app.use('/api/agent', createAgentRouter({
   streamWithProvider,
   getEffectiveModel,
   chats: { getChat, saveChat, getEpoch, chatStorePath: config.chatStorePath, nowIso, uuid: uuidv4 },
+  providerKeys,
   guard: makePrivilegedGuard(mcpToken, 'agent runs')
 }));
 

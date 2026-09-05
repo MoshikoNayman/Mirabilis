@@ -52,12 +52,13 @@ function liveRunCount(runs) {
  * @param {{aiProvider?:string, [k:string]:any}} deps.config
  * @param {Function} deps.streamWithProvider
  * @param {Function} deps.getEffectiveModel  Resolves 'auto'/absent into a real model id.
+ * @param {{get: Function}} [deps.providerKeys]  Server-held API keys.
  * @param {{getChat: Function, saveChat: Function, getEpoch: Function, chatStorePath: string, nowIso: Function, uuid: Function}} [deps.chats]
  *        Optional chat persistence. When supplied and the caller passes a chatId,
  *        the run's goal and result are written into that chat.
  * @param {Function} [deps.guard]  Privileged-route guard, applied to every route here.
  */
-export function createAgentRouter({ config, streamWithProvider, getEffectiveModel, chats, guard }) {
+export function createAgentRouter({ config, streamWithProvider, getEffectiveModel, chats, providerKeys, guard }) {
   const router = Router();
   // One append-only log per run, beside the other stores.
   const auditDir = join(dirname(config.chatStorePath || '.'), 'agent-runs');
@@ -279,7 +280,11 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
           provider: activeProvider,
           model: effectiveModel,
           baseUrl: providerBaseUrl,
-          apiKey: providerApiKey
+          // Same rule as the chat path: use the key the backend holds unless the
+          // caller supplied its own.
+          apiKey: (typeof providerApiKey === 'string' && providerApiKey.trim())
+            ? providerApiKey
+            : (providerKeys?.get?.(activeProvider) || undefined)
         }
       });
 
