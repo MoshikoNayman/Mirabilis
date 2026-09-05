@@ -259,6 +259,19 @@ curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
 
 ---
 
+## Configuration
+
+Mirabilis runs with no configuration at all. Every setting is an environment
+variable, and the full reference is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md);
+`backend/.env.example` is a copy-and-edit starting point.
+
+The two worth knowing before you start:
+
+- `MIRABILIS_BIND_HOST` defaults to loopback and should stay there. The API
+  includes endpoints that run shell commands, so binding it wider exposes them.
+- `MIRABILIS_MCP_FS_ROOT` confines file tools to one subtree. Worth setting
+  before you use the long autonomous tiers.
+
 ## Effort: answering vs working
 
 Mirabilis separates two things most tools conflate.

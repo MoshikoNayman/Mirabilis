@@ -230,3 +230,38 @@ test('a stopped run still persists the partial work it managed', async () => {
   assert.equal(chat.messages.length, 2, 'the goal and whatever came of it should both be recorded');
   assert.equal(chat.messages[1].agentRun.stopReason, result.stopReason);
 });
+
+// ── the full tool policy needs an explicit decision ─────────────────────────
+
+test('the full policy is refused without an explicit acknowledgement', async () => {
+  // Granting a background process a shell must never be reachable by a default
+  // or a remembered setting.
+  const res = await fetch(`${baseUrl}/api/agent/runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
+    body: JSON.stringify({ goal: 'x', effort: 'high', provider: 'ollama', toolPolicy: 'full' })
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.requiresAcknowledgement, 'full-policy');
+  assert.match(body.error, /shell commands/i, 'the refusal must say what is being granted');
+});
+
+test('the full policy runs once acknowledged', async () => {
+  replyIndex = 0;
+  const { frames } = await startRun({
+    goal: 'x', effort: 'high', provider: 'ollama',
+    toolPolicy: 'full', acknowledgeFullPolicy: true
+  });
+  const result = frames.find((f) => f.event === 'result');
+  assert.ok(result, 'an acknowledged run should proceed');
+  assert.equal(result.data.ok, true);
+});
+
+test('read-only and write need no acknowledgement', async () => {
+  for (const policy of ['read-only', 'write']) {
+    replyIndex = 0;
+    const { frames } = await startRun({ goal: 'x', effort: 'high', provider: 'ollama', toolPolicy: policy });
+    assert.ok(frames.find((f) => f.event === 'result'), `${policy} should not be gated`);
+  }
+});

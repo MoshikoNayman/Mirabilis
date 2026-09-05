@@ -126,11 +126,25 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
   router.post('/runs', async (req, res) => {
     const {
       goal, effort = 'high', provider, model, providerBaseUrl, providerApiKey,
-      toolPolicy = 'read-only', fsRoot, workDir, systemPrompt, localOnly, overrides, chatId
+      toolPolicy = 'read-only', fsRoot, workDir, systemPrompt, localOnly, overrides, chatId,
+      acknowledgeFullPolicy
     } = req.body || {};
 
     if (!goal || typeof goal !== 'string' || !goal.trim()) {
       res.status(400).json({ error: 'goal is required' });
+      return;
+    }
+    // The 'full' policy is a real shell running unattended. Requiring an
+    // explicit acknowledgement means it can never be reached by a default, a
+    // remembered setting, or a caller that did not think about it. Checked on
+    // the server so it holds for any client, not just this app's UI.
+    if (toolPolicy === 'full' && acknowledgeFullPolicy !== true) {
+      res.status(400).json({
+        error: 'The "full" tool policy lets this run execute shell commands unattended. '
+          + 'The filesystem root limits where a command starts, not what it can reach. '
+          + 'Re-send with acknowledgeFullPolicy: true to confirm.',
+        requiresAcknowledgement: 'full-policy'
+      });
       return;
     }
     if (!isAgenticEffort(effort)) {

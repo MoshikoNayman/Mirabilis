@@ -1373,6 +1373,10 @@ export default function ChatApp() {
   const agentAbortRef = useRef(null);
   const agentRunRef = useRef(null);
   const [toolPolicy, setToolPolicy] = useState(() => safeStorageGet('mirabilis-tool-policy', 'read-only'));
+  // Acknowledgement for the shell-capable policy. Deliberately NOT persisted:
+  // granting a background process a terminal should be a decision each session,
+  // not something a setting quietly remembers from last week.
+  const [fullPolicyAcknowledged, setFullPolicyAcknowledged] = useState(false);
   const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
   const [canvasEnabled, setCanvasEnabled] = useState(false);
   const [canvasText, setCanvasText] = useState('');
@@ -4906,6 +4910,7 @@ export default function ChatApp() {
           providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
           providerApiKey: providerConfigs[provider]?.apiKey || undefined,
           toolPolicy,
+          acknowledgeFullPolicy: toolPolicy === 'full' ? fullPolicyAcknowledged : undefined,
           localOnly: appStore.getGoDark(),
           systemPrompt
         })
@@ -7090,7 +7095,20 @@ export default function ChatApp() {
                             <button
                               key={opt.value}
                               type="button"
-                              onClick={() => setToolPolicy(opt.value)}
+                              onClick={() => {
+                                if (opt.value === 'full' && !fullPolicyAcknowledged) {
+                                  const ok = window.confirm(
+                                    'Full access lets an autonomous run execute shell commands on this machine '
+                                    + 'with nobody watching.\n\n'
+                                    + 'The filesystem root only sets where a command starts, not what it can reach. '
+                                    + 'Every command is recorded in the run\'s audit log.\n\n'
+                                    + 'Enable full access for this session?'
+                                  );
+                                  if (!ok) return;
+                                  setFullPolicyAcknowledged(true);
+                                }
+                                setToolPolicy(opt.value);
+                              }}
                               className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
                                 toolPolicy === opt.value
                                   ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
