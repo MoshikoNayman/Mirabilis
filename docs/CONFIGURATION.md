@@ -270,3 +270,29 @@ possible if next ever makes that straightforward.
 bundles into the installer. That runtime is a full Chromium, and it is the
 largest piece of third-party code that reaches a user's machine. Its version is
 tracked as its own concern, not by the dependency gate.
+
+### The Electron runtime
+
+The installer bundles a full Chromium. It is the largest piece of third-party
+code that reaches a user's machine, and `npm audit` cannot see it, so its
+version is tracked deliberately rather than by the dependency gate.
+
+The app ships Electron 44 (Chromium 152, Node 24). Electron supports roughly the
+three most recent majors, so falling more than that behind means shipping a
+browser engine with published, unpatched CVEs regardless of how clean the
+lockfiles look.
+
+**electron-builder is pinned to 25.1.8, and that pin is load bearing.** Version
+26 stopped copying `node_modules` out of `extraResources`. This app ships its
+backend that way and runs it as a separate Node process, so under 26 the build
+succeeds, the installer is valid, the window opens, and the backend dies on its
+first import with `Cannot find package 'express'`. Nothing in the pipeline
+noticed, because every check looked at the installer rather than at whether the
+app worked.
+
+`verify-release.js` now fails the build when the packaged backend has no
+dependencies, so the same mistake reports itself at build time. If you upgrade
+electron-builder, that check is what will tell you whether the upgrade is safe.
+The advisories against electron-builder 25 are in the build toolchain, which
+never runs on a user's machine, and the audit gate reports them without
+blocking.

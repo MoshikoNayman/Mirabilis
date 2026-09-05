@@ -52,7 +52,26 @@ const exes = files.filter((f) => f.toLowerCase().endsWith('.exe'));
 const blockmaps = files.filter((f) => f.toLowerCase().endsWith('.blockmap'));
 const yml = files.filter((f) => f.toLowerCase().endsWith('.yml'));
 
+// The packaged app runs the backend as a separate Node process out of
+// resources/backend, so that copy needs its own node_modules. Nothing else in
+// the pipeline checks for it, and when it went missing the build succeeded, the
+// installer was valid, the window opened, and only the backend was dead. The
+// cause was an electron-builder upgrade that stopped copying node_modules out
+// of extraResources. Assert the dependencies are actually there.
+const backendDeps = files.filter((f) =>
+  f.includes(`backend${path.sep}node_modules${path.sep}`)
+);
+if (backendDeps.length === 0) {
+  fail(
+    'the packaged backend has no node_modules, so it cannot start.\n' +
+    '     The app would install and open a window with a dead backend.\n' +
+    '     electron-builder 26 stopped copying node_modules out of extraResources;\n' +
+    '     desktop/package.json pins 25.x for this reason.'
+  );
+}
+
 console.log(`Release verify target: ${target}`);
+console.log(`OK  packaged backend dependencies: ${backendDeps.length} files`);
 console.log(`dist: ${distDir}`);
 console.log(`files scanned: ${files.length}`);
 
