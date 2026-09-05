@@ -303,6 +303,33 @@ function startFrontend() {
   });
 }
 
+// The one origin this window is allowed to be. Everything else is external.
+const APP_ORIGIN = 'http://localhost:3000';
+
+/** Is this URL our own app? */
+function isAppUrl(url) {
+  try {
+    const u = new URL(url);
+    const app = new URL(APP_ORIGIN);
+    // Accept either loopback spelling on the app's port: Next and the browser
+    // do not always agree on localhost versus 127.0.0.1.
+    const loopback = u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1';
+    return u.protocol === app.protocol && loopback && u.port === app.port;
+  } catch {
+    return false;
+  }
+}
+
+/** Only real web links are ever handed to the operating system. */
+function isSafeExternalUrl(url) {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 // ── Create the browser window ──────────────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -332,12 +359,30 @@ function createWindow() {
     return allowed.includes(permission);
   });
 
-  mainWindow.loadURL('http://localhost:3000');
+  mainWindow.loadURL(APP_ORIGIN);
 
-  // Open external links in system browser
+  // Open external links in the system browser, but only ones the OS should be
+  // asked to open. shell.openExternal hands a URL straight to the operating
+  // system, so an unchecked call lets page content trigger file:// or a
+  // registered custom scheme. Restrict it to real web links.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // Keep the window itself on the app. setWindowOpenHandler only covers NEW
+  // windows: without this, anything that navigates the existing window (a link,
+  // a redirect, injected content) could replace the app with a remote page that
+  // then sits inside the Electron shell wearing the app's identity.
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (isAppUrl(url)) return;
+    event.preventDefault();
+    if (isSafeExternalUrl(url)) shell.openExternal(url);
+  });
+
+  // Same rule for anything that tries to attach a webview.
+  mainWindow.webContents.on('will-attach-webview', (event) => {
+    event.preventDefault();
   });
 
   mainWindow.on('close', (e) => {
