@@ -17,6 +17,7 @@ import AgentRunPanel from './shell/AgentRunPanel';
 import { playSend, playReceive, playError } from '../lib/sounds';
 import { postJSON } from '../lib/api';
 import { getSessionToken } from '../lib/sessionToken';
+import { createSseParser } from '../lib/sseParser';
 import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -4917,21 +4918,21 @@ export default function ChatApp() {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = '';
-      let currentEvent = '';
+      // Shared, tested parser rather than an inline one. The inline version
+      // required exactly "data: " with a space, so a server writing "data:{...}"
+      // produced no events at all and the run appeared to hang.
+      const sse = createSseParser();
 
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        const frames = done
+          ? sse.flush()
+          : sse.push(decoder.decode(value, { stream: true }));
 
-        for (const line of lines) {
-          if (line.startsWith('event: ')) { currentEvent = line.slice(7).trim(); continue; }
-          if (!line.startsWith('data: ')) continue;
+        for (const frame of frames) {
+          const currentEvent = frame.event;
           let payload;
-          try { payload = JSON.parse(line.slice(6)); } catch { continue; }
+          try { payload = JSON.parse(frame.data); } catch { continue; }
 
           if (currentEvent === 'run-accepted') {
             setAgentRun((prev) => (prev ? { ...prev, id: payload.id } : prev));
@@ -4987,6 +4988,7 @@ export default function ChatApp() {
             default: break;
           }
         }
+        if (done) break;
       }
     } catch (err) {
       if (err?.name !== 'AbortError') {
