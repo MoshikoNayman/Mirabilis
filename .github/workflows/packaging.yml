@@ -70,16 +70,19 @@ jobs:
         include:
           - os: macos-14
             name: macOS DMG
+            shell: bash
             build: |
               chmod +x desktop/build.sh
               cd desktop && ./build.sh dmg
           - os: ubuntu-22.04
             name: Linux AppImage
+            shell: bash
             build: |
               chmod +x desktop/build.sh
               cd desktop && ./build.sh appimage
           - os: windows-2022
             name: Windows installer
+            shell: cmd
             build: |
               cd desktop
               call build.bat
@@ -96,7 +99,10 @@ jobs:
             frontend/package-lock.json
 
       - name: Build ${{ matrix.name }}
-        shell: ${{ matrix.os == 'windows-2022' && 'cmd' || 'bash' }}
+        # The shell comes from the matrix rather than an inline conditional:
+        # the `shell:` key cannot evaluate the matrix context, and GitHub rejects
+        # the whole workflow file if it tries.
+        shell: ${{ matrix.shell }}
         run: ${{ matrix.build }}
 
       # build.sh already runs verify-release, but build.bat does not, and a
