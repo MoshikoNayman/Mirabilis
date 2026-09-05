@@ -66,6 +66,12 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      # Unit tests for the framework-free modules. Cheap, and this is the layer
+      # where the recent defects actually lived.
+      - name: Frontend unit tests
+        working-directory: frontend
+        run: npm run test:unit
+
       - name: Frontend production build
         working-directory: frontend
         run: npx next build
