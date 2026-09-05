@@ -48,6 +48,7 @@ import { makeHostGuard, makeMcpAuthGuard, makePrivilegedGuard, isLoopbackRequest
 import { classifyProviderScope } from './providerScope.js';
 import { describeEngineError } from './engineErrors.js';
 import { createProviderKeyStore } from './providerKeys.js';
+import { hardenFile, hardenExistingData, ensureSecureDir, SECURE_FILE_MODE } from './storage/securePaths.js';
 import { commandExists, runCommand, extractAudioTrack } from './services/proc.js';
 import {
   WHISPER_MODEL_CATALOG, getWhisperModelsDir, getInstalledWhisperModelIds,
@@ -2456,7 +2457,7 @@ async function saveMemoryItems(items) {
   await ensureMemoryStoreFile();
   const serialized = JSON.stringify({ items }, null, 2);
   const tmpPath = `${memoryStorePath}.tmp-${process.pid}`;
-  const handle = await open(tmpPath, 'w');
+  const handle = await open(tmpPath, 'w', SECURE_FILE_MODE);
   try {
     await handle.writeFile(serialized, 'utf8');
     await handle.sync();
@@ -2465,6 +2466,7 @@ async function saveMemoryItems(items) {
   }
   try { await copyFile(memoryStorePath, `${memoryStorePath}.bak`); } catch { /* first write */ }
   await rename(tmpPath, memoryStorePath);
+  await hardenFile(memoryStorePath);
 }
 
 app.get('/api/training/status', async (_req, res) => {
@@ -4179,6 +4181,18 @@ const server = app.listen(config.port, config.bindHost, () => {
   if (config.bindHost === '0.0.0.0' || config.bindHost === '::') {
     console.warn('[security] Backend is bound to a non-loopback interface. Privileged endpoints (/mcp, /api/remote/*) are reachable from the network. Put an authenticating proxy in front, or unset MIRABILIS_BIND_HOST to bind loopback only.');
   }
+  // Bring the data directory up to standard. Stores were created with the
+  // process umask (normally 022) and landed world-readable, so every existing
+  // install has its chat history, ledger, indexed config vault and agent logs
+  // readable by any other account on the machine. New writes are 0600; this
+  // fixes what is already there.
+  ensureSecureDir(dirname(config.chatStorePath))
+    .then(() => hardenExistingData(dirname(config.chatStorePath)))
+    .then(({ changed }) => {
+      if (changed > 0) console.log(`[security] tightened permissions on ${changed} existing data file(s)`);
+    })
+    .catch(() => {});
+
   // Reclaim images and uploads left behind by wholesale message edits, snapshot
   // restores and Off-the-Record chats. Deliberately at boot: nothing is in
   // flight and no ephemeral chat exists yet, so "unreferenced" is unambiguous.

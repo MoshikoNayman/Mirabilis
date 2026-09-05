@@ -13,6 +13,7 @@
 // readable, which rules out rewriting a JSON document.
 
 import { appendFile, mkdir, readdir, stat, unlink, readFile } from 'node:fs/promises';
+import { hardenFile, ensureSecureDir, SECURE_FILE_MODE } from '../storage/securePaths.js';
 import { join } from 'node:path';
 
 /** Keep the log bounded: a 5-hour run can make thousands of calls. */
@@ -58,7 +59,7 @@ export function createRunAuditor({ dir, runId, nowIso = () => new Date().toISOSt
   let failed = false;
 
   const ensure = () => {
-    if (!ready) ready = mkdir(dir, { recursive: true }).catch(() => { failed = true; });
+    if (!ready) ready = ensureSecureDir(dir).then((ok) => { if (!ok) failed = true; });
     return ready;
   };
 
@@ -67,7 +68,8 @@ export function createRunAuditor({ dir, runId, nowIso = () => new Date().toISOSt
     if (failed) return;
     try {
       await ensure();
-      await appendFile(file, `${JSON.stringify({ at: nowIso(), ...entry })}\n`, 'utf8');
+      await appendFile(file, `${JSON.stringify({ at: nowIso(), ...entry })}\n`, { encoding: 'utf8', mode: SECURE_FILE_MODE });
+      if (lines === 0) await hardenFile(file);
       lines += 1;
     } catch {
       // A full disk or a read-only volume must not take the run down with it.

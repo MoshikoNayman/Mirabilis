@@ -1,5 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
+import { hardenFile, SECURE_FILE_MODE } from './securePaths.js';
 
 const emptyStore = { chats: [] };
 
@@ -97,7 +98,7 @@ export async function writeStore(filePath, data, { shred = false } = {}) {
   invalidateCache();
   const serialized = JSON.stringify(data);
   const tmpPath = `${filePath}.tmp-${process.pid}`;
-  const handle = await fs.open(tmpPath, 'w');
+  const handle = await fs.open(tmpPath, 'w', SECURE_FILE_MODE);
   try {
     await handle.writeFile(serialized, 'utf8');
     await handle.sync();
@@ -112,6 +113,7 @@ export async function writeStore(filePath, data, { shred = false } = {}) {
     try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write: no prior file */ }
     await fs.rename(tmpPath, filePath);
   }
+  await hardenFile(filePath);
   _cache = data;
   _cachePath = filePath;
 }

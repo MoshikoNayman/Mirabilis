@@ -14,6 +14,7 @@
 
 import { readFile, writeFile, rename, mkdir, unlink, copyFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { hardenFile, SECURE_FILE_MODE } from '../storage/securePaths.js';
 
 /** Statuses that mean "this run was alive when the process stopped". */
 const LIVE = new Set(['running', 'stopping']);
@@ -44,9 +45,10 @@ export function createRunStore(dir) {
     // mid-write leaves the previous index intact rather than a truncated one.
     const tmp = `${file}.tmp-${process.pid}`;
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(tmp, JSON.stringify({ runs: list }), 'utf8');
+    await writeFile(tmp, JSON.stringify({ runs: list }), { encoding: 'utf8', mode: SECURE_FILE_MODE });
     await copyFile(file, `${file}.bak`).catch(() => {});
     await rename(tmp, file);
+    await hardenFile(file);
   }
 
   return {

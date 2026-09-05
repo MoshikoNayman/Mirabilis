@@ -8,6 +8,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import { hardenFile, SECURE_FILE_MODE } from './securePaths.js';
 
 const emptyStore = { root: '', builtAt: null, embedModel: null, fileCount: 0, chunks: [] };
 
@@ -115,7 +116,7 @@ export function writeVault(filePath, data, { shred = false } = {}) {
     // alone accounted for roughly a third of its size.
     const serialized = JSON.stringify(next);
     const tmpPath = `${filePath}.tmp-${process.pid}`;
-    const handle = await fs.open(tmpPath, 'w');
+    const handle = await fs.open(tmpPath, 'w', SECURE_FILE_MODE);
     try {
       await handle.writeFile(serialized, 'utf8');
       await handle.sync();
@@ -129,6 +130,7 @@ export function writeVault(filePath, data, { shred = false } = {}) {
       try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write: no prior file */ }
       await fs.rename(tmpPath, filePath);
     }
+    await hardenFile(filePath);
     _cache = next;
     _cachePath = filePath;
     return next;

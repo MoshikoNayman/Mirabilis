@@ -141,3 +141,20 @@ directory or run script in the page.
 
 Neither kind of key is written to an agent run's audit log: credential-shaped
 strings are redacted before anything reaches disk.
+
+## File permissions
+
+Everything in the data directory is written `0600` and the directory itself is
+`0700`, so it is readable only by the account running Mirabilis. That covers the
+chat history, IntelLedger, the indexed config vault, the homelab roster,
+personal memory, provider keys and agent run logs.
+
+These stores were previously created with the process umask, which is normally
+`022`, so they landed world-readable. An install that predates this is corrected
+at startup and logs how many files it tightened.
+
+This is a file mode, not encryption. It closes the other-local-user and
+stray-copy cases. It does not protect against someone who can read the disk
+offline, or against a process already running as you. For the first, use
+whole-disk encryption (FileVault, BitLocker, LUKS), which is the right tool and
+already exists on every platform this app ships to.
