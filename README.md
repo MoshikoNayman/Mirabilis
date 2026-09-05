@@ -32,9 +32,29 @@ node run.js
 
 Open: **http://localhost:3000**
 
-`node run.js` starts the backend, frontend, image service, and any configured local providers. **Dependencies are installed automatically on first run** - no separate install step needed. No shell scripts required.
+That is the whole setup. On a machine with none of this installed, `node run.js`
+checks what is missing, installs it, and starts everything: backend, frontend,
+image service and any local providers. No shell scripts, no separate install
+step, and the same command on macOS, Linux and Windows. CI runs it on all three
+from a cold checkout on every push, so the claim is tested rather than asserted.
 
-> To install or reinstall dependencies explicitly: `node run.js install`
+A first run pulls a lot. To skip the heavy optional parts:
+
+```bash
+node run.js --no-image     # skip image generation (torch/diffusers, multi-GB)
+node run.js --no-ollama    # skip the local engine (for a cloud-only setup)
+```
+
+Useful checks:
+
+```bash
+node run.js doctor         # what is installed, what is running
+node run.js install        # install or repair dependencies explicitly
+node run.js stop           # stop everything it started
+```
+
+`doctor` exits non-zero only when something is genuinely missing. Services that
+are merely not running yet are reported as notes, not failures.
 
 ---
 

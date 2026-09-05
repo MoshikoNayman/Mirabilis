@@ -89,6 +89,43 @@ jobs:
         working-directory: frontend
         run: npx next build
 
+  # The one-command setup, on every platform we claim to support.
+  #
+  # "node run.js and it works" is a promise about a machine that has none of
+  # this installed yet, and it was only ever proven on macOS: the provider
+  # binaries were installed under `if (process.platform === 'darwin')` and every
+  # other platform got a warning, followed at runtime by "Run: node run.js
+  # install" - a command that on Linux and Windows would never install them.
+  #
+  # This job is a genuinely cold machine: a fresh checkout, no node_modules, no
+  # binaries. Ollama and the image service are skipped because they are large
+  # downloads that prove nothing about the launcher; everything else is real.
+  launcher:
+    strategy:
+      fail-fast: false      # one platform failing must not hide the others
+      matrix:
+        os: [ubuntu-22.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: One command, cold machine
+        run: node run.js install --no-image --no-ollama
+
+      # An installed binary that cannot start is worse than one that is absent,
+      # and this is exactly what the old macOS-only code would have produced on
+      # the current upstream layout: it moved the executable and left its shared
+      # libraries behind. Run them.
+      - name: The provider binaries actually execute
+        run: node scripts/verify-providers.mjs
+
+      - name: Doctor reports a healthy install
+        run: node run.js doctor
+
   # Dependency advisories. Fast, and needs no installs: --package-lock-only
   # audits the lockfile directly, which also keeps the desktop tree auditable
   # without pulling down an Electron binary.

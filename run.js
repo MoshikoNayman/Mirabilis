@@ -94,7 +94,10 @@ function printStartupSummary(provider, verbose) {
 }
 
 function usage() {
-  process.stdout.write(`Usage: node run.js [provider|command] [args] [--log] [--verbose] [--prod-ui]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n  --dev-ui           - Force frontend dev mode (next dev, hot reload)\n  --prod-ui          - Force frontend production mode (next start, requires build)\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  node run.js\n  node run.js restart ui\n  node run.js --prod-ui\n  node run.js ollama\n  node run.js openai-compatible --log --verbose\n  node run.js doctor\n  node run.js logs\n  node run.js restart koboldcpp --log\n  node run.js install\n  node run.js uninstall\n  node run.js stop\n\n`);
+  process.stdout.write(`Usage: node run.js [provider|command] [args] [--log] [--verbose] [--prod-ui]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n  --no-image         - Skip the image service (torch/diffusers). Everything except
+                       image generation works, and a first run is far faster.
+  --no-ollama        - Do not auto-install Ollama (for cloud-only setups).
+  --dev-ui           - Force frontend dev mode (next dev, hot reload)\n  --prod-ui          - Force frontend production mode (next start, requires build)\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  node run.js\n  node run.js restart ui\n  node run.js --prod-ui\n  node run.js ollama\n  node run.js openai-compatible --log --verbose\n  node run.js doctor\n  node run.js logs\n  node run.js restart koboldcpp --log\n  node run.js install\n  node run.js uninstall\n  node run.js stop\n\n`);
 }
 
 function parseArgs(argv) {
@@ -614,6 +617,223 @@ async function ensureOllamaModel() {
   return code === 0;
 }
 
+
+// ── Provider binary installation, cross platform ────────────────────────────
+//
+// Pinned by default so an install is reproducible and nobody silently runs
+// whatever upstream published this morning. Override to move to a newer build.
+/** A local engine is not needed by someone using only cloud providers. */
+function skipOllama() {
+  return process.env.MIRABILIS_SKIP_OLLAMA === '1'
+    || process.argv.includes('--no-ollama');
+}
+
+/**
+ * Image generation is optional and by far the heaviest part of an install:
+ * torch and diffusers are a multi-gigabyte download, and the model assets are
+ * another one on first use.
+ *
+ * One predicate governs BOTH installing and starting it. MIRABILIS_SKIP_IMAGE
+ * already existed for the start path; skipping the start while still spending
+ * ten minutes installing torch would be a strange thing to ask for, so the same
+ * answer is used for both. --no-image is the same switch for people who would
+ * rather not remember an environment variable.
+ */
+function skipImageService() {
+  return process.env.MIRABILIS_SKIP_IMAGE_SERVICE === '1'
+    || process.env.MIRABILIS_SKIP_IMAGE === '1'
+    || process.argv.includes('--no-image');
+}
+
+const LLAMACPP_TAG = process.env.MIRABILIS_LLAMACPP_TAG || 'b10819';
+const KOBOLDCPP_TAG = process.env.MIRABILIS_KOBOLDCPP_TAG || 'v1.117.1';
+
+/** Download a URL to a file. Fails loudly: a truncated binary is worse than none. */
+async function downloadTo(url, destPath) {
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`Download failed (${res.status}) for ${url}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length === 0) throw new Error(`Download was empty: ${url}`);
+  await fsp.writeFile(destPath, buf);
+  return buf.length;
+}
+
+/**
+ * Extract a .zip or .tar.gz without assuming any one tool exists.
+ *
+ * bsdtar (macOS, and Windows 10+) reads both formats, so `tar -xf` covers those.
+ * GNU tar on Linux cannot read a zip, so unzip is tried there. Each candidate is
+ * attempted in turn rather than assuming, because the previous code shelled out
+ * to `unzip` and `rm -rf`, neither of which exists on a stock Windows.
+ */
+async function extractArchive(archivePath, destDir) {
+  await fsp.mkdir(destDir, { recursive: true });
+  const isZip = archivePath.toLowerCase().endsWith('.zip');
+  const candidates = [];
+  if (isZip) {
+    if (process.platform === 'linux') candidates.push(['unzip', ['-qo', archivePath, '-d', destDir]]);
+    candidates.push(['tar', ['-xf', archivePath, '-C', destDir]]);
+    if (process.platform === 'win32') {
+      candidates.push(['powershell.exe', ['-NoProfile', '-Command',
+        `Expand-Archive -LiteralPath '${archivePath}' -DestinationPath '${destDir}' -Force`]]);
+    }
+  } else {
+    candidates.push(['tar', ['-xzf', archivePath, '-C', destDir]]);
+  }
+  const tried = [];
+  for (const [cmd, args] of candidates) {
+    const result = spawnSync(cmd, args, { stdio: 'ignore' });
+    if (!result.error && result.status === 0) return;
+    tried.push(cmd);
+  }
+  throw new Error(
+    `Could not extract ${path.basename(archivePath)} (tried: ${tried.join(', ')}).\n` +
+    `  Extract it by hand into ${PROVIDERS_DIR} and re-run.`
+  );
+}
+
+/** Find a file by name anywhere under dir. Release layouts move binaries around. */
+function findFileRecursive(dir, fileName) {
+  let stack = [dir];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const full = path.join(cur, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.name === fileName) return full;
+    }
+  }
+  return null;
+}
+
+/** Fetch a GitHub release by tag. */
+async function githubRelease(repo, tag) {
+  const headers = { 'User-Agent': 'mirabilis-launcher' };
+  // A token is optional and only raises the rate limit; never required.
+  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const res = await fetch(`https://api.github.com/repos/${repo}/releases/tags/${tag}`, { headers });
+  if (!res.ok) {
+    throw new Error(
+      `Could not read ${repo} release ${tag} (HTTP ${res.status}).` +
+      (res.status === 403 ? ' GitHub rate limit: set GITHUB_TOKEN, or retry later.' : '')
+    );
+  }
+  return res.json();
+}
+
+/**
+ * The plain CPU llama.cpp asset for this machine.
+ * Accelerator builds (cuda, vulkan, sycl, rocm, openvino, opencl) are excluded:
+ * they need drivers most machines do not have, and fail at startup rather than
+ * at install, which is the worst place to find out.
+ */
+function llamaAssetPattern(platform, arch) {
+  const a = arch === 'arm64' ? 'arm64' : 'x64';
+  if (platform === 'darwin') return new RegExp(`^llama-.*-bin-macos-${a}\\.(tar\\.gz|zip)$`);
+  if (platform === 'linux') return new RegExp(`^llama-.*-bin-ubuntu-${a}\\.(tar\\.gz|zip)$`);
+  if (platform === 'win32') return new RegExp(`^llama-.*-bin-win-cpu-${a}\\.zip$`);
+  return null;
+}
+
+/** The koboldcpp asset for this machine, preferring the standard build. */
+function koboldAssetName(platform, arch) {
+  if (platform === 'darwin') return arch === 'arm64' ? 'koboldcpp-mac-arm64' : null;
+  if (platform === 'linux') return arch === 'x64' ? 'koboldcpp-linux-x64' : null;
+  if (platform === 'win32') return arch === 'x64' ? 'koboldcpp.exe' : null;
+  return null;
+}
+
+function manualProviderHint(what) {
+  return `${what} has no prebuilt download for ${process.platform}/${process.arch}.\n` +
+    `  Mirabilis works without it - Ollama is the default provider.\n` +
+    `  To use it, build or download it yourself and place it in ${PROVIDERS_DIR}.`;
+}
+
+async function installLlamaServer() {
+  const exeName = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
+  const target = path.join(PROVIDERS_DIR, exeName);
+  if (fs.existsSync(target)) { statusLine('OK', 'llama-server already exists'); return; }
+
+  const pattern = llamaAssetPattern(process.platform, process.arch);
+  if (!pattern) { statusLine('WARN', manualProviderHint('llama-server')); return; }
+
+  statusLine('INFO', `Installing llama-server (${LLAMACPP_TAG}, ${process.platform}/${process.arch})...`);
+  const release = await githubRelease('ggml-org/llama.cpp', LLAMACPP_TAG);
+  const asset = (release.assets || []).find((a) => pattern.test(a.name));
+  if (!asset) { statusLine('WARN', manualProviderHint('llama-server')); return; }
+
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'mirabilis-llama-'));
+  try {
+    const archive = path.join(tmpDir, asset.name);
+    await downloadTo(asset.browser_download_url, archive);
+    await extractArchive(archive, tmpDir);
+    const found = findFileRecursive(tmpDir, exeName);
+    if (!found) throw new Error(`${exeName} was not in ${asset.name}`);
+    await fsp.copyFile(found, target);
+    if (process.platform !== 'win32') await fsp.chmod(target, 0o755);
+
+    // llama-server needs its shared libraries beside it on macOS and Linux.
+    // Copying only the executable produced a binary that installed cleanly and
+    // then failed to start with a dynamic-linker error.
+    const libDir = path.dirname(found);
+    for (const entry of await fsp.readdir(libDir)) {
+      if (/\.(so|so\.\d+|dylib|dll)$/.test(entry) || /^lib.*\.(so|dylib)/.test(entry)) {
+        await fsp.copyFile(path.join(libDir, entry), path.join(PROVIDERS_DIR, entry)).catch(() => {});
+      }
+    }
+    // The CLI is handy but optional; never fail the install for it.
+    const cli = findFileRecursive(tmpDir, process.platform === 'win32' ? 'llama-cli.exe' : 'llama-cli');
+    if (cli) {
+      const cliTarget = path.join(PROVIDERS_DIR, path.basename(cli));
+      await fsp.copyFile(cli, cliTarget).catch(() => {});
+      if (process.platform !== 'win32') await fsp.chmod(cliTarget, 0o755).catch(() => {});
+    }
+    statusLine('OK', 'llama-server installed');
+  } finally {
+    await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function installKoboldCpp() {
+  const exeName = process.platform === 'win32' ? 'koboldcpp.exe' : 'koboldcpp';
+  const target = path.join(PROVIDERS_DIR, exeName);
+  if (fs.existsSync(target)) { statusLine('OK', 'koboldcpp already exists'); return; }
+
+  const assetName = koboldAssetName(process.platform, process.arch);
+  if (!assetName) { statusLine('WARN', manualProviderHint('KoboldCpp')); return; }
+
+  statusLine('INFO', `Installing KoboldCpp (${KOBOLDCPP_TAG}, ${process.platform}/${process.arch})...`);
+  const release = await githubRelease('LostRuins/koboldcpp', KOBOLDCPP_TAG);
+  const asset = (release.assets || []).find((a) => a.name === assetName);
+  if (!asset) { statusLine('WARN', manualProviderHint('KoboldCpp')); return; }
+
+  await downloadTo(asset.browser_download_url, target);
+  if (process.platform !== 'win32') await fsp.chmod(target, 0o755);
+  statusLine('OK', 'koboldcpp installed');
+}
+
+/**
+ * Install the optional local provider runtimes.
+ *
+ * Never fatal. Ollama is the default provider and needs none of this, so a
+ * machine with no prebuilt binary still gets a working app; it just cannot use
+ * the llama.cpp or KoboldCpp providers.
+ */
+async function installProviderBinaries() {
+  if (!fs.existsSync(PROVIDERS_DIR)) fs.mkdirSync(PROVIDERS_DIR, { recursive: true });
+  statusLine('INFO', `Installing provider runtimes (${process.platform}/${process.arch})...`);
+  for (const [name, install] of [['llama-server', installLlamaServer], ['KoboldCpp', installKoboldCpp]]) {
+    try {
+      await install();
+    } catch (error) {
+      statusLine('WARN', `${name} install skipped: ${error.message || error}`);
+      statusLine('INFO', 'Mirabilis still runs: Ollama is the default provider.');
+    }
+  }
+}
+
 async function ensureLlamaModel(modelPath) {
   let needsDownload = false;
   try {
@@ -656,7 +876,14 @@ async function ensureLlamaModel(modelPath) {
 async function startOpenAICompatible(threads) {
   const llamaBin = path.join(PROVIDERS_DIR, process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
   if (!fs.existsSync(llamaBin)) {
-    process.stderr.write('llama-server not found. Run: node run.js install\n');
+    // Say what will actually help. Telling every platform to run `install` was
+    // a dead end wherever no prebuilt binary exists: the command runs, reports
+    // success, and the binary is still missing.
+    process.stderr.write(
+      llamaAssetPattern(process.platform, process.arch)
+        ? 'llama-server not found. Run: node run.js install\n'
+        : `${manualProviderHint('llama-server')}\n`
+    );
     return false;
   }
 
@@ -690,7 +917,11 @@ async function startOpenAICompatible(threads) {
 async function startKoboldCpp(threads) {
   const koboldBin = path.join(PROVIDERS_DIR, process.platform === 'win32' ? 'koboldcpp.exe' : 'koboldcpp');
   if (!fs.existsSync(koboldBin)) {
-    process.stderr.write('koboldcpp not found. Run: node run.js install\n');
+    process.stderr.write(
+      koboldAssetName(process.platform, process.arch)
+        ? 'koboldcpp not found. Run: node run.js install\n'
+        : `${manualProviderHint('KoboldCpp')}\n`
+    );
     return false;
   }
 
@@ -826,13 +1057,24 @@ async function runInstall() {
   }
   statusLine('OK', `Node.js: ${require('child_process').execSync('node -v', { encoding: 'utf8' }).trim()}`);
 
-  // Check Ollama - auto-install if missing
-  if (!(await hasOllamaCommand())) {
+  // Check Ollama - auto-install if missing.
+  //
+  // Skippable, because it is not always wanted: someone using only cloud
+  // providers does not need a local engine, and CI must be able to prove this
+  // launcher works on each platform without pulling a multi-gigabyte runtime.
+  if (skipOllama()) {
+    statusLine('INFO', 'Ollama install skipped (--no-ollama / MIRABILIS_SKIP_OLLAMA).');
+  } else if (!(await hasOllamaCommand())) {
     await installOllama();
+    statusLine('OK', 'Ollama: installed');
+  } else {
+    statusLine('OK', 'Ollama: installed');
   }
-  statusLine('OK', 'Ollama: installed');
 
-  // Ensure Ollama service is running so we can check/pull models
+  // Ensure Ollama service is running so we can check/pull models.
+  // All of this is Ollama work; skip it wholesale when Ollama is opted out,
+  // otherwise the launcher would try to start a binary that is not there.
+  if (!skipOllama()) {
   const ollamaRunning = await endpointReady('http://127.0.0.1:11434');
   if (!ollamaRunning) {
     statusLine('INFO', 'Starting Ollama service...');
@@ -850,6 +1092,7 @@ async function runInstall() {
 
   // Ensure at least one Ollama model is available - pull default if none
   await ensureOllamaModel();
+  } // end Ollama setup
 
   // Install backend
   statusLine('INFO', 'Installing backend dependencies...');
@@ -865,7 +1108,16 @@ async function runInstall() {
     throw new Error('Frontend npm install failed');
   }
 
-  // Setup Python venv
+  // Setup Python venv, unless the caller opted out.
+  //
+  // This step pulls torch and diffusers, which is a multi-gigabyte download and
+  // by far the slowest part of a first run. It only powers image generation, so
+  // anyone who does not want that (and CI, which must not spend ten minutes
+  // downloading torch to prove the launcher works) can skip it.
+  if (skipImageService()) {
+    statusLine('INFO', 'Skipping the image service (MIRABILIS_SKIP_IMAGE_SERVICE / --no-image).');
+    statusLine('INFO', 'Everything except image generation works. Re-run without the flag to add it.');
+  } else {
   statusLine('INFO', 'Setting up Python environment (this may take several minutes on first run)...');
   const venvPath = path.join(IMAGE_SERVICE_DIR, '.venv');
   if (!fs.existsSync(venvPath)) {
@@ -887,81 +1139,23 @@ async function runInstall() {
     throw new Error('Python requirements install failed');
   }
 
-  // Provider binaries (macOS only for auto-install)
-  if (process.platform === 'darwin') {
-    statusLine('INFO', 'Installing provider runtimes (macOS detected)...');
-    // Ensure providers directory exists
-    if (!fs.existsSync(PROVIDERS_DIR)) {
-      fs.mkdirSync(PROVIDERS_DIR, { recursive: true });
-    }
-    const arch = process.arch;
+  } // end image service setup
 
-    // llama-server
-    if (!fs.existsSync(path.join(PROVIDERS_DIR, 'llama-server'))) {
-      statusLine('INFO', 'Installing llama-server...');
-      const llamaUrl = arch === 'arm64'
-        ? 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-arm64.zip'
-        : 'https://github.com/ggerganov/llama.cpp/releases/download/b3920/llama-b3920-bin-macos-x64.zip';
-      
-      const zipPath = path.join(PROVIDERS_DIR, 'llama.zip');
-      const res = await fetch(llamaUrl);
-      if (!res.ok) throw new Error('Failed to download llama-server');
-      const buf = await res.arrayBuffer();
-      await fsp.writeFile(zipPath, Buffer.from(buf));
-
-      const { execSync } = require('child_process');
-      try {
-        execSync(`cd "${PROVIDERS_DIR}" && unzip -qo llama.zip`, { stdio: 'inherit' });
-      } catch {
-        throw new Error('llama-server extraction failed');
-      }
-
-      if (fs.existsSync(path.join(PROVIDERS_DIR, 'build', 'bin', 'llama-server'))) {
-        fs.renameSync(path.join(PROVIDERS_DIR, 'build', 'bin', 'llama-server'), path.join(PROVIDERS_DIR, 'llama-server'));
-      }
-      if (fs.existsSync(path.join(PROVIDERS_DIR, 'build', 'bin', 'llama-cli'))) {
-        fs.renameSync(path.join(PROVIDERS_DIR, 'build', 'bin', 'llama-cli'), path.join(PROVIDERS_DIR, 'llama-cli'));
-      }
-      execSync(`rm -rf "${path.join(PROVIDERS_DIR, 'build')}" "${zipPath}"`, { stdio: 'ignore' });
-      fs.chmodSync(path.join(PROVIDERS_DIR, 'llama-server'), 0o755);
-      statusLine('OK', 'llama-server installed');
-    } else {
-      statusLine('OK', 'llama-server already exists');
-    }
-
-    // koboldcpp
-    if (!fs.existsSync(path.join(PROVIDERS_DIR, 'koboldcpp'))) {
-      if (arch === 'arm64') {
-        statusLine('INFO', 'Installing KoboldCpp...');
-        // Pin to a known release rather than `latest`, so an install is reproducible
-        // and users don't silently run whatever gets published upstream tomorrow.
-        // Override with MIRABILIS_KOBOLDCPP_TAG to move to a newer build.
-        const koboldTag = process.env.MIRABILIS_KOBOLDCPP_TAG || 'v1.117.1';
-        const releaseUrl = `https://api.github.com/repos/LostRuins/koboldcpp/releases/tags/${koboldTag}`;
-        const releaseRes = await fetch(releaseUrl);
-        const release = await releaseRes.json();
-        const asset = release.assets?.find(a => a.name === 'koboldcpp-mac-arm64');
-        if (!asset) throw new Error('KoboldCpp release asset not found');
-
-        const koboldRes = await fetch(asset.browser_download_url);
-        if (!koboldRes.ok) throw new Error('Failed to download KoboldCpp');
-        const koboldBuf = await koboldRes.arrayBuffer();
-        await fsp.writeFile(path.join(PROVIDERS_DIR, 'koboldcpp'), Buffer.from(koboldBuf));
-        fs.chmodSync(path.join(PROVIDERS_DIR, 'koboldcpp'), 0o755);
-        statusLine('OK', 'koboldcpp installed');
-      } else {
-        statusLine('WARN', 'KoboldCpp auto-install only supports macOS arm64');
-      }
-    } else {
-      statusLine('OK', 'koboldcpp already exists');
-    }
-  } else {
-    statusLine('WARN', 'Non-macOS detected. Provider runtime auto-install skipped.');
-    // Ensure providers directory exists anyway (for manual installs)
-    if (!fs.existsSync(PROVIDERS_DIR)) {
-      fs.mkdirSync(PROVIDERS_DIR, { recursive: true });
-    }
-  }
+  // Provider binaries, on every platform.
+  //
+  // These used to install on macOS only. Everywhere else the step was skipped
+  // with a warning, and then the runtime told the user "llama-server not found.
+  // Run: node run.js install" - a command that, on their platform, would never
+  // install it. An instruction the user cannot act on is worse than an honest
+  // "not supported here".
+  //
+  // The upstream layouts differ, and both matter:
+  //   llama.cpp  ships .tar.gz for macOS and Linux, .zip for Windows, and
+  //              publishes many accelerator variants (cuda, vulkan, sycl, rocm,
+  //              openvino) alongside the plain CPU build. Picking the wrong one
+  //              gives a binary that will not start on most machines.
+  //   koboldcpp  ships a single bare executable per platform.
+  await installProviderBinaries();
 
   // Validation
   statusLine('INFO', 'Validating installation...');
@@ -1284,41 +1478,61 @@ async function stopAll() {
 }
 
 async function runDoctor() {
+  // Two kinds of check, and conflating them made `doctor` useless as a gate.
+  //
+  //   required     something is missing that a working install needs
+  //   informational  a service is simply not running right now
+  //
+  // Everything used to be treated as a failure, so `doctor` on a correctly
+  // installed machine that had not been started yet exited 1 and reported
+  // "4 warning(s)". Any script wrapping it, CI included, read that as broken.
   const checks = [];
-  const add = (name, ok, detail) => checks.push({ name, ok, detail });
+  const add = (name, ok, detail, required = true) => checks.push({ name, ok, detail, required });
+  const info = (name, ok, detail) => add(name, ok, detail, false);
 
   add('backend node_modules', fs.existsSync(path.join(BACKEND_DIR, 'node_modules')), path.join(BACKEND_DIR, 'node_modules'));
   add('frontend node_modules', fs.existsSync(path.join(FRONTEND_DIR, 'node_modules')), path.join(FRONTEND_DIR, 'node_modules'));
 
   const pyPath = imagePythonPath();
-  add('image-service python venv', fs.existsSync(pyPath), pyPath);
+  // Optional: only image generation needs it (see --no-image).
+  info('image-service python venv', fs.existsSync(pyPath), pyPath);
 
   const llamaBin = path.join(PROVIDERS_DIR, process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
   const koboldBin = path.join(PROVIDERS_DIR, process.platform === 'win32' ? 'koboldcpp.exe' : 'koboldcpp');
-  add('llama-server binary', fs.existsSync(llamaBin), llamaBin);
-  add('koboldcpp binary', fs.existsSync(koboldBin), koboldBin);
+  // Optional: alternative local engines. Ollama alone is a working setup.
+  info('llama-server binary', fs.existsSync(llamaBin), llamaBin);
+  info('koboldcpp binary', fs.existsSync(koboldBin), koboldBin);
 
   const hasOllama = await hasOllamaCommand();
   const ollamaBin = resolveOllamaBin();
-  add('ollama command', hasOllama, hasOllama ? `available (${ollamaBin})` : 'not found');
-  add('ollama endpoint', await endpointReady('http://127.0.0.1:11434/api/tags'), 'http://127.0.0.1:11434/api/tags');
+  // Optional: a cloud-only setup needs no local engine (see --no-ollama).
+  info('ollama command', hasOllama, hasOllama ? `available (${ollamaBin})` : 'not found');
+  info('ollama endpoint', await endpointReady('http://127.0.0.1:11434/api/tags'), 'http://127.0.0.1:11434/api/tags');
 
-  add('backend endpoint', await endpointReady('http://127.0.0.1:4000/health'), 'http://127.0.0.1:4000/health');
-  add('frontend endpoint', await endpointReady('http://127.0.0.1:3000'), 'http://127.0.0.1:3000');
-  add('image endpoint', await endpointReady('http://127.0.0.1:7860/health', imageHealthReady), 'http://127.0.0.1:7860/health');
+  info('backend endpoint', await endpointReady('http://127.0.0.1:4000/health'), 'http://127.0.0.1:4000/health');
+  info('frontend endpoint', await endpointReady('http://127.0.0.1:3000'), 'http://127.0.0.1:3000');
+  info('image endpoint', await endpointReady('http://127.0.0.1:7860/health', imageHealthReady), 'http://127.0.0.1:7860/health');
 
   process.stdout.write('Mirabilis doctor report:\n');
   for (const c of checks) {
-    process.stdout.write(`  ${c.ok ? '[OK]' : '[WARN]'} ${c.name} - ${c.detail}\n`);
+    const tag = c.ok ? '[OK]' : (c.required ? '[FAIL]' : '[WARN]');
+    process.stdout.write(`  ${tag} ${c.name} - ${c.detail}\n`);
   }
 
   process.stdout.write(`  [INFO] thread count default - ${detectThreadCount()}\n`);
   process.stdout.write(`  [INFO] run state file - ${RUN_STATE_PATH}\n`);
 
-  const failed = checks.filter((c) => !c.ok).length;
+  const failed = checks.filter((c) => !c.ok && c.required).length;
+  const warned = checks.filter((c) => !c.ok && !c.required).length;
   if (failed > 0) {
-    process.stdout.write(`Doctor completed with ${failed} warning(s).\n`);
+    process.stdout.write(
+      `Doctor found ${failed} problem(s)${warned ? ` and ${warned} note(s)` : ''}. Run: node run.js install\n`
+    );
     process.exitCode = 1;
+  } else if (warned > 0) {
+    process.stdout.write(
+      `Doctor found no problems. ${warned} note(s) above are optional components or services that are simply not running.\n`
+    );
   } else {
     process.stdout.write('Doctor completed successfully.\n');
   }
@@ -1617,8 +1831,8 @@ async function main() {
     // wait (e.g. for a headless setup that must have image generation ready).
     const imageEnv = { ...process.env, IMAGE_SERVICE_PORT: '7860', PYTHONUNBUFFERED: '1' };
     const imageLogFile = path.join(os.tmpdir(), 'image-service.log');
-    if (process.env.MIRABILIS_SKIP_IMAGE === '1') {
-      statusLine('INFO', 'Image service skipped (MIRABILIS_SKIP_IMAGE=1). Image generation is disabled.');
+    if (skipImageService()) {
+      statusLine('INFO', 'Image service skipped (--no-image / MIRABILIS_SKIP_IMAGE). Image generation is disabled; everything else works.');
     } else if (await endpointReady('http://127.0.0.1:7860/health', imageHealthReady)) {
       managed.image = null;
       statusLine('INFO', 'Image service already running; reusing existing service.');
