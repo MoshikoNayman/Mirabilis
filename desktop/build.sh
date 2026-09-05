@@ -11,8 +11,15 @@ BUILD_TARGET="${1:-dir}"
 
 case "$BUILD_TARGET" in
   dir)
+    # An unpacked build for smoke-testing. Verify against the HOST platform:
+    # hardcoding "mac" here made `./build.sh dir` fail on Linux, because
+    # verify-release.js went looking for a .app bundle that cannot exist there.
     ELECTRON_BUILDER_ARGS=(--dir)
-    VERIFY_TARGET="mac"
+    case "$(uname -s)" in
+      Darwin) VERIFY_TARGET="mac" ;;
+      Linux)  VERIFY_TARGET="linux" ;;
+      *)      VERIFY_TARGET="mac" ;;
+    esac
     ;;
   dmg)
     ELECTRON_BUILDER_ARGS=(--mac dmg --arm64)

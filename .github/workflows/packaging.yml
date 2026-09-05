@@ -1,0 +1,106 @@
+name: Packaging
+
+# Packaging breakage used to surface only at tag time, which is the worst moment
+# to discover it: the release is already cut and the tag has to be moved.
+#
+# Two levels, deliberately separated by cost.
+#
+#   structure  runs on every pull request that touches packaging inputs. It is a
+#              few minutes and catches the common class: a missing icon, a
+#              renamed entry point, a Next config that stopped emitting the
+#              standalone output the desktop app runs.
+#
+#   package    is manual. It runs the REAL release commands on all three
+#              platforms, so it answers "will the release actually build?"
+#              before a tag exists. Running that on every push would add tens of
+#              runner-minutes for a signal that changes rarely.
+
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'frontend/next.config.*'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - '.github/workflows/packaging.yml'
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Build real installers on macOS, Windows and Linux
+        type: boolean
+        default: true
+
+jobs:
+  # Cheap: does everything the packager needs still exist and have the right shape?
+  structure:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install frontend
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      # verify-build.js inspects the standalone output, so the build has to
+      # happen first. That is also the point: it proves the desktop app would
+      # have something to run.
+      - name: Build frontend
+        working-directory: frontend
+        run: npx next build
+
+      - name: Verify packaging inputs
+        working-directory: desktop
+        run: node verify-build.js
+
+  # Expensive: the real thing, on demand.
+  package:
+    if: github.event_name == 'workflow_dispatch' && inputs.full_matrix
+    strategy:
+      fail-fast: false          # one platform failing should not hide the others
+      matrix:
+        include:
+          - os: macos-14
+            name: macOS DMG
+            build: |
+              chmod +x desktop/build.sh
+              cd desktop && ./build.sh dmg
+          - os: ubuntu-22.04
+            name: Linux AppImage
+            build: |
+              chmod +x desktop/build.sh
+              cd desktop && ./build.sh appimage
+          - os: windows-2022
+            name: Windows installer
+            build: |
+              cd desktop
+              call build.bat
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Build ${{ matrix.name }}
+        shell: ${{ matrix.os == 'windows-2022' && 'cmd' || 'bash' }}
+        run: ${{ matrix.build }}
+
+      # build.sh already runs verify-release, but build.bat does not, and a
+      # smoke test that does not assert on its output is not a test.
+      - name: List artifacts
+        shell: bash
+        run: ls -lh desktop/dist || true
