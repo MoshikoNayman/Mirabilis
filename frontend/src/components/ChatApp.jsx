@@ -18,6 +18,7 @@ import { playSend, playReceive, playError } from '../lib/sounds';
 import { postJSON } from '../lib/api';
 import { getSessionToken } from '../lib/sessionToken';
 import { createSseParser } from '../lib/sseParser';
+import { restoreToolPolicy, needsFullAcknowledgement, describeRunError } from '../lib/agentRunPolicy';
 import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -1372,7 +1373,11 @@ export default function ChatApp() {
   const [agentRun, setAgentRun] = useState(null);
   const agentAbortRef = useRef(null);
   const agentRunRef = useRef(null);
-  const [toolPolicy, setToolPolicy] = useState(() => safeStorageGet('mirabilis-tool-policy', 'read-only'));
+  // restoreToolPolicy, not the raw stored value. `full` must never come back
+  // from a previous session: its acknowledgement is per session by design, so a
+  // restored `full` is a policy the backend refuses on every single run, and
+  // the stored value is reapplied on every load, so the app cannot recover.
+  const [toolPolicy, setToolPolicy] = useState(() => restoreToolPolicy(safeStorageGet('mirabilis-tool-policy', 'read-only')));
   // Acknowledgement for the shell-capable policy. Deliberately NOT persisted:
   // granting a background process a terminal should be a decision each session,
   // not something a setting quietly remembers from last week.
@@ -4938,6 +4943,20 @@ export default function ChatApp() {
     setAgentRun((prev) => (prev ? { ...prev, status: 'stopping' } : prev));
   }
 
+  // Ask for the shell acknowledgement, and remember the answer for this session.
+  // Shared by the policy menu and the send path so the wording cannot drift.
+  function confirmFullPolicy() {
+    const ok = window.confirm(
+      'Full access lets an autonomous run execute shell commands on this machine '
+      + 'with nobody watching.\n\n'
+      + 'The filesystem root only sets where a command starts, not what it can reach. '
+      + 'Every command is recorded in the run\'s audit log.\n\n'
+      + 'Enable full access for this session?'
+    );
+    if (ok) setFullPolicyAcknowledged(true);
+    return ok;
+  }
+
   async function runAgentGoal(goal) {
     // One run at a time. Two concurrent runs would share agentRunRef, so only
     // the newer one could be stopped and the older would keep burning budget
@@ -4946,11 +4965,28 @@ export default function ChatApp() {
       appStore.toast('A run is already in progress. Stop it before starting another.', { kind: 'warn' });
       return;
     }
+
+    // Ask rather than let the server refuse. Reaching the backend without the
+    // acknowledgement produces a rejection the user cannot act on, so whenever
+    // the policy needs one and does not have it, get it here. Declining falls
+    // back to the policy that does real work without opening a shell, which is
+    // far better than refusing to run at all.
+    let policyForRun = toolPolicy;
+    let acknowledged = fullPolicyAcknowledged;
+    if (needsFullAcknowledgement(policyForRun, acknowledged)) {
+      if (confirmFullPolicy()) {
+        acknowledged = true;
+      } else {
+        policyForRun = 'write';
+        setToolPolicy('write');
+        appStore.toast('Running without shell access.', { kind: 'info' });
+      }
+    }
     const controller = new AbortController();
     agentAbortRef.current = controller;
 
     const started = {
-      id: null, goal, effort: effortLevel, policy: toolPolicy,
+      id: null, goal, effort: effortLevel, policy: policyForRun,
       status: 'running', phase: 'plan', events: [], budget: null, answer: '', stopReason: null, error: ''
     };
     setAgentRun(started);
@@ -4991,16 +5027,19 @@ export default function ChatApp() {
           model: model || undefined,
           providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
           providerApiKey: undefined, // held by the backend; never sent from the page
-          toolPolicy,
-          acknowledgeFullPolicy: toolPolicy === 'full' ? fullPolicyAcknowledged : undefined,
+          toolPolicy: policyForRun,
+          acknowledgeFullPolicy: policyForRun === 'full' ? acknowledged : undefined,
           localOnly: appStore.getGoDark(),
           systemPrompt
         })
       });
 
       if (!res.ok || !res.body) {
+        // The server writes a plain sentence in `error`. Printing the raw body
+        // put a wall of escaped JSON on screen for what is usually a simple,
+        // actionable refusal.
         const detail = await res.text().catch(() => '');
-        throw new Error(detail || `Agent run failed (${res.status})`);
+        throw new Error(describeRunError(res.status, detail));
       }
 
       const reader = res.body.getReader();
@@ -7195,16 +7234,8 @@ export default function ChatApp() {
                               key={opt.value}
                               type="button"
                               onClick={() => {
-                                if (opt.value === 'full' && !fullPolicyAcknowledged) {
-                                  const ok = window.confirm(
-                                    'Full access lets an autonomous run execute shell commands on this machine '
-                                    + 'with nobody watching.\n\n'
-                                    + 'The filesystem root only sets where a command starts, not what it can reach. '
-                                    + 'Every command is recorded in the run\'s audit log.\n\n'
-                                    + 'Enable full access for this session?'
-                                  );
-                                  if (!ok) return;
-                                  setFullPolicyAcknowledged(true);
+                                if (needsFullAcknowledgement(opt.value, fullPolicyAcknowledged)) {
+                                  if (!confirmFullPolicy()) return;
                                 }
                                 setToolPolicy(opt.value);
                               }}
