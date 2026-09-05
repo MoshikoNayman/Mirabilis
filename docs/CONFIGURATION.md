@@ -81,6 +81,39 @@ Web search is blocked entirely while Go Dark is on, regardless of this key.
 | `MIRABILIS_AGENT_MAX_CONCURRENT_RUNS` | `2` | Runs executing at once. Each carries its own budget and, at the full policy, its own shell, so this is a resource ceiling rather than a preference. |
 | `MIRABILIS_MCP_TOKEN` | (generated) | Bearer token for `/mcp` and the privileged routes. Generated and persisted to the data directory when unset. |
 
+### Tool policies, and what `full` really means
+
+The agent runs under one of three policies.
+
+| Policy | Tools | What it can touch |
+| --- | --- | --- |
+| `read-only` | `list_dir`, `read_file`, `search_files` | reads inside the file root, nothing else |
+| `write` | adds `write_file` | writes inside the file root |
+| `full` | adds `run_command` | a real shell |
+
+`full` is a real shell, and that is an accepted risk rather than a solved
+problem. Be clear about what the mitigations do and do not do:
+
+- A blocklist rejects the recognisable destroyers: recursive `rm`, `mkfs`,
+  `dd` to a device, fork bombs, `shutdown`, recursive `chmod` on `/`. It
+  matches patterns, so it stops accidents and obvious damage. It is not a
+  sandbox and a determined prompt can express the same intent another way.
+- `MIRABILIS_MCP_FS_ROOT` confines the file tools and sets where a command
+  starts. It does not confine where a command can go once running.
+- The `full` policy has to be acknowledged explicitly per run. It is never
+  the default and cannot be reached by accident.
+- Every tool call is written to an append-only audit log, so what ran is
+  recoverable afterwards.
+
+The honest summary: `full` gives a model the same reach as the account running
+Mirabilis. Treat granting it as you would treat pasting a script from the
+internet into a terminal. If that is not acceptable for a given task, use
+`write`, which covers most real work, and set a file root.
+
+Actually confining it would mean an OS-level sandbox: a container, a VM, or
+Seatbelt and namespaces. That is a different feature, not a patch to this one,
+and pretending the blocklist is equivalent would be the more dangerous choice.
+
 ## Image generation
 
 | Variable | Default | What it does |
