@@ -70,22 +70,13 @@ jobs:
         include:
           - os: macos-14
             name: macOS DMG
-            shell: bash
-            build: |
-              chmod +x desktop/build.sh
-              cd desktop && ./build.sh dmg
+            target: dmg
           - os: ubuntu-22.04
             name: Linux AppImage
-            shell: bash
-            build: |
-              chmod +x desktop/build.sh
-              cd desktop && ./build.sh appimage
+            target: appimage
           - os: windows-2022
             name: Windows installer
-            shell: cmd
-            build: |
-              cd desktop
-              call build.bat
+            target: nsis
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -98,15 +89,24 @@ jobs:
             backend/package-lock.json
             frontend/package-lock.json
 
+      # Two steps rather than one with a computed shell: the `shell` key cannot
+      # evaluate the matrix context, and GitHub rejects the whole workflow file
+      # if it tries, so the workflow could not even be dispatched.
       - name: Build ${{ matrix.name }}
-        # The shell comes from the matrix rather than an inline conditional:
-        # the `shell:` key cannot evaluate the matrix context, and GitHub rejects
-        # the whole workflow file if it tries.
-        shell: ${{ matrix.shell }}
-        run: ${{ matrix.build }}
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          chmod +x desktop/build.sh
+          cd desktop
+          ./build.sh ${{ matrix.target }}
 
-      # build.sh already runs verify-release, but build.bat does not, and a
-      # smoke test that does not assert on its output is not a test.
+      - name: Build ${{ matrix.name }}
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          cd desktop
+          call build.bat
+
       - name: List artifacts
         shell: bash
         run: ls -lh desktop/dist || true
