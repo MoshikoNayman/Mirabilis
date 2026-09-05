@@ -1349,7 +1349,11 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
     validationFailed = true;
   }
 
-  if (!fs.existsSync(imagePythonPath())) {
+  // Only demand the Python environment if we were asked to install it.
+  // Validating a component the caller explicitly skipped turned --no-image into
+  // a guaranteed failure at the very last step, after everything else had
+  // installed correctly.
+  if (!skipImageService() && !fs.existsSync(imagePythonPath())) {
     statusLine('FAIL', 'Python venv not set up');
     validationFailed = true;
   }
