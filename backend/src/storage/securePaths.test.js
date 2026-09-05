@@ -75,7 +75,20 @@ test('ensureSecureDir creates a private directory', async () => {
 
 test('permission work never throws, whatever it is pointed at', async () => {
   // A permission fix must never be able to take the app down at boot.
-  assert.equal(await hardenFile('/definitely/not/here.json'), false);
-  assert.equal(await ensureSecureDir('/proc/cannot/create/this'), false);
-  assert.deepEqual(await hardenExistingData('/definitely/not/a/directory'), { changed: 0 });
+  //
+  // The unwritable target is a directory whose PARENT is a regular file, which
+  // fails ENOTDIR instantly on every platform. Do NOT reach for /proc here: it
+  // does not exist on macOS (instant ENOENT) but is a real mounted filesystem
+  // on Linux, so a test written that way passes locally and hangs CI. That has
+  // now cost three red builds; this is the portable way to say "cannot write".
+  const base = await tmp();
+  const asFile = path.join(base, 'not-a-directory');
+  await fs.writeFile(asFile, 'x', 'utf8');
+
+  assert.equal(await hardenFile(path.join(base, 'definitely-not-here.json')), false);
+  assert.equal(await ensureSecureDir(path.join(asFile, 'nested', 'deeper')), false);
+  assert.deepEqual(await hardenExistingData(path.join(asFile, 'nested')), { changed: 0 });
+  assert.deepEqual(await hardenExistingData(path.join(base, 'no-such-dir')), { changed: 0 });
+
+  await fs.rm(base, { recursive: true, force: true });
 });
