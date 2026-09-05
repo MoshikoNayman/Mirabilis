@@ -19,6 +19,7 @@ import { postJSON } from '../lib/api';
 import { getSessionToken } from '../lib/sessionToken';
 import { createSseParser } from '../lib/sseParser';
 import { restoreToolPolicy, needsFullAcknowledgement, describeRunError } from '../lib/agentRunPolicy';
+import { hasUsableKey, providerNeedsKey, missingKeyMessage, providerLabel } from '../lib/providerKeys';
 import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -1769,9 +1770,11 @@ export default function ChatApp() {
       try {
         const cfgBase = String(providerConfigs?.[provider]?.baseUrl || '').trim();
         const cfgKey = String(providerConfigs?.[provider]?.apiKey || '').trim();
-        if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas') && !cfgKey) {
-          const p = provider === 'grok' ? 'Grok' : provider === 'groq' ? 'Groq' : provider === 'openrouter' ? 'OpenRouter' : provider === 'gemini' ? 'Gemini' : provider === 'cerebras' ? 'Cerebras' : provider === 'claude' ? 'Claude' : provider === 'gpuaas' ? 'GPUaaS endpoint' : 'OpenAI';
-          setStatusText(`${p} selected. Add API key in Configure endpoint.`);
+        // Same rule as the send path: a backend-held key is a real key. This
+        // probe used to announce "Add API key in Configure endpoint" for a
+        // provider whose key was already saved.
+        if (providerNeedsKey(provider) && !hasUsableKey(provider, { pageKey: cfgKey, hints: keyHints })) {
+          setStatusText(`${providerLabel(provider)} selected. Add API key in Configure endpoint.`);
           return;
         }
         const query = new URLSearchParams({ provider });
@@ -1793,7 +1796,7 @@ export default function ChatApp() {
     return () => {
       cancelled = true;
     };
-  }, [provider, providerConfigs]);
+  }, [provider, providerConfigs, keyHints]);
 
   useEffect(() => {
     // Backfill provider config defaults for existing users with empty/legacy settings.
@@ -2293,7 +2296,12 @@ export default function ChatApp() {
       const next = {};
       for (const k of (payload?.keys || [])) next[k.provider] = k;
       setKeyHints(next);
-    } catch { /* the settings panel simply shows nothing stored */ }
+      // Returned as well as stored: the send path needs the answer NOW, and
+      // reading it from state would race the fetch on an early first message.
+      return next;
+    } catch {
+      return null; // the settings panel simply shows nothing stored
+    }
   }, []);
 
   useEffect(() => { refreshKeyHints(); }, [refreshKeyHints]);
@@ -4113,11 +4121,20 @@ export default function ChatApp() {
       ? (firstAvailableModel || (provider === 'openai' ? 'gpt-4o-mini' : provider === 'grok' ? 'grok-3-mini' : provider === 'groq' ? 'llama-3.3-70b-versatile' : provider === 'openrouter' ? 'meta-llama/llama-3.3-70b-instruct:free' : provider === 'gemini' ? 'gemini-2.5-flash' : provider === 'cerebras' ? 'llama-3.3-70b' : provider === 'claude' ? 'claude-3-5-sonnet-latest' : provider === 'gpuaas' ? 'model.gguf' : ''))
       : model;
 
+    // A key counts whether the BACKEND holds it or the page does. Gating on the
+    // page copy alone made every cloud provider permanently unusable, because
+    // the change that moved keys to the backend also stopped anything writing
+    // that copy. Saving a key said "Stored in the app" and the next send still
+    // refused, with no way to fix it from inside the app.
     const configuredApiKey = String(providerConfigs[provider]?.apiKey || '').trim();
-    if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas') && !configuredApiKey) {
-      setIsProviderConfigOpen(true);
-      const p = provider === 'grok' ? 'xAI' : provider === 'groq' ? 'Groq' : provider === 'openrouter' ? 'OpenRouter' : provider === 'gemini' ? 'Google AI' : provider === 'cerebras' ? 'Cerebras' : provider === 'claude' ? 'Anthropic' : provider === 'gpuaas' ? 'GPUaaS endpoint' : 'OpenAI';
-      throw new Error(`${p} API key is required. Open Configure endpoint and paste your key.`);
+    if (providerNeedsKey(provider) && !hasUsableKey(provider, { pageKey: configuredApiKey, hints: keyHints })) {
+      // Confirm with the server before refusing: on an early first message the
+      // hints fetch may not have landed yet, and refusing there would be wrong.
+      const fresh = await refreshKeyHints();
+      if (!hasUsableKey(provider, { pageKey: configuredApiKey, hints: fresh || {} })) {
+        setIsProviderConfigOpen(true);
+        throw new Error(missingKeyMessage(provider));
+      }
     }
 
     const configuredBaseUrl = provider === 'gemini'
