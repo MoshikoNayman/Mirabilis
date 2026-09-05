@@ -15,7 +15,10 @@ import { resolveEffort, EFFORT_PROFILES, EFFORT_ORDER, isAgenticEffort } from '.
 import { createToolRegistry, TOOL_POLICIES } from './tools.js';
 import { createModelAdapter } from './modelAdapter.js';
 import { classifyProviderScope } from '../providerScope.js';
+import { createRunAuditor, pruneRunAudits, readRunAudit } from './auditLog.js';
+import { createRunStore } from './runStore.js';
 import { getFsRoot, safeResolvePath } from './sandbox.js';
+import { dirname, join } from 'node:path';
 
 /** Live runs, so a client that reconnects can still stop one. */
 const runs = new Map();
@@ -35,6 +38,22 @@ const FINISHED_TTL_MS = 10 * 60_000;
  */
 export function createAgentRouter({ config, streamWithProvider, getEffectiveModel, chats, guard }) {
   const router = Router();
+  // One append-only log per run, beside the other stores.
+  const auditDir = join(dirname(config.chatStorePath || '.'), 'agent-runs');
+  // Housekeeping at startup so the record never becomes the thing that fills the disk.
+  pruneRunAudits(auditDir).catch(() => {});
+
+  // Durable run index. Reconciles on boot: anything the index still calls live
+  // cannot be, since this process just started, so it is marked interrupted
+  // rather than left as a run that appears to be going but never finishes.
+  const runStore = createRunStore(auditDir);
+  const storeReady = runStore.init()
+    .then(({ interrupted }) => {
+      if (interrupted > 0) {
+        console.log(`[agent] marked ${interrupted} run(s) as interrupted by a restart`);
+      }
+    })
+    .catch(() => {});
   if (guard) router.use(guard);
 
   // What the UI needs to render the effort picker, straight from the source of
@@ -61,13 +80,30 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
     });
   });
 
-  router.get('/runs', (_req, res) => {
-    res.json({
-      runs: [...runs.values()].map((r) => ({
+  router.get('/runs', async (_req, res) => {
+    await storeReady;
+    // The live Map is the truth for anything running now; the store carries
+    // history and anything a restart interrupted.
+    const merged = new Map(runStore.list().map((r) => [r.id, r]));
+    for (const r of runs.values()) {
+      merged.set(r.id, {
         id: r.id, goal: r.goal, effort: r.effort, status: r.status,
         startedAt: r.startedAt, budget: r.budget || null
-      }))
+      });
+    }
+    res.json({
+      runs: [...merged.values()].sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
     });
+  });
+
+  // The record of what a run did, after the fact. This is the whole point of
+  // the audit log: the live feed is gone once the tab closes.
+  router.get('/runs/:id/audit', async (req, res) => {
+    try {
+      res.json({ id: req.params.id, entries: await readRunAudit(auditDir, req.params.id) });
+    } catch {
+      res.status(404).json({ error: 'No audit log for that run.' });
+    }
   });
 
   router.post('/runs/:id/stop', (req, res) => {
@@ -79,6 +115,7 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
     if (live) {
       run.abort.abort();
       run.status = 'stopping';
+      runStore.upsert({ id: run.id, status: 'stopping' }).catch(() => {});
     }
     res.json({ ok: true, id: run.id, status: run.status, alreadyFinished: !live });
   });
@@ -139,7 +176,13 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
     // A disconnect must not silently keep an hour-long job running.
     res.on('close', () => { if (!res.writableEnded) abort.abort(); });
 
-    send('run-accepted', { id, effort: profile.id, policy: toolPolicy, limits: profile });
+    const auditor = createRunAuditor({ dir: auditDir, runId: id });
+    await storeReady;
+    await runStore.upsert({
+      id, goal, effort: profile.id, policy: toolPolicy, status: 'running',
+      startedAt: record.startedAt, auditLog: auditor.file, chatId: chatId || null
+    });
+    send('run-accepted', { id, effort: profile.id, policy: toolPolicy, limits: profile, auditLog: auditor.file });
 
     try {
       // A caller-supplied fsRoot may only NARROW the operator's jail, never
@@ -194,6 +237,16 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
         }
       });
 
+      await auditor.start({
+        goal, effort: profile.id, policy: registry.policy,
+        provider: activeProvider, model: effectiveModel,
+        fsRoot: effectiveRoot,
+        limits: {
+          maxWallMs: profile.maxWallMs, maxIterations: profile.maxIterations,
+          maxToolCalls: profile.maxToolCalls, maxSubAgents: profile.maxSubAgents
+        }
+      });
+
       const outcome = await runAgent({
         goal, profile, registry, callModel, systemPrompt,
         // Sub-agents need their own registry. Without this factory the loop
@@ -204,11 +257,25 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
         onEvent: (/** @type {any} */ event) => {
           if (event?.budget) record.budget = event.budget;
           send('progress', event);
+          // Mirror the security-relevant events to disk. Fire and forget: the
+          // auditor swallows its own failures so it can never sink a run.
+          if (event?.type === 'tool-call') {
+            auditor.tool({ iteration: event.iteration, tool: event.tool, args: event.args, mutating: event.mutating });
+          } else if (event?.type === 'tool-result') {
+            auditor.result({ iteration: event.iteration, tool: event.tool, ok: event.ok, observation: event.observation });
+          } else if (event?.type === 'fanout-start') {
+            auditor.note('fanout', { count: event.count, concurrency: event.concurrency });
+          }
         }
       });
 
       record.status = outcome.ok ? 'completed' : String(outcome.stopReason || 'stopped');
       record.budget = outcome.budget;
+      await runStore.upsert({
+        id, status: record.status, stopReason: outcome.stopReason,
+        budget: outcome.budget, steps: outcome.steps, validated: outcome.validated,
+        finishedAt: new Date().toISOString()
+      });
 
       // Persist the run into the chat HERE rather than from the client. The
       // frontend used to POST the goal and the answer to a route that does not
@@ -249,9 +316,19 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
         } catch { /* the panel still holds the result; do not fail the run over this */ }
       }
 
-      send('result', { ...outcome, persistedTo });
+      await auditor.end({
+        stopReason: outcome.stopReason, steps: outcome.steps,
+        validated: outcome.validated, budget: outcome.budget, answer: outcome.answer
+      });
+
+      send('result', { ...outcome, persistedTo, auditLog: auditor.file });
     } catch (error) {
       record.status = 'failed';
+      await runStore.upsert({
+        id, status: 'failed', stopReason: 'failed',
+        error: String(error?.message || error), finishedAt: new Date().toISOString()
+      }).catch(() => {});
+      await auditor.note('run-error', { error: String(error?.message || error) });
       send('error', { error: String(error?.message || error) });
     } finally {
       res.end();
