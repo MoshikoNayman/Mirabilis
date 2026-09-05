@@ -206,3 +206,34 @@ The release workflow fails if they are missing rather than shipping that.
 
 macOS builds produce both a `.dmg` and a `.zip`. The dmg is for installing by
 hand; the zip is the only thing Squirrel.Mac can install an update from.
+
+## Dependency advisories
+
+CI audits the lockfiles on every push. The gate is on what ships: the
+production trees of `backend`, `frontend` and `desktop` fail the build at high
+severity. Development trees are reported but do not block, because they are
+build and test tooling that never reaches a user and is frequently only fixable
+by a major bump of the toolchain itself.
+
+All three production trees are currently clean. Getting there needed three
+`overrides` entries, which are worth explaining because they look like
+duplication:
+
+| Package | Why an override | Where the vulnerable copy lived |
+| --- | --- | --- |
+| `qs` | express pins an old body-parser | nested under express |
+| `postcss` | the direct dependency was already newer | nested under next |
+| `postcss-selector-parser` | tailwind 3.x needs the 6.x API, and 6.1.4 is patched | tailwind |
+| `sharp` | next pins a version with open libvips CVEs | nested under next |
+
+`sharp` is only used by next's image optimizer, and this app imports
+`next/image` in exactly zero files, so it is dead weight that was carrying four
+high-severity CVEs. The override is the cheap fix; removing it entirely is
+possible if next ever makes that straightforward.
+
+### What the audit does not cover
+
+`npm audit` says nothing about the Electron runtime that electron-builder
+bundles into the installer. That runtime is a full Chromium, and it is the
+largest piece of third-party code that reaches a user's machine. Its version is
+tracked as its own concern, not by the dependency gate.

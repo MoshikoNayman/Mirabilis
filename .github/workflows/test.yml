@@ -89,6 +89,49 @@ jobs:
         working-directory: frontend
         run: npx next build
 
+  # Dependency advisories. Fast, and needs no installs: --package-lock-only
+  # audits the lockfile directly, which also keeps the desktop tree auditable
+  # without pulling down an Electron binary.
+  #
+  # The gate is on what SHIPS. Production trees fail the build at high; dev
+  # trees are reported and do not, because they are build and test tooling that
+  # never reaches a user and is often only fixable by a major bump of the
+  # toolchain. The desktop dev tree is the live example: every advisory there is
+  # electron or electron-builder, neither of which runs on a user's machine as
+  # a library.
+  #
+  # NOTE: this does NOT cover the Electron runtime that electron-builder bundles
+  # into the installer. That is a shipped Chromium, and npm audit says nothing
+  # about it. Track the Electron major separately.
+  audit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Backend production dependencies
+        working-directory: backend
+        run: npm audit --package-lock-only --omit=dev --audit-level=high
+
+      - name: Frontend production dependencies
+        working-directory: frontend
+        run: npm audit --package-lock-only --omit=dev --audit-level=high
+
+      - name: Desktop production dependencies
+        working-directory: desktop
+        run: npm audit --package-lock-only --omit=dev --audit-level=high
+
+      # Visible, not blocking.
+      - name: Development toolchain (report only)
+        if: always()
+        run: |
+          for dir in backend frontend desktop; do
+            echo "== $dir =="
+            (cd "$dir" && npm audit --package-lock-only) || true
+          done
+
   # End-to-end against the real backend and a real browser. Kept as its own job
   # so a UI regression is distinguishable at a glance from a unit failure, and so
   # it can fail without hiding the faster signal above.
