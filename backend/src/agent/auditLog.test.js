@@ -85,11 +85,20 @@ test('a long command is truncated but its beginning is preserved', async () => {
 
 test('auditing never throws, even when the directory cannot be written', async () => {
   // A read-only volume or a full disk must not be able to fail a run.
-  const a = createRunAuditor({ dir: '/proc/definitely-not-writable-here', runId: 'run-5' });
+  //
+  // The unwritable path is a directory whose PARENT is a file, which gives
+  // ENOTDIR instantly on every platform. An earlier version used /proc, which
+  // does not exist on macOS (instant ENOENT) but is a real mounted filesystem
+  // on Linux: the test passed locally and hung the whole suite in CI.
+  const base = await tmp();
+  const asFile = path.join(base, 'not-a-directory');
+  await fs.writeFile(asFile, 'x', 'utf8');
+  const a = createRunAuditor({ dir: path.join(asFile, 'nested'), runId: 'run-5' });
   await a.start({ goal: 'g', effort: 'high', policy: 'read-only', limits: {} });
   await a.tool({ iteration: 1, tool: 'read_file', args: {} });
   await a.end({ stopReason: 'completed', steps: 1, validated: true, budget: {}, answer: 'x' });
   assert.equal(a.lineCount, 0, 'nothing was written, and nothing blew up');
+  await fs.rm(base, { recursive: true, force: true });
 });
 
 test('pruning drops logs that are too old or too many', async () => {

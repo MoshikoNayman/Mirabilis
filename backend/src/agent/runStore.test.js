@@ -115,8 +115,15 @@ test('the index is bounded so it cannot grow without limit', async () => {
 });
 
 test('an unwritable directory does not throw', async () => {
-  const s = createRunStore('/proc/definitely-not-writable-here');
+  // Same shape as the audit-log case: a directory under a FILE is portably
+  // unwritable. /proc is absent on macOS but real on Linux, so using it made
+  // this test hang the suite in CI while passing locally.
+  const base = await tmp();
+  const asFile = path.join(base, 'not-a-directory');
+  await fs.writeFile(asFile, 'x', 'utf8');
+  const s = createRunStore(path.join(asFile, 'nested'));
   await s.init();
   await s.upsert({ id: 'r', status: 'running', startedAt: 'x' });
   assert.equal(s.get('r').status, 'running', 'it still works in memory');
+  await fs.rm(base, { recursive: true, force: true });
 });
