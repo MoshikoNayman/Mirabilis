@@ -11,6 +11,7 @@ import AppErrorBoundary from './ui/AppErrorBoundary';
 import AuroraChrome from './shell/AuroraChrome';
 import TabSwitch from './shell/TabSwitch';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
+import { publishGoDark } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const LAST_ACTIVE_TAB_STORAGE_KEY = 'mirabilis-last-active-tab-v1';
@@ -193,6 +194,14 @@ export default function MirabilisApp() {
   };
 
   // OmniSearch dispatches this when a ledger result is clicked. Switch to the
+  // Tell the desktop shell whether Go Dark is on, once, on load.
+  //
+  // The Electron main process is what would contact the update server, and it
+  // refuses to do so until it has been told the lockdown is off. Without this
+  // first report it never learns, so updates would silently never be checked
+  // for a user who has never touched the Go Dark switch.
+  useEffect(() => { publishGoDark(); }, []);
+
   // ledger tab and hand the id to IntelLedgerApp to open (it only mounts on the
   // intel tab, so the tab switch has to happen here first).
   useEffect(() => {

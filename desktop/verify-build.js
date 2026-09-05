@@ -26,6 +26,48 @@ const checks = [
     hint: 'desktop/preload.js is missing.'
   },
   {
+    name: 'Updater sources',
+    ok: exists(path.join(DESKTOP_DIR, 'updater.js')) && exists(path.join(DESKTOP_DIR, 'updatePolicy.js')),
+    hint: 'desktop/updater.js or updatePolicy.js is missing; the app could not check for updates.'
+  },
+  {
+    // electron-builder ships exactly what `files` lists. A file left out of
+    // that array is missing only in the packaged app, which is the worst place
+    // to find out: main.js requires it at startup, so the release would launch
+    // to a blank window while `npm run dev` stayed perfectly fine.
+    name: 'Updater sources are packaged',
+    ok: (() => {
+      try {
+        const files = require(path.join(DESKTOP_DIR, 'package.json')).build.files || [];
+        const shipped = (f) => files.some((p) => p === f || p.endsWith('**/*') && f.startsWith(p.replace('/**/*', '')));
+        return shipped('updater.js') && shipped('updatePolicy.js') && files.some((f) => f.startsWith('node_modules'));
+      } catch { return false; }
+    })(),
+    hint: 'Add updater.js, updatePolicy.js and node_modules/**/* to build.files in desktop/package.json.'
+  },
+  {
+    name: 'Update feed configured',
+    ok: (() => {
+      try {
+        const publish = require(path.join(DESKTOP_DIR, 'package.json')).build.publish;
+        return !!(publish && publish.provider && publish.owner && publish.repo);
+      } catch { return false; }
+    })(),
+    hint: 'build.publish is missing; electron-builder emits no latest*.yml and updates cannot be found.'
+  },
+  {
+    // Squirrel.Mac installs from a zip. A dmg-only mac target means macOS can
+    // never self update, however well signed it is.
+    name: 'macOS update artifact',
+    ok: (() => {
+      try {
+        const targets = require(path.join(DESKTOP_DIR, 'package.json')).build.mac.target || [];
+        return targets.some((t) => (typeof t === 'string' ? t : t.target) === 'zip');
+      } catch { return false; }
+    })(),
+    hint: 'Add a zip target to build.mac.target: Squirrel.Mac cannot install from a dmg.'
+  },
+  {
     name: 'Windows icon',
     ok: exists(path.join(DESKTOP_DIR, 'icons', 'Mirabilis.ico')),
     hint: 'desktop/icons/Mirabilis.ico is missing.'

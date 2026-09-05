@@ -158,3 +158,51 @@ stray-copy cases. It does not protect against someone who can read the disk
 offline, or against a process already running as you. For the first, use
 whole-disk encryption (FileVault, BitLocker, LUKS), which is the right tool and
 already exists on every platform this app ships to.
+
+## Updates
+
+The desktop app can check for new releases and install them. Three things
+constrain how that works, and all three are deliberate.
+
+**Go Dark stops update checks.** The check runs in the Electron main process,
+which sits outside both the renderer and the backend send path where Go Dark is
+normally enforced. So the main process is told the lockdown state over IPC and
+refuses to check until it has been told the lockdown is off. Not knowing counts
+as locked down: on a launch where the renderer has not reported yet, no check
+happens. Go Dark means nothing leaves the machine, and that has to include the
+updater.
+
+**Nothing downloads without being asked.** `autoDownload` is off. The app tells
+you a version is available and you choose Download, Skip This Version, or Later.
+Skipping records the version, not a flag, so skipping 26.3.2 does not also
+silence 26.4.0.
+
+**macOS cannot self install until the app is signed.** Squirrel.Mac validates
+the code signature of the running bundle before swapping it, and an unsigned
+build fails that check. Rather than offer a download that breaks at the last
+step, an unsigned macOS build says so and opens the releases page. Windows and
+Linux self install today. When signing and notarization are in place, build with
+`MIRABILIS_SIGNED=1` and macOS behaves like the others.
+
+Checks are rate limited to once every six hours. A manual check from the menu
+(macOS) or the tray (Windows and Linux) ignores that limit and always reports
+something, including when it declines to check and why.
+
+| Setting | Where | Default |
+| --- | --- | --- |
+| `enabled` | `update-settings.json` in the app data directory | on |
+| `skippedVersion` | same file, written when you choose Skip | none |
+| `lastCheckAt` | same file | none |
+
+That file is 0600 like everything else the app writes.
+
+### Releases
+
+`build.publish` in `desktop/package.json` points electron-builder at the GitHub
+releases of this repository, which is also what makes it emit the `latest*.yml`
+feed files. Those files are what an installed app reads; a release without them
+reports "no update" forever, which is indistinguishable from being up to date.
+The release workflow fails if they are missing rather than shipping that.
+
+macOS builds produce both a `.dmg` and a `.zip`. The dmg is for installing by
+hand; the zip is the only thing Squirrel.Mac can install an update from.

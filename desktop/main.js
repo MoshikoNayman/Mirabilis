@@ -17,6 +17,7 @@ if (!gotLock) {
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
+const { initUpdater, updateMenuItem } = require('./updater.js');
 
 // Windows: set AppUserModelId so the taskbar groups correctly, pinning works,
 // and toast notifications show the right icon/name.
@@ -404,6 +405,9 @@ function createTray() {
   tray.setToolTip('Mirabilis');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Show', click: () => { mainWindow ? mainWindow.show() : createWindow(); } },
+    // Windows and Linux get no menu bar, so the tray is the only route to a
+    // manual update check on those platforms.
+    updateMenuItem(),
     { type: 'separator' },
     { label: 'Quit', click: () => { app.isQuiting = true; app.quit(); } }
   ]));
@@ -420,6 +424,7 @@ app.whenReady().then(async () => {
         label: 'Mirabilis AI',
         submenu: [
           { label: 'About Mirabilis AI', role: 'about' },
+          updateMenuItem(),
           { type: 'separator' },
           { label: 'Hide Mirabilis AI', accelerator: 'Command+H', role: 'hide' },
           { label: 'Hide Others', accelerator: 'Command+Option+H', role: 'hideOthers' },
@@ -455,6 +460,10 @@ app.whenReady().then(async () => {
     // Users can still right-click the tray icon to quit.
     Menu.setApplicationMenu(null);
   }
+
+  // Updates. This only registers the IPC handlers: no network call happens
+  // until the renderer reports that Go Dark is off.
+  initUpdater();
 
   // Tray on all platforms - lets the app run in the background
   createTray();

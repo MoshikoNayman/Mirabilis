@@ -58,18 +58,33 @@ jobs:
           cd desktop
           ./build.sh dmg
 
+      # A release with no update feed is a release nobody can move off, and the
+      # symptom shows up months later as "the app never offers updates". Fail
+      # the build instead of shipping that.
+      - name: Verify the update feed was generated
+        run: |
+          cd desktop/dist
+          test -f latest-mac.yml || { echo "latest-mac.yml missing: check build.publish in desktop/package.json"; exit 1; }
+          ls -1 *.zip >/dev/null || { echo "no zip artifact: Squirrel.Mac cannot install from a dmg"; exit 1; }
+
       - name: Generate checksums
         run: |
           cd desktop/dist
-          shasum -a 256 *.dmg > SHA256SUMS-macos.txt
+          shasum -a 256 *.dmg *.zip > SHA256SUMS-macos.txt
           cat SHA256SUMS-macos.txt
 
+      # latest-mac.yml is the update feed. Without it in the release, an
+      # installed app has nothing to read and every check reports "no update",
+      # which is indistinguishable from being up to date. The zip is what
+      # Squirrel.Mac installs; the dmg stays for a first install by hand.
       - name: Upload macOS assets to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_REF }}
           files: |
             desktop/dist/*.dmg
+            desktop/dist/*.zip
+            desktop/dist/latest-mac.yml
             desktop/dist/*.blockmap
             desktop/dist/SHA256SUMS-macos.txt
 
@@ -99,6 +114,14 @@ jobs:
         run: |
           cd desktop
           call build.bat
+
+      # Same reasoning as macOS: `latest*.yml` in the upload glob matches nothing
+      # when the feed was not generated, and the release ships looking fine.
+      - name: Verify the update feed was generated
+        shell: bash
+        run: |
+          cd desktop/dist
+          test -f latest.yml || { echo "latest.yml missing: check build.publish in desktop/package.json"; exit 1; }
 
       - name: Generate checksums
         shell: pwsh
@@ -142,6 +165,11 @@ jobs:
           chmod +x desktop/build.sh
           cd desktop
           ./build.sh appimage
+
+      - name: Verify the update feed was generated
+        run: |
+          cd desktop/dist
+          test -f latest-linux.yml || { echo "latest-linux.yml missing: check build.publish in desktop/package.json"; exit 1; }
 
       - name: Generate checksums
         run: |

@@ -22,7 +22,12 @@ case "$BUILD_TARGET" in
     esac
     ;;
   dmg)
-    ELECTRON_BUILDER_ARGS=(--mac dmg --arm64)
+    # Both targets, deliberately. The dmg is for a first install by hand; the
+    # zip is the only thing Squirrel.Mac can install an update from, so a
+    # dmg-only build ships an app that can never update itself. Naming targets
+    # here overrides build.mac.target in package.json, so this list has to stay
+    # in step with it.
+    ELECTRON_BUILDER_ARGS=(--mac dmg zip --arm64)
     VERIFY_TARGET="mac"
     ;;
   appimage)
@@ -47,6 +52,17 @@ cp "$SCRIPT_DIR/main.js"    "$BUILD_DIR/main.js"
 cp "$SCRIPT_DIR/preload.js" "$BUILD_DIR/preload.js"
 cp -r "$SCRIPT_DIR/icons"   "$BUILD_DIR/icons"
 cp "$SCRIPT_DIR/package.json" "$BUILD_DIR/package.json"
+cp "$SCRIPT_DIR/updater.js"   "$BUILD_DIR/updater.js"
+cp "$SCRIPT_DIR/updatePolicy.js" "$BUILD_DIR/updatePolicy.js"
+# The lockfile ships too. electron-updater is a RUNTIME dependency now: it is
+# the code that decides which binary replaces the app, so its dependency tree
+# should be the reviewed one, not whatever npm resolved on build day.
+# NB: an `[ -f x ] && cp` one-liner would abort the whole build under
+# `set -e` whenever the lockfile is absent, because the failed test is the
+# statement's exit status. Use a real conditional.
+if [ -f "$SCRIPT_DIR/package-lock.json" ]; then
+  cp "$SCRIPT_DIR/package-lock.json" "$BUILD_DIR/package-lock.json"
+fi
 
 echo "==> Installing backend dependencies..."
 cd "$MIRABILIS/backend"
@@ -103,7 +119,10 @@ else
 fi
 
 echo "==> Running electron-builder..."
-npx electron-builder "${ELECTRON_BUILDER_ARGS[@]}" --projectDir "$BUILD_DIR"
+# --publish never: the release workflow uploads the artifacts itself, in one
+# place, after verifying them. electron-builder publishing on its own would be a
+# second, unverified path to the same release.
+npx electron-builder "${ELECTRON_BUILDER_ARGS[@]}" --publish never --projectDir "$BUILD_DIR"
 
 echo "==> Copying output to dist/..."
 mkdir -p "$SCRIPT_DIR/dist"

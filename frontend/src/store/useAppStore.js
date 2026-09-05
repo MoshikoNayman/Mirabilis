@@ -60,6 +60,23 @@ let state = {
   toasts: []
 };
 
+// The desktop shell needs to know about Go Dark.
+//
+// Go Dark is enforced here and in the backend send path, but the Electron main
+// process sits outside both, and it is the thing that would contact the update
+// server. It refuses to check until this reports false, so an unreported state
+// is treated as locked down. That is also why this is called on load and not
+// only on toggle: without the initial report, updates would never be checked.
+function reportLocalOnly(on) {
+  if (typeof window === 'undefined') return;
+  try { window.electron?.setLocalOnly?.(on === true); } catch { /* not the desktop app */ }
+}
+
+/** Publish the current lockdown state to the desktop shell. */
+export function publishGoDark() {
+  reportLocalOnly(state.goDark);
+}
+
 const listeners = new Set();
 
 function emit() {
@@ -245,6 +262,7 @@ export const appStore = {
     if (typeof window !== 'undefined') {
       try { window.localStorage.setItem(GO_DARK_KEY, on ? '1' : '0'); } catch { /* ignore */ }
     }
+    reportLocalOnly(state.goDark);
     emit();
   },
   toggleGoDark() {

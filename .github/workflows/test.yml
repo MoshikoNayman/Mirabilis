@@ -55,6 +55,16 @@ jobs:
         timeout-minutes: 15
         run: npm test
 
+      # The Electron shell has no test runner of its own, and updatePolicy.js is
+      # dependency-free by design, so node --test can run it directly. Without
+      # this step the update rules (including the one that keeps Go Dark from
+      # being bypassed) would have tests that nothing ever executes.
+      # An explicit glob, not `node --test desktop/`: handed a directory, the
+      # runner executes every file in it, so it would try to run main.js and
+      # die on the first Electron API call.
+      - name: Desktop tests
+        run: node --test desktop/*.test.js
+
       - name: Frontend install
         working-directory: frontend
         run: npm ci --no-audit --no-fund

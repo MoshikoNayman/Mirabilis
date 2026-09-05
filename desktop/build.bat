@@ -46,6 +46,9 @@ copy "%SCRIPT_DIR%main.js"     "%BUILD_DIR%\main.js" >nul
 copy "%SCRIPT_DIR%preload.js"  "%BUILD_DIR%\preload.js" >nul
 xcopy "%SCRIPT_DIR%icons"      "%BUILD_DIR%\icons" /E /I /Q >nul
 copy "%SCRIPT_DIR%package.json" "%BUILD_DIR%\package.json" >nul
+copy "%SCRIPT_DIR%updater.js" "%BUILD_DIR%\updater.js" >nul
+copy "%SCRIPT_DIR%updatePolicy.js" "%BUILD_DIR%\updatePolicy.js" >nul
+if exist "%SCRIPT_DIR%package-lock.json" copy "%SCRIPT_DIR%package-lock.json" "%BUILD_DIR%\package-lock.json" >nul
 
 echo =^> Syncing backend into staging...
 robocopy "%MIRABILIS%\backend" "%BUILD_DIR%\backend" /E /XD node_modules .git /NFL /NDL /NJH /NJS >nul
@@ -88,7 +91,7 @@ for /f "delims=" %%F in ('dir /b "%LOCALAPPDATA%\electron-builder\Cache\winCodeS
 )
 
 echo =^> Running electron-builder...
-call npx electron-builder --win --projectDir "%BUILD_DIR%"
+call npx electron-builder --win --publish never --projectDir "%BUILD_DIR%"
 if errorlevel 1 goto cleanup_error
 
 echo =^> Copying output to dist\...
