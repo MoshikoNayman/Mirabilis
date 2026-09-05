@@ -265,3 +265,26 @@ test('read-only and write need no acknowledgement', async () => {
     assert.ok(frames.find((f) => f.event === 'result'), `${policy} should not be gated`);
   }
 });
+
+test('concurrent runs are capped on the server, not just in the UI', async () => {
+  // The one-at-a-time guard in the app is a convenience. This endpoint takes a
+  // token, so anything holding it could start runs in a loop, each with its own
+  // budget and, at the full policy, its own shell.
+  replyIndex = 0;
+  const slowGoal = 'concurrency probe';
+  // Fire several at once and count how many the server accepted.
+  const attempts = await Promise.all(Array.from({ length: 6 }, () =>
+    fetch(`${baseUrl}/api/agent/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
+      body: JSON.stringify({ goal: slowGoal, effort: 'high', provider: 'ollama' })
+    }).then(async (r) => ({ status: r.status, body: await r.text() }))
+  ));
+
+  const refused = attempts.filter((a) => a.status === 429);
+  assert.ok(refused.length > 0, 'some of six simultaneous runs must be refused');
+  for (const r of refused) {
+    assert.match(r.body, /already in progress/, 'the refusal should say why');
+    assert.match(r.body, /limit/, 'and what the limit is');
+  }
+});

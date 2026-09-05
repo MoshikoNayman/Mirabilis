@@ -78,6 +78,7 @@ Web search is blocked entirely while Go Dark is on, regardless of this key.
 |---|---|---|
 | `MIRABILIS_MCP_FS_ROOT` | (none: system-wide) | Confines agent and MCP file tools to one subtree. **Set this if you use the long tiers.** Note it bounds file tools and where a command starts, not what a shell command can reach. |
 | `MIRABILIS_AGENT_FANOUT_CONCURRENCY` | `2` | Sub-agents generating at once. More is not faster against a single local engine (Ollama serialises per model) but does hold more live contexts. Raise only on hardware that serves requests in parallel. |
+| `MIRABILIS_AGENT_MAX_CONCURRENT_RUNS` | `2` | Runs executing at once. Each carries its own budget and, at the full policy, its own shell, so this is a resource ceiling rather than a preference. |
 | `MIRABILIS_MCP_TOKEN` | (generated) | Bearer token for `/mcp` and the privileged routes. Generated and persisted to the data directory when unset. |
 
 ## Image generation

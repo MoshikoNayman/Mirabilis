@@ -27,6 +27,27 @@ const runs = new Map();
 const FINISHED_TTL_MS = 10 * 60_000;
 
 /**
+ * How many runs may be executing at once.
+ *
+ * The UI allows one, but that is a convenience, not a control: this endpoint
+ * takes a token, and anything holding it could start runs in a loop. Each one
+ * carries its own budget and, at the full policy, its own shell, so an
+ * unbounded count is a resource-exhaustion hole with a local-code-execution
+ * flavour. Two, so a second run is possible deliberately but a loop is not.
+ */
+const MAX_CONCURRENT_RUNS = Math.max(
+  1,
+  Number(process.env.MIRABILIS_AGENT_MAX_CONCURRENT_RUNS) || 2
+);
+
+/** Runs that are still executing right now. */
+function liveRunCount(runs) {
+  let n = 0;
+  for (const r of runs.values()) if (r.status === 'running' || r.status === 'stopping') n += 1;
+  return n;
+}
+
+/**
  * @param {object} deps
  * @param {{aiProvider?:string, [k:string]:any}} deps.config
  * @param {Function} deps.streamWithProvider
@@ -134,6 +155,17 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
       res.status(400).json({ error: 'goal is required' });
       return;
     }
+    const live = liveRunCount(runs);
+    if (live >= MAX_CONCURRENT_RUNS) {
+      res.status(429).json({
+        error: `${live} agent run(s) are already in progress and the limit is ${MAX_CONCURRENT_RUNS}. `
+          + 'Stop one before starting another, or raise MIRABILIS_AGENT_MAX_CONCURRENT_RUNS.',
+        liveRuns: live,
+        limit: MAX_CONCURRENT_RUNS
+      });
+      return;
+    }
+
     // The 'full' policy is a real shell running unattended. Requiring an
     // explicit acknowledgement means it can never be reached by a default, a
     // remembered setting, or a caller that did not think about it. Checked on
