@@ -708,7 +708,21 @@ function findFileRecursive(dir, fileName) {
   return null;
 }
 
-/** Fetch a GitHub release by tag. */
+/**
+ * The direct download URL for a release asset.
+ *
+ * Preferred over the releases API because the API is rate limited per IP for
+ * unauthenticated callers, and shared IPs hit that limit routinely: on a CI
+ * macOS runner every asset lookup came back 403 and the install quietly
+ * produced nothing. Release downloads do not share that limit. Since the tags
+ * are pinned, the asset name is known exactly, so the API is only needed when
+ * that guess is wrong.
+ */
+function releaseAssetUrl(repo, tag, assetName) {
+  return `https://github.com/${repo}/releases/download/${tag}/${assetName}`;
+}
+
+/** Fetch a GitHub release by tag. Fallback path: see releaseAssetUrl. */
 async function githubRelease(repo, tag) {
   const headers = { 'User-Agent': 'mirabilis-launcher' };
   // A token is optional and only raises the rate limit; never required.
@@ -729,6 +743,24 @@ async function githubRelease(repo, tag) {
  * they need drivers most machines do not have, and fail at startup rather than
  * at install, which is the worst place to find out.
  */
+function llamaAssetName(tag, platform, arch) {
+  const a = arch === 'arm64' ? 'arm64' : 'x64';
+  if (platform === 'darwin') return `llama-${tag}-bin-macos-${a}.tar.gz`;
+  if (platform === 'linux') return `llama-${tag}-bin-ubuntu-${a}.tar.gz`;
+  if (platform === 'win32') return `llama-${tag}-bin-win-cpu-${a}.zip`;
+  return null;
+}
+
+/** Is this URL downloadable? Used to check a guessed asset name cheaply. */
+async function urlExists(url) {
+  try {
+    const res = await fetch(url, { method: 'HEAD', redirect: 'follow' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 function llamaAssetPattern(platform, arch) {
   const a = arch === 'arm64' ? 'arm64' : 'x64';
   if (platform === 'darwin') return new RegExp(`^llama-.*-bin-macos-${a}\\.(tar\\.gz|zip)$`);
@@ -760,17 +792,27 @@ async function installLlamaServer() {
   if (!pattern) { statusLine('WARN', manualProviderHint('llama-server')); return; }
 
   statusLine('INFO', `Installing llama-server (${LLAMACPP_TAG}, ${process.platform}/${process.arch})...`);
-  const release = await githubRelease('ggml-org/llama.cpp', LLAMACPP_TAG);
-  const asset = (release.assets || []).find((a) => pattern.test(a.name));
-  if (!asset) { statusLine('WARN', manualProviderHint('llama-server')); return; }
+
+  // The pinned tag makes the asset name predictable, so try the direct download
+  // before spending a rate-limited API call.
+  const guessName = llamaAssetName(LLAMACPP_TAG, process.platform, process.arch);
+  let assetName = guessName;
+  let assetUrl = guessName ? releaseAssetUrl('ggml-org/llama.cpp', LLAMACPP_TAG, guessName) : null;
+  if (!assetUrl || !(await urlExists(assetUrl))) {
+    const release = await githubRelease('ggml-org/llama.cpp', LLAMACPP_TAG);
+    const asset = (release.assets || []).find((a) => pattern.test(a.name));
+    if (!asset) { statusLine('WARN', manualProviderHint('llama-server')); return; }
+    assetName = asset.name;
+    assetUrl = asset.browser_download_url;
+  }
 
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'mirabilis-llama-'));
   try {
-    const archive = path.join(tmpDir, asset.name);
-    await downloadTo(asset.browser_download_url, archive);
+    const archive = path.join(tmpDir, assetName);
+    await downloadTo(assetUrl, archive);
     await extractArchive(archive, tmpDir);
     const found = findFileRecursive(tmpDir, exeName);
-    if (!found) throw new Error(`${exeName} was not in ${asset.name}`);
+    if (!found) throw new Error(`${exeName} was not in ${assetName}`);
     await fsp.copyFile(found, target);
     if (process.platform !== 'win32') await fsp.chmod(target, 0o755);
 
@@ -805,11 +847,15 @@ async function installKoboldCpp() {
   if (!assetName) { statusLine('WARN', manualProviderHint('KoboldCpp')); return; }
 
   statusLine('INFO', `Installing KoboldCpp (${KOBOLDCPP_TAG}, ${process.platform}/${process.arch})...`);
-  const release = await githubRelease('LostRuins/koboldcpp', KOBOLDCPP_TAG);
-  const asset = (release.assets || []).find((a) => a.name === assetName);
-  if (!asset) { statusLine('WARN', manualProviderHint('KoboldCpp')); return; }
+  let url = releaseAssetUrl('LostRuins/koboldcpp', KOBOLDCPP_TAG, assetName);
+  if (!(await urlExists(url))) {
+    const release = await githubRelease('LostRuins/koboldcpp', KOBOLDCPP_TAG);
+    const asset = (release.assets || []).find((a) => a.name === assetName);
+    if (!asset) { statusLine('WARN', manualProviderHint('KoboldCpp')); return; }
+    url = asset.browser_download_url;
+  }
 
-  await downloadTo(asset.browser_download_url, target);
+  await downloadTo(url, target);
   if (process.platform !== 'win32') await fsp.chmod(target, 0o755);
   statusLine('OK', 'koboldcpp installed');
 }

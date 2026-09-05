@@ -115,6 +115,12 @@ jobs:
 
       - name: One command, cold machine
         run: node run.js install --no-image --no-ollama
+        env:
+          # Only used if the direct release download has to fall back to the
+          # API. Unauthenticated API calls are rate limited per IP, and shared
+          # runner IPs hit that limit: a macOS run had both lookups refused with
+          # a 403 and installed nothing.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # An installed binary that cannot start is worse than one that is absent,
       # and this is exactly what the old macOS-only code would have produced on
