@@ -48,8 +48,11 @@ jobs:
         working-directory: backend
         run: npm run typecheck
 
+      # A bounded step: a hang here previously ran until the runner gave up,
+      # producing no output and no signal about which test was stuck.
       - name: Backend tests
         working-directory: backend
+        timeout-minutes: 15
         run: npm test
 
       - name: Frontend install
