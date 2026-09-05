@@ -20,6 +20,7 @@ import { getSessionToken } from '../lib/sessionToken';
 import { createSseParser } from '../lib/sseParser';
 import { restoreToolPolicy, needsFullAcknowledgement, describeRunError } from '../lib/agentRunPolicy';
 import { hasUsableKey, providerNeedsKey, missingKeyMessage, providerLabel } from '../lib/providerKeys';
+import { needsServerModelSwitch } from '../lib/providerCapabilities';
 import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -1523,6 +1524,32 @@ export default function ChatApp() {
   const autoScrollRef = useRef(true); // ref mirror - readable synchronously in scroll handler
   const [memoryItems, setMemoryItems] = useState([]);
   const [memoryInput, setMemoryInput] = useState('');
+  // Re-arm the watched folder on the backend after it restarts.
+  //
+  // The pinned paths are persisted in the browser, but the watched ROOT they
+  // are relative to is in-memory state in the backend process, which the
+  // desktop app respawns on every launch. So the composer kept showing
+  // "N workspace files" while every single fetch for those files failed and the
+  // model was answering about code it had never seen. The root is persisted
+  // here, so send it back rather than waiting for the user to guess that they
+  // must reopen the Workspace panel.
+  useEffect(() => {
+    const root = appStore.getWorkspaceRoot ? appStore.getWorkspaceRoot() : '';
+    if (!root) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await api('/api/workspace/watch', { method: 'POST', body: JSON.stringify({ path: root }) });
+      } catch {
+        // The folder may be gone or on an unmounted volume. The send path now
+        // reports skipped pins loudly, so this stays quiet.
+        if (!cancelled) { /* nothing to do */ }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Watched Workspace: pinned files (relative paths) whose FRESH contents are
   // folded into each send. Reactive so the composer chip updates as pins change.
   const workspacePins = useAppStore((s) => s.workspacePins);
@@ -1904,6 +1931,27 @@ export default function ChatApp() {
   useEffect(() => {
     safeStorageSet('mirabilis-openclaw', openClawMode ? 'true' : 'false');
   }, [openClawMode]);
+
+  // Make a restored OpenClaw actually mean something.
+  //
+  // openClawMode is persisted, but everything that IMPLEMENTS it is not:
+  // uncensoredMode starts false, usePersonalMemory starts true, and the system
+  // prompt comes back in full. So after a relaunch the rose dot said "on" and
+  // was counted in the Options badge while the app quietly behaved in exactly
+  // the opposite way to what the indicator promised. A mode indicator that lies
+  // about privacy is worse than one that is off, so re-apply the mode instead
+  // of merely displaying it.
+  const openClawRestoredRef = useRef(false);
+  useEffect(() => {
+    if (openClawRestoredRef.current) return;
+    openClawRestoredRef.current = true;
+    if (!openClawMode) return;
+    setUncensoredMode(true);
+    setUsePersonalMemory(false);
+    setSelectedPromptProfileId(UNSAVED_PROMPT_PROFILE_ID);
+    setSystemPrompt('');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     safeStorageSet('mirabilis-voice-rate', String(voiceRate));
@@ -2650,7 +2698,25 @@ export default function ChatApp() {
     voiceSawStreamingRef.current = false;
     const send = voiceSendRef.current;
     if (send) {
-      Promise.resolve(send(text)).catch(() => {
+      Promise.resolve(send(text)).then(() => {
+        // The send path can REFUSE WITHOUT THROWING: Go Dark with a cloud
+        // provider, a provider with no usable key, a chat that could not be
+        // created. Each shows a toast and returns normally, so the catch below
+        // never fired and the orb sat on "Thinking..." forever with taps
+        // deliberately ignored in that phase. The only escape was End.
+        //
+        // If the promise settled and nothing ever started streaming, the turn
+        // was refused. Note it and go back to listening.
+        //
+        // This cannot misfire on a normal reply: the completion effect clears
+        // voiceAwaitingReplyRef before this can see it, and while a stream is in
+        // flight voiceSawStreamingRef is already true.
+        if (voiceAwaitingReplyRef.current && !voiceSawStreamingRef.current) {
+          voiceAwaitingReplyRef.current = false;
+          setVoiceNote('That turn could not be sent. Check the provider, its API key, or Go Dark.');
+          if (voiceActiveRef.current) startVoiceListening();
+        }
+      }).catch(() => {
         // Send failed to even start - drop back to listening so we're not stuck.
         voiceAwaitingReplyRef.current = false;
         if (voiceActiveRef.current) startVoiceListening();
@@ -5059,6 +5125,9 @@ export default function ChatApp() {
         throw new Error(describeRunError(res.status, detail));
       }
 
+      // Accepted. Only now is it safe to take the text away.
+      setInput('');
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       // Shared, tested parser rather than an inline one. The inline version
@@ -5092,8 +5161,17 @@ export default function ChatApp() {
               status: payload.ok ? 'completed' : 'stopped',
               stopReason: payload.stopReason,
               answer: payload.answer,
+              // Keep the reason. The backend computes an actionable sentence for
+              // a failed run ("Could not reach ollama ... Start it with
+              // `ollama serve`") and this handler used to drop it, so the panel
+              // collapsed to the bare word "Stopped" and the user was told
+              // nothing at all about what went wrong.
+              error: payload.ok ? '' : (payload.error || prev.error || ''),
               budget: payload.budget
             } : prev));
+            if (!payload.ok && payload.error) {
+              appStore.toast(payload.error, { kind: 'error' });
+            }
             // The backend writes the run into the chat; reload to show it.
             if (payload.persistedTo) {
               // Only reload if the user is still in the run's chat. An hour-long
@@ -5109,7 +5187,14 @@ export default function ChatApp() {
           if (currentEvent !== 'progress') continue;
 
           // Progress: keep the meters current and narrate what happened.
-          if (payload.budget) {
+          //
+          // Only the PARENT's budget belongs in the meters. Sub-agent events
+          // carry their own much smaller allowance, so during fan-out the panel
+          // reported a child's numbers as the run's: time-left jumped to the
+          // child's, "step 4/12" became "step 1/3", and the Agents meter
+          // vanished because a child is not allowed to spawn any. Fan-out is
+          // exactly when the meters matter most.
+          if (payload.budget && payload.subAgent === undefined) {
             setAgentRun((prev) => (prev ? { ...prev, budget: payload.budget } : prev));
           }
           const at = payload.at;
@@ -5158,7 +5243,12 @@ export default function ChatApp() {
     // and the heuristic used to win, silently turning a chosen 5-hour run into
     // an image generation. An explicit tier beats a guess.
     if (AGENTIC_EFFORTS.has(effortLevel)) {
-      setInput('');
+      // Deliberately NOT clearing the composer here. An agent goal is usually
+      // several sentences of carefully specified instructions, and every path
+      // that refuses the run (Go Dark with a cloud provider, a run already in
+      // flight, a goal the server rejects) used to destroy that text before the
+      // server had agreed to anything. runAgentGoal clears it once the run is
+      // actually accepted, which is what the chat path below already does.
       playSend();
       runAgentGoal(content);
       return;
@@ -5312,6 +5402,16 @@ export default function ChatApp() {
         ].filter(Boolean).join('\n');
         outboundContent = `${header}\n\n${blocks.join('\n\n')}\n\n${outboundContent}`;
       }
+      // Every pin failed. This is the case that used to be completely silent:
+      // the note above only rendered when at least one file succeeded, so the
+      // total failure - the one that matters - said nothing at all, and the
+      // composer went on claiming the files were live context.
+      if (blocks.length === 0 && skipped > 0) {
+        appStore.toast(
+          `None of the ${skipped} pinned workspace file(s) could be read, so they were not sent. Reopen Workspace and re-pick the folder.`,
+          { kind: 'warn' }
+        );
+      }
     }
 
     // Config Vault: cited RAG over the user's own config folder. Fully local
@@ -5358,18 +5458,34 @@ export default function ChatApp() {
 
     let chatId = activeChatId;
     if (!chatId) {
-      const payload = await api('/api/chats', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: 'New Chat',
-          uncensoredMode,
-          systemPrompt,
-          promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
-        })
-      });
-      chatId = payload.chat.id;
-      setActiveChatId(chatId);
-      await refreshChats();
+      // Guarded for the same reason as resolveProviderForSend above. This call
+      // is the first thing a message sends on a cold start, which is exactly
+      // when the backend may not be listening yet. Unguarded, it rejected out of
+      // a function invoked bare from the composer: the typed text was gone, the
+      // transcript stayed empty, no error appeared anywhere, and the status chip
+      // read "Streaming response..." forever.
+      try {
+        const payload = await api('/api/chats', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: 'New Chat',
+            uncensoredMode,
+            systemPrompt,
+            promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
+          })
+        });
+        chatId = payload.chat.id;
+        setActiveChatId(chatId);
+        await refreshChats();
+      } catch (error) {
+        setStatusText('Could not start a chat');
+        appStore.toast(
+          `Could not start a new chat: ${describeRunError(0, error?.message || '')}`,
+          { kind: 'error' }
+        );
+        setInput(content);
+        return;
+      }
     }
 
     const userMessage = {
@@ -5433,8 +5549,15 @@ export default function ChatApp() {
       });
 
       if (!response.ok || !response.body) {
-        const details = await response.text().catch(() => 'Failed request');
-        throw new Error(details || `Request failed (${response.status})`);
+        // describeRunError, not the raw body. A refusal the user can act on was
+        // arriving in the chat bubble as escaped JSON:
+        //   Error: {"error":"Go Dark is on - the endpoint resolves to a
+        //   non-local host. Pick a local model ..."}
+        // The server already writes that sentence in `error`; show only that.
+        // This is the same fix already applied to the agent path, which is the
+        // rarer of the two.
+        const details = await response.text().catch(() => '');
+        throw new Error(describeRunError(response.status, details));
       }
 
       const reader = response.body.getReader();
@@ -6860,8 +6983,16 @@ export default function ChatApp() {
                                         setStatusText(`${plabel} loads a GGUF at launch and cannot pull models. Drop a .gguf into mirabilis/models, or start ${plabel} with your model, then it will appear here.`);
                                       }
                                     } else if (isInstalled) {
-                                      if (provider === 'ollama') {
+                                      // Only the locally hosted GGUF servers need the
+                                      // backend to load a different file. For everything
+                                      // else the model id just travels with each request,
+                                      // so picking one is a local state change. Posting
+                                      // them all to switch-model made choosing a model
+                                      // impossible for ten providers: the route 400s, and
+                                      // setModel lived inside the .then() that never ran.
+                                      if (!needsServerModelSwitch(provider)) {
                                         setModel(item.id);
+                                        setStatusText(`Active model: ${item.label}`);
                                         setIsModelMenuOpen(false);
                                       } else {
                                         setStatusText(`Switching ${provider} model...`);
