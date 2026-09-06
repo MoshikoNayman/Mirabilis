@@ -51,6 +51,7 @@ import { lookupModel } from './ollamaRegistry.js';
 import { describeEngineError } from './engineErrors.js';
 import { createProviderKeyStore } from './providerKeys.js';
 import { hardenFile, hardenExistingData, ensureSecureDir, SECURE_FILE_MODE } from './storage/securePaths.js';
+import { checkDataAccess, formatAccessProblems, describeStorageError } from './storage/dataAccess.js';
 import { commandExists, runCommand, extractAudioTrack } from './services/proc.js';
 import {
   WHISPER_MODEL_CATALOG, getWhisperModelsDir, getInstalledWhisperModelIds,
@@ -2737,7 +2738,17 @@ app.post('/api/chats', async (req, res) => {
     messages: []
   };
 
-  await saveChat(config.chatStorePath, chat);
+  try {
+    await saveChat(config.chatStorePath, chat);
+  } catch (error) {
+    // A permission failure here used to reach the user as
+    // "EACCES: permission denied, open '.../chats.json'", which names the
+    // errno and the path and explains neither. Say what is wrong and give the
+    // command that fixes it.
+    console.error('[chats] could not save:', error?.message || error);
+    res.status(500).json({ error: describeStorageError(error, config.chatStorePath) });
+    return;
+  }
   res.status(201).json({ chat });
 });
 
@@ -4211,6 +4222,21 @@ const server = app.listen(config.port, config.bindHost, () => {
     .then(() => hardenExistingData(dirname(config.chatStorePath)))
     .then(({ changed }) => {
       if (changed > 0) console.log(`[security] tightened permissions on ${changed} existing data file(s)`);
+    })
+    .catch(() => {});
+
+  // Say NOW if a data file cannot be written, rather than letting the first
+  // click fail with a raw errno.
+  //
+  // A user launched the app with sudo once, which left chats.json owned by
+  // root. Every attempt to start a chat then failed with
+  // "EACCES: permission denied, open '.../chats.json'" and nothing anywhere
+  // explained that a file in their own home directory belonged to another
+  // account, or how to take it back. Reporting at boot costs one stat per file.
+  checkDataAccess(dirname(config.chatStorePath))
+    .then(({ ok, problems }) => {
+      if (ok) return;
+      console.error(`\n${formatAccessProblems(problems)}`);
     })
     .catch(() => {});
 
