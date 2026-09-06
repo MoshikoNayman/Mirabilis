@@ -6,59 +6,27 @@ import { streamOllamaChat, listOllamaModels } from './providers/ollama.js';
 import { streamOpenAICompatibleChat, listOpenAICompatibleModels } from './providers/openaiCompatible.js';
 import { listAnthropicModels, streamAnthropicChat } from './providers/anthropic.js';
 import { assertSafeProviderUrl } from './security.js';
+import { getModels as getCatalogModels, refreshCatalog, getProviderDefault } from './modelCatalog.js';
 
-// Curated one-click models for the Ollama panel. Every ollamaId below is verified
-// present in the Ollama registry (registry.ollama.ai). Anything not listed can
-// still be pulled via the free-text "pull any model" field in the model menu.
-const CURATED_OLLAMA_MODELS = [
-  // ── MCQ family - Mirabilis native models (built with training/mcq/setup.sh)
-  { id: 'mcq-pro-12b',   label: 'MCQ-Pro-12B',   group: 'MCQ', ollamaId: 'mcq-pro-12b',   size: '8.1 GB' },
-  { id: 'mcq-ultra-31b', label: 'MCQ-Ultra-31B', group: 'MCQ', ollamaId: 'mcq-ultra-31b', size: '~20 GB' },
-  { id: 'mcq-raw-8b',    label: 'MCQ-Raw-8B',    group: 'MCQ', ollamaId: 'mcq-raw-8b',    size: '4.9 GB', uncensored: true },
-
-  // ── Small & Fast - run well on modest hardware (8-16 GB)
-  { id: 'llama3.2:3b',  label: 'Llama 3.2 3B',  group: 'Small & Fast', ollamaId: 'llama3.2:3b', size: '2.0 GB' },
-  { id: 'gemma3:1b',    label: 'Gemma 3 1B',    group: 'Small & Fast', ollamaId: 'gemma3:1b',   size: '815 MB' },
-  { id: 'gemma3',       label: 'Gemma 3 4B',    group: 'Small & Fast', ollamaId: 'gemma3',      size: '3.3 GB' },
-  { id: 'phi4-mini',    label: 'Phi-4 Mini',    group: 'Small & Fast', ollamaId: 'phi4-mini',   size: '2.5 GB' },
-  { id: 'qwen2.5',      label: 'Qwen 2.5 7B',   group: 'Small & Fast', ollamaId: 'qwen2.5',     size: '4.7 GB' },
-  { id: 'mistral',      label: 'Mistral 7B',    group: 'Small & Fast', ollamaId: 'mistral',     size: '4.1 GB' },
-  { id: 'llama3.1',     label: 'Llama 3.1 8B',  group: 'Small & Fast', ollamaId: 'llama3.1',    size: '4.7 GB' },
-
-  // ── Powerful - need more RAM/VRAM
-  { id: 'gpt-oss:20b',  label: 'GPT-OSS 20B (OpenAI)', group: 'Powerful', ollamaId: 'gpt-oss:20b',   size: '14 GB' },
-  { id: 'phi4',         label: 'Phi-4 14B',            group: 'Powerful', ollamaId: 'phi4',          size: '9.1 GB' },
-  { id: 'gemma3:12b',   label: 'Gemma 3 12B',          group: 'Powerful', ollamaId: 'gemma3:12b',    size: '8.1 GB' },
-  { id: 'gemma3:27b',   label: 'Gemma 3 27B',          group: 'Powerful', ollamaId: 'gemma3:27b',    size: '17 GB'  },
-  { id: 'gemma4:e4b',   label: 'Gemma 4 E4B (MoE)',    group: 'Powerful', ollamaId: 'gemma4:e4b',    size: '9.6 GB' },
-  { id: 'gemma4:26b',   label: 'Gemma 4 26B',          group: 'Powerful', ollamaId: 'gemma4:26b',    size: '18 GB'  },
-  { id: 'gemma4:31b',   label: 'Gemma 4 31B',          group: 'Powerful', ollamaId: 'gemma4:31b',    size: '20 GB'  },
-  { id: 'qwen3',        label: 'Qwen 3 8B',            group: 'Powerful', ollamaId: 'qwen3',         size: '5.2 GB' },
-  { id: 'qwen3:32b',    label: 'Qwen 3 32B',           group: 'Powerful', ollamaId: 'qwen3:32b',     size: '20 GB'  },
-  { id: 'llama3.3',     label: 'Llama 3.3 70B',        group: 'Powerful', ollamaId: 'llama3.3',      size: '43 GB'  },
-  { id: 'gpt-oss:120b', label: 'GPT-OSS 120B (OpenAI)',group: 'Powerful', ollamaId: 'gpt-oss:120b',  size: '65 GB'  },
-  { id: 'mixtral',      label: 'Mixtral 8x22B',        group: 'Powerful', ollamaId: 'mixtral:8x22b', size: '80 GB'  },
-  { id: 'llama4',       label: 'Llama 4 Scout (MoE)',  group: 'Powerful', ollamaId: 'llama4:scout',  size: '67 GB'  },
-
-  // ── Coding
-  { id: 'qwen2.5-coder',   label: 'Qwen2.5 Coder 7B',    group: 'Coding', ollamaId: 'qwen2.5-coder',   size: '4.7 GB' },
-  { id: 'qwen3-coder:30b', label: 'Qwen3 Coder 30B (MoE)', group: 'Coding', ollamaId: 'qwen3-coder:30b', size: '19 GB' },
-
-  // ── Reasoning
-  { id: 'deepseek-r1',     label: 'DeepSeek R1 7B',      group: 'Reasoning', ollamaId: 'deepseek-r1',    size: '4.7 GB' },
-  { id: 'deepseek-r1:14b', label: 'DeepSeek R1 14B',     group: 'Reasoning', ollamaId: 'deepseek-r1:14b', size: '9.0 GB' },
-
-  // ── Uncensored / unrestricted community models
-  { id: 'dolphin3',                 label: 'Dolphin 3.0 8B',        group: 'Uncensored', ollamaId: 'dolphin3',             size: '4.7 GB', uncensored: true },
-  { id: 'dolphin-llama3',           label: 'Dolphin Llama 3 8B',    group: 'Uncensored', ollamaId: 'dolphin-llama3',       size: '4.7 GB', uncensored: true },
-  { id: 'dolphin-mistral',          label: 'Dolphin Mistral 7B',    group: 'Uncensored', ollamaId: 'dolphin-mistral',      size: '4.1 GB', uncensored: true },
-  { id: 'dolphin-mixtral',          label: 'Dolphin Mixtral 8x7B',  group: 'Uncensored', ollamaId: 'dolphin-mixtral:8x7b', size: '26 GB',  uncensored: true },
-  { id: 'wizard-vicuna-uncensored', label: 'Wizard Vicuna Uncens.', group: 'Uncensored', ollamaId: 'wizard-vicuna-uncensored', size: '3.8 GB', uncensored: true },
-  { id: 'llama2-uncensored',        label: 'Llama 2 Uncensored',    group: 'Uncensored', ollamaId: 'llama2-uncensored',    size: '3.8 GB', uncensored: true },
-];
+// The suggested-model catalog now lives in backend/models.json, not here.
+//
+// It was a hardcoded array, which made every new model upstream a code change
+// and an app update for every user. That is the wrong shape for a list whose
+// entire job is to track something that moves weekly. modelCatalog.js merges
+// the bundled file with a copy refreshed from the repository and an optional
+// user file, so adding a model is now editing one JSON file and pushing it.
+//
+// getModels() is synchronous and always returns a usable list; the refresh
+// happens in the background and lands on the next call.
 
 // All valid pull targets - used by the pull endpoint to whitelist requests
-export const CURATED_OLLAMA_IDS = new Set(CURATED_OLLAMA_MODELS.map((m) => m.ollamaId || m.id));
+// Was exported and never used anywhere: dead since the pull route started
+// validating ids by format instead of against a whitelist. Kept as a function
+// so anything that wants it gets the CURRENT catalog rather than a snapshot
+// taken at import time.
+export function curatedOllamaIds() {
+  return new Set(getCatalogModels().map((m) => m.ollamaId || m.id));
+}
 
 function normalizeModelId(modelId) {
   // Ollama often reports installed models as "name:tag" (e.g. llama3:latest).
@@ -115,7 +83,7 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
   const localById = new Map(locals.map((m) => [String(m.id || '').trim(), m]));
   const unmatchedLocalIds = new Set(localById.keys());
 
-  const catalog = CURATED_OLLAMA_MODELS.map((entry) => {
+  const catalog = getCatalogModels().map((entry) => {
     const entryNeedle = normalizeCatalogNeedle(`${entry.id} ${entry.ollamaId || ''} ${entry.label}`);
     /** @type {any} */
     let matchedRemote = null;
@@ -248,19 +216,17 @@ export async function getEffectiveModel({ provider, model, config }) {
     if (isCloudOnly && preferred && preferred.toLowerCase().endsWith('.gguf')) preferred = null;
     if (preferred && preferred !== 'auto') return preferred;
     if (provider === 'vllm') return config.openAIModel || 'model';
-    if (provider === 'openai') return 'gpt-4o-mini';
-    if (provider === 'grok') return 'grok-3-mini';
-    if (provider === 'groq') return 'llama-3.3-70b-versatile';
-    if (provider === 'openrouter') return 'meta-llama/llama-3.3-70b-instruct:free';
-    if (provider === 'gemini') return 'gemini-2.5-flash';
-    if (provider === 'cerebras') return 'llama-3.3-70b';
     if (provider === 'gpuaas') return config.openAIModel || 'model';
+    // From models.json, so a new flagship does not need an app release to
+    // become the fallback. Only reached when the live listing failed.
+    const fallback = getProviderDefault(provider);
+    if (fallback) return fallback;
     return config.openAIModel || 'model.gguf';
   }
   if (provider === 'claude') {
     const preferred = model && model !== 'auto' ? model : config.openAIModel;
     if (preferred && preferred !== 'auto') return preferred;
-    return 'claude-3-5-sonnet-latest';
+    return getProviderDefault('claude') || 'claude-sonnet-5';
   }
   if (provider === 'koboldcpp') {
     const preferred = model && model !== 'auto' ? model : (config.koboldModel || config.openAIModel);
@@ -323,23 +289,11 @@ export async function listModels(config, provider = config.aiProvider, options =
     // Cloud-only providers - never mix in local GGUF files; they can't be loaded via a remote API.
     const isCloudOnly = provider !== 'openai-compatible';
     // Per-provider sensible fallback model name (used when remote listing fails/unavailable).
-    const providerFallbackModel = provider === 'openai'
-      ? 'gpt-4o-mini'
-      : provider === 'grok'
-      ? 'grok-3-mini'
-      : provider === 'groq'
-      ? 'llama-3.3-70b-versatile'
-      : provider === 'openrouter'
-      ? 'meta-llama/llama-3.3-70b-instruct:free'
-      : provider === 'gemini'
-      ? 'gemini-2.5-flash'
-      : provider === 'cerebras'
-      ? 'llama-3.3-70b'
-      : provider === 'gpuaas'
-      ? null   // no meaningful default - user must specify
-      : provider === 'vllm'
-      ? null   // vLLM lists its own models remotely; user points at their server
-      : config.openAIModel;
+    const providerFallbackModel = (provider === 'gpuaas' || provider === 'vllm')
+      // No meaningful default: the user points these at their own server, which
+      // lists its own models.
+      ? null
+      : (getProviderDefault(provider) || (provider === 'openai-compatible' ? config.openAIModel : null));
 
     const baseUrl = overrideBaseUrl || defaultBase;
     const apiKey = overrideApiKey !== undefined ? overrideApiKey : config.openAIApiKey;
@@ -381,8 +335,8 @@ export async function listModels(config, provider = config.aiProvider, options =
       }));
     }
     return [{
-      id: config.openAIModel || 'claude-3-5-sonnet-latest',
-      label: prettifyEndpointModelLabel(config.openAIModel || 'claude-3-5-sonnet-latest'),
+      id: config.openAIModel || getProviderDefault('claude'),
+      label: prettifyEndpointModelLabel(config.openAIModel || getProviderDefault('claude')),
       group: 'Anthropic Models',
       available: true,
       selected: true,
@@ -451,12 +405,12 @@ export async function listModels(config, provider = config.aiProvider, options =
     if (!quantBase[base]) quantBase[base] = m.quant;
   }
   const curatedBaseSet = new Set(
-    CURATED_OLLAMA_MODELS.flatMap((m) => [
+    getCatalogModels().flatMap((m) => [
       normalizeModelId(m.id),
       normalizeModelId(m.ollamaId || m.id)
     ])
   );
-  const curated = CURATED_OLLAMA_MODELS.map((model) => {
+  const curated = getCatalogModels().map((model) => {
     const pullId = model.ollamaId || model.id;
     // If the ollamaId has a specific non-default tag (e.g. gemma3:1b, gemma3:12b, gemma4:e2b),
     // ONLY match if that exact tag is present in the discovered set.

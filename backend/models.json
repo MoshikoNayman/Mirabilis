@@ -1,0 +1,259 @@
+{
+  "$schema": "https://raw.githubusercontent.com/MoshikoNayman/Mirabilis/main/backend/models.schema.json",
+  "version": 1,
+  "updated": "2026-09-05",
+  "note": "Suggested local models and cloud fallback defaults. Edit and push to update every install; no app release needed. Cloud model lists are discovered live from each provider, so providerDefaults is only used when that listing fails.",
+  "ollama": [
+    {
+      "id": "mcq-pro-12b",
+      "label": "MCQ-Pro-12B",
+      "group": "MCQ",
+      "ollamaId": "mcq-pro-12b",
+      "size": "8.1 GB",
+      "local": true
+    },
+    {
+      "id": "mcq-ultra-31b",
+      "label": "MCQ-Ultra-31B",
+      "group": "MCQ",
+      "ollamaId": "mcq-ultra-31b",
+      "size": "~20 GB",
+      "local": true
+    },
+    {
+      "id": "mcq-raw-8b",
+      "label": "MCQ-Raw-8B",
+      "group": "MCQ",
+      "ollamaId": "mcq-raw-8b",
+      "size": "4.9 GB",
+      "uncensored": true,
+      "local": true
+    },
+    {
+      "id": "llama3.2:3b",
+      "label": "Llama 3.2 3B",
+      "group": "Small & Fast",
+      "ollamaId": "llama3.2:3b",
+      "size": "2.0 GB"
+    },
+    {
+      "id": "gemma3:1b",
+      "label": "Gemma 3 1B",
+      "group": "Small & Fast",
+      "ollamaId": "gemma3:1b",
+      "size": "815 MB"
+    },
+    {
+      "id": "gemma3",
+      "label": "Gemma 3 4B",
+      "group": "Small & Fast",
+      "ollamaId": "gemma3",
+      "size": "3.3 GB"
+    },
+    {
+      "id": "phi4-mini",
+      "label": "Phi-4 Mini",
+      "group": "Small & Fast",
+      "ollamaId": "phi4-mini",
+      "size": "2.5 GB"
+    },
+    {
+      "id": "qwen2.5",
+      "label": "Qwen 2.5 7B",
+      "group": "Small & Fast",
+      "ollamaId": "qwen2.5",
+      "size": "4.7 GB"
+    },
+    {
+      "id": "mistral",
+      "label": "Mistral 7B",
+      "group": "Small & Fast",
+      "ollamaId": "mistral",
+      "size": "4.1 GB"
+    },
+    {
+      "id": "llama3.1",
+      "label": "Llama 3.1 8B",
+      "group": "Small & Fast",
+      "ollamaId": "llama3.1",
+      "size": "4.7 GB"
+    },
+    {
+      "id": "gpt-oss:20b",
+      "label": "GPT-OSS 20B (OpenAI)",
+      "group": "Powerful",
+      "ollamaId": "gpt-oss:20b",
+      "size": "14 GB"
+    },
+    {
+      "id": "phi4",
+      "label": "Phi-4 14B",
+      "group": "Powerful",
+      "ollamaId": "phi4",
+      "size": "9.1 GB"
+    },
+    {
+      "id": "gemma3:12b",
+      "label": "Gemma 3 12B",
+      "group": "Powerful",
+      "ollamaId": "gemma3:12b",
+      "size": "8.1 GB"
+    },
+    {
+      "id": "gemma3:27b",
+      "label": "Gemma 3 27B",
+      "group": "Powerful",
+      "ollamaId": "gemma3:27b",
+      "size": "17 GB"
+    },
+    {
+      "id": "gemma4:e4b",
+      "label": "Gemma 4 E4B (MoE)",
+      "group": "Powerful",
+      "ollamaId": "gemma4:e4b",
+      "size": "9.6 GB"
+    },
+    {
+      "id": "gemma4:26b",
+      "label": "Gemma 4 26B",
+      "group": "Powerful",
+      "ollamaId": "gemma4:26b",
+      "size": "18 GB"
+    },
+    {
+      "id": "gemma4:31b",
+      "label": "Gemma 4 31B",
+      "group": "Powerful",
+      "ollamaId": "gemma4:31b",
+      "size": "20 GB"
+    },
+    {
+      "id": "qwen3",
+      "label": "Qwen 3 8B",
+      "group": "Powerful",
+      "ollamaId": "qwen3",
+      "size": "5.2 GB"
+    },
+    {
+      "id": "qwen3:32b",
+      "label": "Qwen 3 32B",
+      "group": "Powerful",
+      "ollamaId": "qwen3:32b",
+      "size": "20 GB"
+    },
+    {
+      "id": "llama3.3",
+      "label": "Llama 3.3 70B",
+      "group": "Powerful",
+      "ollamaId": "llama3.3",
+      "size": "43 GB"
+    },
+    {
+      "id": "gpt-oss:120b",
+      "label": "GPT-OSS 120B (OpenAI)",
+      "group": "Powerful",
+      "ollamaId": "gpt-oss:120b",
+      "size": "65 GB"
+    },
+    {
+      "id": "mixtral",
+      "label": "Mixtral 8x22B",
+      "group": "Powerful",
+      "ollamaId": "mixtral:8x22b",
+      "size": "80 GB"
+    },
+    {
+      "id": "llama4",
+      "label": "Llama 4 Scout (MoE)",
+      "group": "Powerful",
+      "ollamaId": "llama4:scout",
+      "size": "67 GB"
+    },
+    {
+      "id": "qwen2.5-coder",
+      "label": "Qwen2.5 Coder 7B",
+      "group": "Coding",
+      "ollamaId": "qwen2.5-coder",
+      "size": "4.7 GB"
+    },
+    {
+      "id": "qwen3-coder:30b",
+      "label": "Qwen3 Coder 30B (MoE)",
+      "group": "Coding",
+      "ollamaId": "qwen3-coder:30b",
+      "size": "19 GB"
+    },
+    {
+      "id": "deepseek-r1",
+      "label": "DeepSeek R1 7B",
+      "group": "Reasoning",
+      "ollamaId": "deepseek-r1",
+      "size": "4.7 GB"
+    },
+    {
+      "id": "deepseek-r1:14b",
+      "label": "DeepSeek R1 14B",
+      "group": "Reasoning",
+      "ollamaId": "deepseek-r1:14b",
+      "size": "9.0 GB"
+    },
+    {
+      "id": "dolphin3",
+      "label": "Dolphin 3.0 8B",
+      "group": "Uncensored",
+      "ollamaId": "dolphin3",
+      "size": "4.7 GB",
+      "uncensored": true
+    },
+    {
+      "id": "dolphin-llama3",
+      "label": "Dolphin Llama 3 8B",
+      "group": "Uncensored",
+      "ollamaId": "dolphin-llama3",
+      "size": "4.7 GB",
+      "uncensored": true
+    },
+    {
+      "id": "dolphin-mistral",
+      "label": "Dolphin Mistral 7B",
+      "group": "Uncensored",
+      "ollamaId": "dolphin-mistral",
+      "size": "4.1 GB",
+      "uncensored": true
+    },
+    {
+      "id": "dolphin-mixtral",
+      "label": "Dolphin Mixtral 8x7B",
+      "group": "Uncensored",
+      "ollamaId": "dolphin-mixtral:8x7b",
+      "size": "26 GB",
+      "uncensored": true
+    },
+    {
+      "id": "wizard-vicuna-uncensored",
+      "label": "Wizard Vicuna Uncens.",
+      "group": "Uncensored",
+      "ollamaId": "wizard-vicuna-uncensored",
+      "size": "3.8 GB",
+      "uncensored": true
+    },
+    {
+      "id": "llama2-uncensored",
+      "label": "Llama 2 Uncensored",
+      "group": "Uncensored",
+      "ollamaId": "llama2-uncensored",
+      "size": "3.8 GB",
+      "uncensored": true
+    }
+  ],
+  "providerDefaults": {
+    "_comment": "Last-resort model per cloud provider, used ONLY when the live /models listing fails (no key, offline, provider down). Normal operation ignores these entirely and uses what the provider reports.",
+    "openai": "gpt-4o-mini",
+    "grok": "grok-3-mini",
+    "groq": "llama-3.3-70b-versatile",
+    "openrouter": "meta-llama/llama-3.3-70b-instruct:free",
+    "gemini": "gemini-2.5-flash",
+    "cerebras": "llama-3.3-70b",
+    "claude": "claude-sonnet-5"
+  }
+}

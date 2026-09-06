@@ -1,0 +1,44 @@
+name: Model catalog
+
+# The suggested-model list points at things that live outside this repository.
+# Models get renamed and withdrawn, and when that happens the row stays in the
+# picker, the install fails, and nobody finds out until a user reports it.
+#
+# Weekly, because that is roughly the pace at which this churns, and on any
+# change to the file itself so a bad edit is caught before it is pushed to
+# users. backend/models.json is read at RUNTIME from the repository, so an
+# error here reaches every install without an app release: that cuts both ways,
+# which is exactly why it is worth a check.
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'   # Mondays, 09:00 UTC
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'backend/models.json'
+      - 'scripts/check-model-catalog.mjs'
+  push:
+    branches: [main]
+    paths:
+      - 'backend/models.json'
+      - 'scripts/check-model-catalog.mjs'
+
+jobs:
+  catalog:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Valid JSON with the right shape, before asking the network anything.
+      # A malformed file cannot break a running install (the loader falls back
+      # to the bundled copy) but it would silently stop updates for everyone.
+      - name: The catalog file is well formed
+        run: node scripts/validate-model-catalog.mjs
+
+      - name: Every suggested model still exists upstream
+        run: node scripts/check-model-catalog.mjs

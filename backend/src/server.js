@@ -46,6 +46,7 @@ import { createRecall } from './recall.js';
 import { createConfigVault } from './configVault.js';
 import { makeHostGuard, makeMcpAuthGuard, makePrivilegedGuard, isLoopbackRequest, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
 import { classifyProviderScope } from './providerScope.js';
+import { refreshCatalog } from './modelCatalog.js';
 import { describeEngineError } from './engineErrors.js';
 import { createProviderKeyStore } from './providerKeys.js';
 import { hardenFile, hardenExistingData, ensureSecureDir, SECURE_FILE_MODE } from './storage/securePaths.js';
@@ -1335,6 +1336,11 @@ app.post('/api/voice/transcribe', upload.single('audio'), async (req, res) => {
 
 app.get('/api/models', async (req, res) => {
   const provider = req.query.provider || config.aiProvider;
+  // Kick the suggested-model catalog refresh here rather than on a timer: this
+  // is the moment someone is about to look at the list. It is fire and forget,
+  // rate limited internally, and skipped entirely under Go Dark, so it never
+  // delays the response and never leaks under lockdown.
+  void refreshCatalog({ localOnly: req.query.localOnly === '1' || req.query.localOnly === 'true' });
   const overrideBaseUrl = typeof req.query.baseUrl === 'string' ? req.query.baseUrl.trim() : '';
   // Prefer the key from a header (kept out of URLs/logs); fall back to query for
   // backward compatibility with older clients.
