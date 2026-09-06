@@ -47,6 +47,7 @@ import { createConfigVault } from './configVault.js';
 import { makeHostGuard, makeMcpAuthGuard, makePrivilegedGuard, isLoopbackRequest, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
 import { classifyProviderScope } from './providerScope.js';
 import { refreshCatalog } from './modelCatalog.js';
+import { lookupModel } from './ollamaRegistry.js';
 import { describeEngineError } from './engineErrors.js';
 import { createProviderKeyStore } from './providerKeys.js';
 import { hardenFile, hardenExistingData, ensureSecureDir, SECURE_FILE_MODE } from './storage/securePaths.js';
@@ -1753,6 +1754,20 @@ app.post('/api/models/install-jobs/:jobId/cancel', async (req, res) => {
   try { job.currentProcess?.kill('SIGTERM'); } catch { /* ignore */ }
 
   return res.json({ job: cloneJob(job), cancelRequested: true });
+});
+
+// Does this model exist upstream, and how big is it? Asked before a pull so a
+// typo is caught in the field instead of becoming a failed multi-gigabyte
+// download reported by whatever the daemon happened to say.
+app.get('/api/models/registry-lookup', async (req, res) => {
+  const id = typeof req.query.id === 'string' ? req.query.id : '';
+  if (!id.trim()) return res.status(400).json({ error: 'id is required' });
+  // A registry lookup is egress. Under Go Dark it does not happen, and the
+  // field simply stops offering the hint.
+  if (req.query.localOnly === '1' || req.query.localOnly === 'true') {
+    return res.json({ status: 'unknown', reason: 'Go Dark is on, so the registry was not contacted.' });
+  }
+  res.json(await lookupModel(id));
 });
 
 app.post('/api/models/pull', async (req, res) => {

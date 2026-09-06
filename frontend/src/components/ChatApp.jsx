@@ -1384,6 +1384,7 @@ export default function ChatApp() {
   // granting a background process a terminal should be a decision each session,
   // not something a setting quietly remembers from last week.
   const [fullPolicyAcknowledged, setFullPolicyAcknowledged] = useState(false);
+
   // Masked hints for the keys the BACKEND holds. The page never sees a value.
   const [keyHints, setKeyHints] = useState({});
   // What the user is currently typing, before it is saved. Never persisted.
@@ -1516,6 +1517,33 @@ export default function ChatApp() {
   const [pullingModels, setPullingModels] = useState({});
   // Free-text "pull any Ollama model" field in the model menu.
   const [customModelInput, setCustomModelInput] = useState('');
+  // What the registry says about what has been typed, so a typo is caught in
+  // the field instead of becoming a failed multi-gigabyte download.
+  const [customModelLookup, setCustomModelLookup] = useState(null);
+
+  // Ask the registry about the typed name, debounced.
+  //
+  // The field used to pull whatever was typed, so "qwen2.5:7bb" became a
+  // download that failed somewhere inside the pull, long after the user had
+  // committed to it. Now the answer, including the size, arrives before the
+  // Pull button is worth pressing.
+  useEffect(() => {
+    const name = customModelInput.trim();
+    if (!name) { setCustomModelLookup(null); return; }
+    let cancelled = false;
+    setCustomModelLookup({ status: 'checking' });
+    const timer = setTimeout(async () => {
+      try {
+        const params = new URLSearchParams({ id: name });
+        if (appStore.getGoDark()) params.set('localOnly', '1');
+        const result = await api(`/api/models/registry-lookup?${params.toString()}`);
+        if (!cancelled) setCustomModelLookup(result);
+      } catch {
+        if (!cancelled) setCustomModelLookup({ status: 'unknown' });
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [customModelInput]);
   // modelId → true while a delete request is in-flight
   const [deletingModels, setDeletingModels] = useState({});
   const [isTeachPanelOpen, setIsTeachPanelOpen] = useState(false);
@@ -7164,13 +7192,40 @@ export default function ChatApp() {
                               const name = customModelInput.trim();
                               if (name) { installModel(name, name); setCustomModelInput(''); }
                             }}
-                            disabled={!customModelInput.trim() || !!pullingModels[customModelInput.trim()]}
+                            disabled={
+                              !customModelInput.trim()
+                              || !!pullingModels[customModelInput.trim()]
+                              // Only block on a definite "no such model". An
+                              // unreachable registry must never stop someone
+                              // installing a model they know is real.
+                              || customModelLookup?.status === 'missing'
+                              || customModelLookup?.status === 'invalid'
+                            }
                             className="shrink-0 rounded-[var(--r-md)] px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
                             style={{ background: 'var(--accent)' }}
                           >
                             Pull
                           </button>
                         </div>
+                        {customModelInput.trim() && customModelLookup && (
+                          <div className="mt-1 text-[10px] text-[color:var(--text-muted)]">
+                            {customModelLookup.status === 'checking' && 'Checking the registry...'}
+                            {customModelLookup.status === 'found' && (
+                              <span className="text-emerald-600 dark:text-emerald-400">
+                                Found{customModelLookup.size ? ` - ${customModelLookup.size} download` : ''}
+                              </span>
+                            )}
+                            {customModelLookup.status === 'missing' && (
+                              <span className="text-rose-500">No model with that name and tag.</span>
+                            )}
+                            {customModelLookup.status === 'invalid' && (
+                              <span className="text-rose-500">That is not a valid model name.</span>
+                            )}
+                            {customModelLookup.status === 'unknown' && (
+                              <span>Could not check it. You can still pull if you know it exists.</span>
+                            )}
+                          </div>
+                        )}
                         <a
                           href="https://ollama.com/library"
                           target="_blank"
