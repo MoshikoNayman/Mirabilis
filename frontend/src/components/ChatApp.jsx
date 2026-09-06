@@ -6494,9 +6494,8 @@ export default function ChatApp() {
           )}
 
           <footer className="mt-3 border-t border-black/10 pt-3">
-            {agentRun && (
-              <AgentRunPanel run={agentRun} onStop={stopAgentRun} />
-            )}
+            {/* The autonomous run used to be a block here. It now sits inline in
+                the composer action row below, in space that was already empty. */}
 
             {/* ROW 1: slim toolbar. Left: model, effort, options. Right: status + tokens. */}
             <div className="mb-2 flex items-center justify-between gap-3">
@@ -8400,6 +8399,16 @@ export default function ChatApp() {
                     <WaveIcon size={16} className="h-4 w-4" />
                   </button>
                 </div>
+                {/* The gap this fills was pure whitespace. min-w-0 so a long
+                    last-event line truncates instead of shoving Send off. */}
+                {agentRun && (
+                  <AgentRunPanel
+                    run={agentRun}
+                    onStop={stopAgentRun}
+                    onDismiss={() => setAgentRun(null)}
+                  />
+                )}
+
                 <button
                   onClick={isStreaming ? stopStreaming : sendMessage}
                   disabled={!isStreaming && !input.trim()}
