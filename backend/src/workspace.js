@@ -1,10 +1,5 @@
-// backend/src/workspace.js
-// Watched Workspace: point Mirabilis at a local folder, list its text files, and
-// read any file's FRESH bytes on demand. A single active watched root is held in
-// memory (like remoteState in server.js). Every read is jailed to that root so a
-// relative path can never escape the watched folder. This is the local-first
-// superpower a cloud chat app cannot offer: live filesystem context that is
-// pulled straight from disk at send time instead of a stale one-off upload.
+// Watched workspace: lists a local folder's text files and reads fresh bytes on demand.
+// One active root is held in memory, and every read is jailed to it.
 
 import { watch } from 'node:fs';
 import { stat, readdir, readFile as fsReadFile } from 'node:fs/promises';
@@ -65,9 +60,7 @@ function isBinaryExt(name) {
   return BINARY_EXT.has(extOf(name));
 }
 
-// Jail a caller-supplied relative path to the watched root. Mirrors the
-// safeResolvePath pattern in mcp/mcpServer.js: strip null bytes, normalize, then
-// resolve against the root and reject anything that escapes it.
+// Jails a caller-supplied relative path to the watched root.
 function jailResolve(relPath) {
   if (!root) throw new Error('No workspace is being watched.');
   const cleaned = normalize(String(relPath || '').replace(/\0/g, ''));
@@ -100,9 +93,7 @@ export async function setRoot(dir) {
 function startWatch() {
   if (!root) return;
   try {
-    // Recursive watch is supported on macOS and Windows. On platforms where it
-    // is not, this throws and we fall back to re-scanning on every listFiles()
-    // call, so the feature still works, just without change notifications.
+    // Recursive watch throws where unsupported; listFiles() then rescans each call.
     watcher = watch(root, { recursive: true, persistent: false }, () => {
       lastChangeAt = Date.now();
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -132,10 +123,8 @@ export function getLastChangeAt() {
   return lastChangeAt;
 }
 
-// Recursively walk the watched root and return a flat list of text files,
-// skipping dotfiles/dotdirs, known noise directories, obvious binaries, and
-// oversize files. Capped at MAX_ENTRIES total. Each entry is
-// { relPath, name, size, mtime }.
+// Flat list of text files under the root, skipping dotfiles, noise dirs, binaries
+// and oversize files. Entries are { relPath, name, size, mtime }.
 export async function listFiles() {
   if (!root) throw new Error('No workspace is being watched.');
   const out = [];
@@ -176,8 +165,8 @@ export async function listFiles() {
   return out;
 }
 
-// Read a single file's FRESH contents from disk. Jailed to the watched root and
-// capped at MAX_READ_BYTES. Returns { path, content, size }.
+// Reads one file from disk, jailed to the root and capped at MAX_READ_BYTES.
+// Returns { path, content, size }.
 export async function readFile(relPath) {
   const resolved = jailResolve(relPath);
   let info;

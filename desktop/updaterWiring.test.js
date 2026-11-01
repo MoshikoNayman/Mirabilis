@@ -1,13 +1,5 @@
 'use strict';
-// Wiring tests for desktop/updater.js.
-//
-// The policy rules are tested in updatePolicy.test.js. What is tested here is
-// the part that has historically broken in this project: the glue. A correct
-// rule that nothing calls is the same as no rule, and the Go Dark gate is only
-// worth anything if the IPC handler actually feeds it.
-//
-// Electron and electron-updater are stubbed at the module loader, so this runs
-// under plain node with no browser process and no network.
+// Tests the IPC wiring of updater.js under plain node, with Electron stubbed.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -18,10 +10,7 @@ const path = require('node:path');
 
 const UPDATER = require.resolve('./updater.js');
 
-// The stub stays installed for the life of the file. updater.js requires
-// electron-updater LAZILY, inside the check, so a patch that is removed right
-// after the initial require would let the real module load mid-test and reach
-// the network. `current` is swapped per test.
+// Stays installed for the whole file: updater.js loads electron-updater lazily.
 let current = null;
 const realLoad = Module._load;
 Module._load = function (request, parent, isMain) {
@@ -74,7 +63,7 @@ test('initUpdater registers both IPC channels', () => {
 });
 
 test('nothing contacts the update server before the renderer reports in', async () => {
-  // This is the whole point of the gate. At this moment localOnly is null.
+  // localOnly is still null here.
   const { mod, state, dialogs } = loadUpdater();
   mod.initUpdater();
   await mod.checkForUpdates({ userInitiated: false });
@@ -92,8 +81,7 @@ test('reporting Go Dark ON keeps the update server unreachable', async () => {
 });
 
 test('reporting Go Dark OFF schedules the launch check, and it runs', async () => {
-  // The gap this closes: a gate that is never opened is indistinguishable from
-  // a broken updater. Capture the scheduled callback rather than waiting on it.
+  // Capture the scheduled callback rather than waiting on it.
   const { mod, handlers, state } = loadUpdater();
   mod.initUpdater();
 

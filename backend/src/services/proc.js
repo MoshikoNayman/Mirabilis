@@ -1,11 +1,5 @@
 // @ts-check
-// backend/src/services/proc.js
-// Small child-process helpers shared by the chat and IntelLedger paths.
-//
-// Extracted so both can use the SAME implementation. They had drifted: the
-// IntelLedger copy accepted no timeout at all, so a hung ffmpeg or whisper run
-// wedged its media job forever and, because the media queue defaults to a single
-// concurrent slot, stalled every job behind it.
+// Child-process helpers shared by the chat and IntelLedger paths.
 
 import { spawn, exec } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -26,8 +20,7 @@ export async function commandExists(command) {
 
 /**
  * Run a command to completion, capturing stdout/stderr.
- * Always bounded by a timeout: an unbounded external tool is the difference
- * between a failed job and a permanently stuck queue.
+ * Always bounded by a timeout so a hung tool cannot stall the single-slot media queue.
  * @param {string} command
  * @param {string[]} args
  * @param {{cwd?: string, env?: Record<string,string>, timeoutMs?: number, signal?: AbortSignal}} [opts]
@@ -36,9 +29,8 @@ export async function commandExists(command) {
 export async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 60 * 10, signal } = {}) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(new Error(`${command} aborted before it started`)); return; }
-    // detached puts the child in its own process GROUP. A shell command that
-    // forks (npm install, a build, anything backgrounded) leaves children that
-    // outlive a plain proc.kill, so stopping a run has to signal the group.
+    // detached gives the child its own process group. Forked children outlive a
+    // plain proc.kill, so stopping a run signals the whole group.
     const proc = spawn(command, args, {
       cwd,
       env: env ? { ...process.env, ...env } : process.env,
@@ -47,15 +39,10 @@ export async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 6
     });
 
     /**
-     * SIGTERM the group, then SIGKILL anything still alive, and let go of the
-     * child's pipes either way.
-     *
-     * Releasing the streams is not optional. A backgrounded grandchild can
-     * escape the process group (shells differ: dash and bash do not agree), and
-     * it inherits stdout and stderr. Those handles keep OUR event loop alive, so
-     * a leaked `sleep` in a test hung the whole suite on Linux while passing on
-     * macOS. Detaching from the pipes means a survivor is at worst an orphan,
-     * never something that pins this process open.
+     * SIGTERM the group, then SIGKILL survivors, and always release the pipes.
+     * A grandchild can escape the group (dash and bash differ) while holding
+     * stdout/stderr, which would keep this event loop alive. Destroying the
+     * streams leaves it an orphan instead.
      */
     const killGroup = () => {
       const pid = proc.pid;
@@ -101,8 +88,7 @@ export async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 6
         return;
       }
       const error = new Error(`${command} exited with code ${code}${stderr ? `: ${stderr.trim()}` : ''}`);
-      // Callers that run tests need the exit code and stdout too: cargo, npm and
-      // pytest print the failing cases on stdout.
+      // Test runners (cargo, npm, pytest) print failures on stdout, so attach it.
       Object.assign(error, { exitCode: code, stdout, stderr });
       reject(error);
     });

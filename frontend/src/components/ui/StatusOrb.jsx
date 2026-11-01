@@ -1,7 +1,5 @@
-// frontend/src/components/ui/StatusOrb.jsx
-// The Mirabilis flower as a living presence orb. Its ring/glow reflects the
-// aggregate provider presence; it "breathes" when idle and speeds up while a
-// response is streaming. This is the ICQ flower, reimagined with Apple polish.
+// The Mirabilis flower as a presence orb; its ring reflects aggregate provider
+// presence and the flower spins while searching.
 'use client';
 
 const STATE_COLOR = {
@@ -12,10 +10,7 @@ const STATE_COLOR = {
   unknown: 'var(--presence-offline)'
 };
 
-// The ICQ mascot flower, duotone: accent spiral petals with a single
-// lighter-accent petal and the signature yellow heart. Petals use the authentic
-// ICQ path data, so it recolors with the active theme accent while keeping the
-// ICQ silhouette (one standout petal, exactly like the original red one).
+// ICQ flower paths. ICQ_PETAL_A is the standout petal; the rest take the accent.
 const ICQ_PETALS = [
   'm106.61 110.23s-42.218-47.933-48.752-62.93c-6.534-14.998-4.4796-30.925 7.3807-35.35 11.86-4.4252 29.058 10.284 32.436 29.134 3.3782 18.85 8.9346 69.146 8.9346 69.146z',
   'm104.24 108.08s-3.4772-58.275 0-77.208c3.4772-18.933 21.955-27.771 36.631-23.482 14.676 4.2897 26.361 23.591 15.968 42.267-10.394 18.676-52.599 58.422-52.599 58.422z',
@@ -28,10 +23,8 @@ const ICQ_PETAL_A = 'm103.44 107.4s-35.939 37.331-51.327 40.732c-15.388 3.4011-2
 const ICQ_PETAL_B = 'm102.01 107.02s-49.266 2.8098-69.592 0-24.215-11.647-23.745-23.745c0.46999-12.098 15.745-27.854 33.426-27.033s59.911 50.779 59.911 50.779z';
 
 export function FlowerMark({ size = 22, variant = 'accent' }) {
-  // 'classic' = the authentic ICQ colours (green petals, one red petal, yellow
-  // heart, black outline) - used for the spinning "searching" state so the red
-  // petal makes the rotation read, just like the original ICQ. 'accent' = the
-  // theme-tinted duotone used at rest.
+  // 'classic' uses the original ICQ colours while spinning, so the red petal
+  // makes the rotation visible. 'accent' is the theme-tinted version at rest.
   if (variant === 'classic') {
     return (
       <svg width={size} height={size} viewBox="0 0 210 210" className="icq-mark-svg" style={{ width: size, height: size }} aria-hidden="true">

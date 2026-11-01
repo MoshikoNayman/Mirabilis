@@ -1,17 +1,5 @@
-// A guard against one specific, expensive mistake.
-//
-// Three separate CI failures have had the same root cause: a test reached for
-// an OS-special filesystem path (/proc, /sys) to mean "somewhere I cannot
-// write". Those paths do not exist on macOS, so the call fails instantly and
-// the test passes locally. On Linux they are real mounted filesystems, and the
-// call does not fail instantly: the suite hung until the runner killed it,
-// producing a two-minute timeout with no hint of which line was responsible.
-//
-// The portable way to say "cannot write here" is a path whose PARENT is a
-// regular file, which fails ENOTDIR on every platform, immediately.
-//
-// This costs a few milliseconds and turns a mystery CI hang into a local
-// failure that names the file and says what to do instead.
+// Fails tests that use /proc or /sys as an unwritable path; those hang on Linux.
+// Use a path whose parent is a regular file instead (ENOTDIR on every OS).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

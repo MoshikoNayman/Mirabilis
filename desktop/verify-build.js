@@ -31,10 +31,8 @@ const checks = [
     hint: 'desktop/updater.js or updatePolicy.js is missing; the app could not check for updates.'
   },
   {
-    // electron-builder ships exactly what `files` lists. A file left out of
-    // that array is missing only in the packaged app, which is the worst place
-    // to find out: main.js requires it at startup, so the release would launch
-    // to a blank window while `npm run dev` stayed perfectly fine.
+    // electron-builder ships only what `files` lists, and main.js requires these
+    // at startup, so an omission breaks only the packaged app.
     name: 'Updater sources are packaged',
     ok: (() => {
       try {
@@ -56,8 +54,7 @@ const checks = [
     hint: 'build.publish is missing; electron-builder emits no latest*.yml and updates cannot be found.'
   },
   {
-    // Squirrel.Mac installs from a zip. A dmg-only mac target means macOS can
-    // never self update, however well signed it is.
+    // Squirrel.Mac installs from a zip; a dmg-only target cannot self update.
     name: 'macOS update artifact',
     ok: (() => {
       try {

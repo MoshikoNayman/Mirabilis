@@ -1,7 +1,5 @@
 // @ts-check
-// frontend/src/lib/api.js
-// Centralized API base + fetch helpers. Replaces the inline fetch + ad-hoc
-// readJsonOrThrow logic scattered through the component tree.
+// API base URL and JSON fetch helpers.
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';

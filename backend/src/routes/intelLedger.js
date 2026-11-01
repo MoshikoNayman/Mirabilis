@@ -1,6 +1,3 @@
-// backend/src/routes/intelLedger.js
-// IntelLedger API routes - ESM
-
 import { Router } from 'express';
 import multer from 'multer';
 import path from 'node:path';
@@ -162,7 +159,7 @@ function extractDueDate(sentence) {
   // Validate ISO date format (YYYY-MM-DD) to reject invalid dates like 2026-13-45
   if (/^\d{4}-\d{2}-\d{2}$/.test(candidate)) {
     const d = new Date(candidate + 'T00:00:00Z');
-    if (isNaN(d.getTime())) return null; // Invalid date
+    if (isNaN(d.getTime())) return null;
   }
   return candidate;
 }
@@ -361,10 +358,8 @@ function computeNextReminderAt({ priority, dueDate, isOverdue }) {
   return reminder.toISOString();
 }
 
-// Delegates to the shared implementation, which is always bounded by a timeout.
-// The copy that used to live here accepted no timeout at all, so a hung ffmpeg
-// or whisper process kept its media job running forever; with the media queue
-// defaulting to one concurrent slot, that stalled every queued job behind it.
+// Always timeout-bounded: the media queue defaults to one slot, so a hung
+// ffmpeg or whisper would stall every queued job behind it.
 function runCommand(command, args = [], options = {}) {
   return sharedRunCommand(command, args, options);
 }
@@ -1297,11 +1292,8 @@ export function createIntelLedgerRoutes(storage, aiDeps) {
           model: transcribeModel
         });
       } else {
-        // Prefer whisper.cpp, exactly as the chat dictation path does. This tier
-        // was missing here, so on a machine where whisper.cpp is the only
-        // installed engine, media ingest skipped it entirely and fell through to
-        // the Python CLI (usually absent, failing with a raw spawn ENOENT) even
-        // though the app reported local speech-to-text as ready.
+        // Prefer whisper.cpp, matching chat dictation; it may be the only
+        // installed engine, and the Python CLI is usually absent.
         const whisperCpp = await whisperCppAvailable();
         if (whisperCpp) {
           const text = await transcribeWithWhisperCpp({

@@ -22,7 +22,7 @@ test('a world-readable file is brought down to owner-only', async () => {
 });
 
 test('an existing install is fixed, not just new writes', async () => {
-  // The whole point: every machine already running has world-readable history.
+  // Existing installs have world-readable history that must be tightened.
   const dir = await tmp();
   const nested = path.join(dir, 'agent-runs');
   await fs.mkdir(nested, { recursive: true });
@@ -74,13 +74,7 @@ test('ensureSecureDir creates a private directory', async () => {
 });
 
 test('permission work never throws, whatever it is pointed at', async () => {
-  // A permission fix must never be able to take the app down at boot.
-  //
-  // The unwritable target is a directory whose PARENT is a regular file, which
-  // fails ENOTDIR instantly on every platform. Do NOT reach for /proc here: it
-  // does not exist on macOS (instant ENOENT) but is a real mounted filesystem
-  // on Linux, so a test written that way passes locally and hangs CI. That has
-  // now cost three red builds; this is the portable way to say "cannot write".
+  // Parent is a file, so ENOTDIR on every OS; do not use /proc (hangs on Linux).
   const base = await tmp();
   const asFile = path.join(base, 'not-a-directory');
   await fs.writeFile(asFile, 'x', 'utf8');

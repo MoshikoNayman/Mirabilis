@@ -1,23 +1,6 @@
 // @ts-check
-// backend/src/agent/agentLoop.js
-// The autonomous execution loop: plan, act, observe, validate, repair.
-//
-// Shape of a run:
-//
-//   plan -> [ decide -> act -> observe ]* -> validate -> pass -> done
-//                ^                              |
-//                +---- repair (with critique) --+
-//
-// Two properties matter more than anything else here.
-//
-// 1. The budget is checked in code before every iteration and every tool call.
-//    The model is told what remains so it can triage, but it cannot vote on
-//    whether to continue.
-//
-// 2. Running out of budget must still return the best available work. An agent
-//    that spends an hour and then reports only "budget exhausted" has wasted the
-//    hour. When the ceiling is hit mid-run the loop asks for a wrap-up using
-//    what it already has, and says plainly what was left undone.
+// Agent loop: plan, act, observe, validate, repair. Code enforces the budget before
+// every step; on exhaustion the loop still returns a wrap-up of the work so far.
 
 import { createBudget, STOP_REASONS, BudgetExhaustedError } from './budget.js';
 import { parseAgentAction, protocolInstructions } from './protocol.js';
@@ -57,20 +40,16 @@ export async function runAgent({
   const history = [];
   let plan = '';
   let finalAnswer = '';
-  // The last summary a validator REJECTED. Kept apart from finalAnswer: if the
-  // budget runs out mid-repair, the rejected text used to be returned verbatim
-  // as the result with nothing saying a validator had refused it.
+  // Last summary the validator rejected. Kept apart from finalAnswer so a run that
+  // ends mid-repair never returns it as if it had passed.
   let rejectedAnswer = '';
   let rejectedReason = '';
   /** @type {string|null} */
   let stopReason = null;
 
   const ask = async (messages, purpose, maxTokens) => {
-    // Bound the call by what is actually left. The budget was only consulted at
-    // loop boundaries, so a provider that accepted the connection and then
-    // stalled could carry a run past its ceiling: measured at 2x on the 30
-    // minute tier. The wrap-up runs on an already-spent budget, so it gets a
-    // small fixed allowance rather than an open-ended one.
+    // Bound each call by the time left, so a stalled provider cannot carry the run
+    // past its ceiling. The wrap-up runs on a spent budget and gets a fixed allowance.
     const deadlineMs = purpose === 'wrap-up'
       ? WRAP_UP_TIMEOUT_MS
       : Math.max(1_000, budget.remaining().wallMs);
@@ -80,9 +59,8 @@ export async function runAgent({
     return text;
   };
 
-  // Fan-out is offered only when the tier grants sub-agents AND the caller
-  // supplied a way to build a registry for them. Sub-agents are handed a profile
-  // with maxSubAgents 0, so this is self-limiting to a single level.
+  // Fan-out needs a tier with sub-agents and a registry factory. Sub-agents get
+  // maxSubAgents 0, so nesting stops at one level.
   if (profile.maxSubAgents > 0 && typeof makeRegistry === 'function' && typeof registry.addTool === 'function') {
     registry.addTool('spawn_agents', createSpawnTool({
       budget, profile, makeRegistry, callModel, signal, now,
@@ -165,9 +143,8 @@ export async function runAgent({
       const action = parseAgentAction(decision);
 
       if (action.kind === 'invalid') {
-        // Feed the parse error back as an observation. It still costs an
-        // iteration, so a model that cannot follow the format degrades into
-        // termination instead of spinning forever.
+        // Feed the parse error back. It still costs an iteration, so a model that
+        // cannot follow the format terminates instead of spinning.
         emit('invalid-action', { iteration, error: action.error });
         history.push({
           step: iteration,
@@ -219,7 +196,7 @@ export async function runAgent({
         if (passed) { validated = true; stopReason = STOP_REASONS.COMPLETED; break; }
 
         if (!budget.chargeRepair()) {
-          // Out of repair attempts: keep the answer but be honest about it.
+          // Out of repair attempts: keep the answer, flagged as unvalidated.
           stopReason = STOP_REASONS.COMPLETED;
           finalAnswer += `\n\n[Validation did not pass and no repair attempts remain. Outstanding: ${reason || 'unspecified'}]`;
           break;
@@ -254,9 +231,7 @@ export async function runAgent({
     }
 
     // wrap up
-    // Budget ran out mid-run: salvage the work rather than reporting a bare
-    // failure. This is the difference between "your hour produced nothing" and
-    // "here is what I established, and here is what is left".
+    // Budget ran out mid-run: salvage the work instead of reporting a bare failure.
     const ranOut = stopReason && stopReason !== STOP_REASONS.COMPLETED && stopReason !== STOP_REASONS.CANCELLED;
 
     // Stopped while repairing a rejected answer: hand it back only with the

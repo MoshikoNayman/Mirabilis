@@ -24,11 +24,8 @@ export async function listOpenAICompatibleModels(input) {
   }
 }
 
-// The full sampling/behaviour parameter set an OpenAI-compatible server (llama.cpp
-// llama-server, vLLM, LM Studio, KoboldCpp) understands. Previously only temperature
-// and max_tokens were forwarded, so grammar/JSON mode, stop sequences, seed, nucleus
-// sampling, penalties, and tools were unreachable even against a capable local server.
-// Values are coerced to safe ranges; unknown keys are dropped.
+// Sampling parameters OpenAI-compatible servers (llama-server, vLLM, LM Studio, KoboldCpp)
+// accept. Values are clamped to safe ranges; unknown keys are dropped.
 const OPENAI_PARAM_SPEC = {
   top_p: { min: 0, max: 1 },
   top_k: { min: 0, max: 500, int: true },
@@ -136,10 +133,8 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
           // Partial frame: the next chunk will complete it.
           continue;
         }
-        // llama-server, vLLM and most OpenAI-compatible servers report a
-        // mid-generation failure as a `data: {"error":...}` frame on an
-        // already-200 response. Discarding it left the reply empty and the
-        // route saved that emptiness as success.
+        // Mid-generation failures arrive as a `data: {"error":...}` frame on a 200
+        // response; throw so the route does not save an empty reply as success.
         if (json.error) {
           const detail = json.error?.message || json.error;
           throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));

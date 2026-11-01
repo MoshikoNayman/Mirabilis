@@ -1,9 +1,5 @@
-// frontend/src/components/shell/HomelabRoster.jsx
-// Homelab Roster - the user's own machines (routers, NAS, servers, a Raspberry
-// Pi) shown as ICQ-style buddy contacts with LIVE reachability dots. Mirrors the
-// look of BuddyList.jsx: an Apple-vibrancy sheet with presence dots. Hosts are
-// saved on the backend; a TCP probe polls every ~15s to light each dot green
-// (reachable) or grey (offline). "Connect" reuses the existing SSH backend.
+// Saved homelab hosts as buddy contacts with polled TCP reachability dots.
+// Connect goes through the existing SSH backend.
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -176,7 +172,6 @@ export default function HomelabRoster({ open }) {
     }
   }, []);
 
-  // Load hosts + start the reachability poll while the sheet is open.
   useEffect(() => {
     if (!open) return undefined;
     let cancelled = false;

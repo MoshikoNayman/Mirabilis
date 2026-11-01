@@ -1,9 +1,4 @@
 // Route-level tests for autonomous runs, against the real server process.
-//
-// The bug these exist for: a run started from the UI with the model picker on
-// "Auto" sends no model at all, and the route passed that undefined straight to
-// the provider. Every such run died instantly on "model is required" while the
-// panel just said the run failed to start.
 
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -164,9 +159,6 @@ test('an unreachable engine reports how to fix it, not "fetch failed"', async ()
 });
 
 // persisting the run into a chat
-// The client used to POST the goal and answer to /api/chats/:id/messages, a
-// route that does not exist, so the result lived only in the run panel and was
-// lost the moment it closed.
 
 async function newChat() {
   const res = await fetch(`${baseUrl}/api/chats`, {
@@ -234,8 +226,7 @@ test('a stopped run still persists the partial work it managed', async () => {
 // the full tool policy needs an explicit decision
 
 test('the full policy is refused without an explicit acknowledgement', async () => {
-  // Granting a background process a shell must never be reachable by a default
-  // or a remembered setting.
+  // A default or remembered setting must never grant a background shell.
   const res = await fetch(`${baseUrl}/api/agent/runs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
@@ -292,12 +283,9 @@ test('a project folder may not be the disk root or a missing path', async () => 
 });
 
 test('concurrent runs are capped on the server, not just in the UI', async () => {
-  // The one-at-a-time guard in the app is a convenience. This endpoint takes a
-  // token, so anything holding it could start runs in a loop, each with its own
-  // budget and, at the full policy, its own shell.
+  // Any token holder can call this endpoint, so the UI guard is not enough.
   replyIndex = 0;
   const slowGoal = 'concurrency probe';
-  // Fire several at once and count how many the server accepted.
   const attempts = await Promise.all(Array.from({ length: 6 }, () =>
     fetch(`${baseUrl}/api/agent/runs`, {
       method: 'POST',

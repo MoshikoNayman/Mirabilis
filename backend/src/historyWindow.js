@@ -1,18 +1,6 @@
 // @ts-check
-// backend/src/historyWindow.js
-// Chooses which prior messages to resend with a new turn.
-//
-// The naive version recomputes the window from the newest message every request
-// and stops when the budget runs out. That is correct but expensive: the FRONT
-// of the prompt shifts forward by a message or two on every turn, and local
-// engines key their KV cache on a prompt PREFIX. A prefix that changes every
-// turn means the cache misses every turn, so a long chat re-prefills its entire
-// history on each message.
-//
-// Instead we anchor the window. The start index is remembered on the chat and
-// held still while the prompt fits. When it no longer fits, it jumps forward far
-// enough to free a chunk of budget at once, then holds again. That converts a
-// guaranteed miss every turn into one miss roughly every N turns.
+// Chooses which prior messages to resend with a new turn. The start index is
+// anchored so the prompt prefix, and the engine's KV cache, stays stable across turns.
 
 /** Fraction of the budget to free when eviction is triggered. */
 const EVICT_TO_FRACTION = 0.75;
@@ -54,10 +42,8 @@ export function selectHistoryWindow(messages, {
   let evicted = false;
 
   if (tokens > budgetTokens) {
-    // Over budget: advance in one jump to well under it, rather than trimming
-    // the single message that would just barely make it fit. Trimming minimally
-    // guarantees another eviction next turn, which is the behaviour that made
-    // the prefix cache useless.
+    // Jump well under budget. Trimming the minimum would evict again next turn
+    // and miss the prefix cache every time.
     const target = budgetTokens * EVICT_TO_FRACTION;
     const lastAllowedStart = Math.max(0, list.length - minMessages);
     while (start < lastAllowedStart && tokens > target) {
@@ -67,7 +53,6 @@ export function selectHistoryWindow(messages, {
     }
   }
 
-  // Hard cap on message count, independent of tokens.
   if (list.length - start > maxMessages) {
     start = list.length - maxMessages;
     tokens = sumFrom(start);

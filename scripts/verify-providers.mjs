@@ -1,17 +1,5 @@
-// Proves the provider binaries the launcher installed can actually start.
-//
-// Checking that a file exists is not enough: the llama.cpp release ships the
-// executable alongside shared libraries it needs at runtime, so an installer
-// that copies only the executable produces something that passes every
-// existence check and then dies with a dynamic-linker error the first time a
-// user selects that provider. Run them and look at the exit status.
-//
-// Absence is tolerated ONLY where upstream publishes nothing for this
-// platform and architecture. Where a build does exist, a missing binary is a
-// failure: the first version of this check treated every absence as a skip, so
-// a macOS run in which BOTH downloads were refused with a rate-limit 403
-// reported "0 verified, 0 broken" and passed. A test that passes when the thing
-// under test did nothing is not a test.
+// Runs each installed provider binary, since a copied executable can still lack its shared libs.
+// A missing binary fails unless upstream publishes no build for this platform and arch.
 
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -59,9 +47,8 @@ for (const t of targets) {
     failures += 1;
     continue;
   }
-  // A usage or version banner is success even when the exit status is non-zero:
-  // several of these print help and exit 1. A dynamic-linker failure produces
-  // neither, which is the case worth catching.
+  // Some print help and exit 1, so a usage or version banner counts as success.
+  // A dynamic-linker failure prints neither.
   const looksAlive = result.status === 0 || /usage|version|llama|kobold/i.test(output);
   if (!looksAlive) {
     console.error(`FAIL ${t.name}: exited ${result.status} with no recognisable output: ${output || '(nothing)'}`);

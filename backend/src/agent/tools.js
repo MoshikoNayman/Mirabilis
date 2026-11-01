@@ -1,17 +1,6 @@
 // @ts-check
-// backend/src/agent/tools.js
-// The agent's tool surface, behind a policy gate.
-//
-// Two rules shape this file.
-//
-// First, least privilege by default. A run gets read-only tools unless the user
-// explicitly grants more, because the whole point of the long tiers is that
-// nobody is watching. "It only writes files when it needs to" is not a property
-// you can verify after the fact, so the grant is made up front and enforced here.
-//
-// Second, results are for a context window, not a terminal. Every tool truncates
-// and says so. An agent that burns its budget reading a 2 MB log has spent the
-// user's hour on nothing.
+// Agent tools behind a policy gate: read-only unless the user grants more up front.
+// Every tool truncates its result to fit the context window, and says so.
 
 import { readFile, writeFile, readdir, stat, mkdir } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
@@ -124,10 +113,8 @@ export function createToolRegistry({
       async execute({ pattern, path: searchPath, glob, caseSensitive }) {
         if (!pattern) throw new Error('pattern is required');
         const root = rp(searchPath || '.');
-        // Case-INSENSITIVE by default. Observed with a real model: it searched
-        // for "error", the log said "ERROR", grep found nothing, and the agent
-        // confidently reported that the application had no errors. A search
-        // tool that silently returns the wrong answer is worse than none.
+        // Case-insensitive by default: models search "error" in logs that say "ERROR"
+        // and treat no match as no errors.
         const args = ['-rn', '--binary-files=without-match'];
         for (const dir of SEARCH_EXCLUDE_DIRS) args.push(`--exclude-dir=${dir}`);
         if (glob) args.push(`--include=${String(glob)}`);
@@ -208,8 +195,7 @@ export function createToolRegistry({
     }
   };
 
-  // Run-scoped tools are merged before the policy filter, so they are gated by
-  // the same rules as everything else rather than sneaking in above them.
+  // Merge run-scoped tools before the policy filter so the same gate applies.
   for (const [name, tool] of Object.entries(extraTools || {})) {
     if (tool && typeof tool.execute === 'function') all[name] = tool;
   }
@@ -240,13 +226,11 @@ export function createToolRegistry({
     isMutating: (name) => Boolean(granted[name]?.mutating),
 
     /**
-     * Run one tool. Never throws for an ordinary tool failure: the loop needs
-     * the error text as an observation so it can adapt, not an exception that
-     * ends the run. A refused tool is reported the same way, with the reason.
+     * Run one tool. Failures and refusals come back as results with the reason,
+     * so the loop can adapt instead of ending the run.
      */
     async dispatch(name, args = {}) {
-      // Refuse work once the run is cancelled. Without this, a stop pressed
-      // during a decide step still let the next tool call start.
+      // A stop pressed during a decide step must not let the next tool call start.
       if (signal?.aborted) return { ok: false, error: 'Run cancelled.' };
       const tool = granted[name];
       if (!tool) {

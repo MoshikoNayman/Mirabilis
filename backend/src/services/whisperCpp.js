@@ -1,15 +1,6 @@
 // @ts-check
-// backend/src/services/whisperCpp.js
-// Local, on-device speech-to-text via whisper.cpp.
-//
-// This lives in its own module because BOTH products need it and only one had
-// it. The chat dictation path tried whisper.cpp before falling back to the
-// Python `whisper` CLI or the OpenAI API, while IntelLedger media ingest went
-// straight from "no OpenAI key" to the Python CLI, with no whisper.cpp tier at
-// all. On a machine where whisper.cpp is the only installed engine, IntelLedger
-// therefore failed (or reached for a cloud API) while the app reported local STT
-// as ready. That contradicts the local-first promise, so the tier belongs in one
-// place that every caller uses.
+// On-device speech-to-text via whisper.cpp, shared by chat dictation and
+// IntelLedger media ingest.
 
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';

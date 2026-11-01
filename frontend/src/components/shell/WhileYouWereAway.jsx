@@ -1,8 +1,5 @@
-// frontend/src/components/shell/WhileYouWereAway.jsx
-// The ICQ "offline messages" greeting, reimagined for IntelLedger. On app open
-// it surfaces what needs attention - overdue commitments and items due today -
-// each with quick actions (Resolve / Snooze / Jump). Styled to match BuddyList:
-// an Apple-vibrancy sheet anchored top-right under the dock.
+// On app open, lists overdue and due-today ledger items with Resolve, Snooze and
+// Jump actions, in a BuddyList-style sheet under the dock.
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -142,8 +139,7 @@ export default function WhileYouWereAway({ open }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Auto-open gate: fetch the brief once on mount. If anything is overdue or due
-  // today, open the sheet - but at most once per browser session.
+  // Auto-open when anything is overdue or due today, once per browser session.
   useEffect(() => {
     if (alreadyShown()) return;
     const userId = readUserId();
@@ -158,13 +154,12 @@ export default function WhileYouWereAway({ open }) {
         markShown();
         if (pending > 0) appStore.openWywa();
       } catch {
-        // If the ledger is unreachable we simply do not greet - no popup on launch.
+        // Ledger unreachable: skip the greeting.
       }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  // (Re)load the full item list whenever the sheet opens.
   useEffect(() => {
     if (!open) return undefined;
     const userId = readUserId();

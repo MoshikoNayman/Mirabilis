@@ -32,11 +32,7 @@ test('the vault round-trips and preserves chunk content', async () => {
 });
 
 test('vectors are written rounded, and the file is not pretty-printed', async () => {
-  // Vectors dominate this file: at the 20,000-chunk ceiling the pretty-printed,
-  // full-precision form measured ~25 KB per chunk, projecting past 500 MB held
-  // in memory and re-serialized on every write. Compact JSON plus 6-decimal
-  // rounding cuts that by about 3x, with a measured worst-case cosine error of
-  // 1.8e-09 which cannot affect ranking.
+  // Compact JSON plus 6-decimal rounding keeps a 20,000-chunk vault about 3x smaller.
   const p = await tmpVault();
   await writeVault(p, { root: '/etc', builtAt: null, embedModel: null, fileCount: 1, chunks: [chunk('a')] });
   const raw = await fs.readFile(p, 'utf8');
@@ -86,9 +82,7 @@ test('clearVault empties the index and shreds the backup', async () => {
 });
 
 test('clearVault does not hand back a shared mutable empty array', async () => {
-  // Same class of bug as the chat store: spreading a module-level template
-  // aliases its arrays, so a later push pollutes the shared "empty" value and
-  // subsequent clears silently retain data.
+  // Spreading a module-level template would alias its arrays across clears.
   const p1 = await tmpVault();
   const p2 = await tmpVault();
 

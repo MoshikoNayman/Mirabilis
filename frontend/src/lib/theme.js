@@ -1,11 +1,5 @@
-// frontend/src/lib/theme.js
-// Shared theme module. Uses the EXACT localStorage keys + DOM mutations that
-// ChatApp.jsx already uses, so the shell and the chat view stay in sync
-// (ChatApp hydrates these keys on mount; we apply live on change).
-//
-//   mode   -> 'local-ai-theme-mode'   : 'light' | 'dark' | 'auto'
-//   scheme -> 'mirabilis-color-scheme': 'mirabilis' | 'arctic' | 'ember' | 'summit'
-//   font   -> 'mirabilis-font'        : 'jakarta' | 'system' | 'tahoma'
+// Theme state using the same storage keys and DOM attributes as ChatApp.jsx, so
+// the shell and chat view stay in sync.
 
 import { safeStorageGet, safeStorageSet } from './storage';
 
@@ -57,8 +51,7 @@ export function isDarkActive() {
   return mode === 'dark' || (mode === 'auto' && prefersDark());
 }
 
-// Apply current stored values to <html>. Idempotent - safe to call anytime.
-// Mirrors ChatApp: scheme 'mirabilis' and font 'jakarta' clear the attribute.
+// Idempotent. Mirrors ChatApp: scheme 'mirabilis' and font 'jakarta' clear the attribute.
 export function applyTheme() {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;

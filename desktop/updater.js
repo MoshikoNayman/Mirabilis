@@ -1,19 +1,6 @@
 'use strict';
-// desktop/updater.js
-// The Electron half of updates. All of the judgement lives in updatePolicy.js;
-// this file is the wiring, kept thin so the parts worth testing are testable.
-//
-// Shape of the feature, and why:
-//
-//   Nothing is downloaded without being asked. autoDownload is off. A local
-//   first app that silently pulls a binary in the background is not one.
-//
-//   Nothing is checked while Go Dark is on, or before we know whether it is.
-//   See updatePolicy.js. The renderer reports the state over IPC.
-//
-//   On an unsigned macOS build we do not offer to install. Squirrel.Mac will
-//   not swap an unsigned bundle, so the download would fail at the last step.
-//   We open the releases page instead and say why.
+// Electron wiring for updates; the decisions live in updatePolicy.js. Nothing downloads
+// unasked, nothing is checked under Go Dark, and unsigned macOS builds get the releases page.
 
 const { app, dialog, shell, ipcMain } = require('electron');
 const fs = require('node:fs');
@@ -23,13 +10,12 @@ const { shouldCheck, installMode, shouldNotify } = require('./updatePolicy.js');
 
 const RELEASES_URL = 'https://github.com/MoshikoNayman/Mirabilis/releases/latest';
 
-// Set at build time once the app is signed and notarized. Until then macOS
-// updates are notify-only, which is the truth rather than a broken button.
+// Set at build time for signed, notarized builds. Squirrel.Mac cannot swap an
+// unsigned bundle, so without it macOS updates are notify-only.
 const SIGNED_BUILD = process.env.MIRABILIS_SIGNED === '1';
 
 const SETTINGS_FILE = () => path.join(app.getPath('userData'), 'update-settings.json');
 
-/** Same 0600 standard as every other file the app writes. */
 function readSettings() {
   try {
     const raw = fs.readFileSync(SETTINGS_FILE(), 'utf8');
@@ -53,8 +39,7 @@ function writeSettings(next) {
     fs.renameSync(tmp, file);
     fs.chmodSync(file, 0o600);
   } catch {
-    // A settings write failing must never break the app. The cost is one
-    // extra check next launch.
+    // Never fatal; the cost is one extra check next launch.
   }
 }
 
@@ -66,10 +51,7 @@ function log(...args) {
   console.log('[updater]', ...args);
 }
 
-/**
- * electron-updater is loaded lazily. It is only needed in a packaged build, and
- * requiring it in dev pulls in a module that expects app-update.yml to exist.
- */
+// Loaded lazily: in dev, electron-updater expects an app-update.yml that does not exist.
 function loadAutoUpdater() {
   const { autoUpdater } = require('electron-updater');
   autoUpdater.autoDownload = false;
@@ -84,8 +66,7 @@ async function openReleasesPage() {
 
 /**
  * @param {object} [opts]
- * @param {boolean} [opts.userInitiated] a manual check reports "you are up to
- *   date" and ignores the rate limit; a launch check stays silent.
+ * @param {boolean} [opts.userInitiated] manual checks always report and skip the rate limit
  */
 async function check({ userInitiated = false } = {}) {
   if (checking) return;
@@ -101,7 +82,7 @@ async function check({ userInitiated = false } = {}) {
   if (!decision.check) {
     log('skipping check:', decision.reason);
     if (userInitiated) {
-      // A manual check must always say something. Silence reads as a bug.
+      // A manual check always gets a visible answer.
       dialog.showMessageBox({
         type: 'info',
         title: 'Check for Updates',
@@ -226,13 +207,7 @@ async function offer({ autoUpdater, available, current, settings }) {
   }
 }
 
-/**
- * Wire up IPC and schedule the launch check.
- *
- * The launch check is deliberately late and event driven rather than on a
- * timer: it runs when the renderer reports Go Dark is off, which is the first
- * moment it is allowed to run at all.
- */
+// The launch check runs once the renderer first reports Go Dark is off.
 function initUpdater() {
   if (started) return;
   started = true;
@@ -241,8 +216,6 @@ function initUpdater() {
     const next = value === true;
     const first = localOnly === null;
     localOnly = next;
-    // First honest "not locked down" we have seen: this is the earliest moment
-    // a check is permitted, so take it rather than waiting for a timer.
     if (first && next === false) setTimeout(() => { check({ userInitiated: false }); }, 5000).unref?.();
     return true;
   });
@@ -250,7 +223,6 @@ function initUpdater() {
   ipcMain.handle('mirabilis:check-for-updates', () => { check({ userInitiated: true }); return true; });
 }
 
-/** Menu and tray entry. */
 function updateMenuItem() {
   return { label: 'Check for Updates...', click: () => check({ userInitiated: true }) };
 }

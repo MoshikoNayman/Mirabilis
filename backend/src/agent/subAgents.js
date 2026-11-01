@@ -1,21 +1,6 @@
 // @ts-check
-// backend/src/agent/subAgents.js
-// Parallel sub-agents, as a tool the parent can call.
-//
-// Fan-out is worth it when a goal splits into parts that do not need to see each
-// other's work: audit four subsystems, research five options, check a change
-// against three lenses. Each sub-agent gets its own clean context, which is the
-// real win. A single agent doing all four sequentially drags the first
-// subsystem's noise through the other three.
-//
-// Two rules keep this from becoming a budget bomb:
-//
-// 1. Sub-agents SHARE the parent's budget. They receive a slice of what actually
-//    remains, and everything they spend is charged back to the parent. A run
-//    cannot buy itself more time by delegating.
-// 2. Depth is capped at one. Sub-agents get no spawn tool of their own, so there
-//    is no tree, only a single fan-out. Recursive delegation is where these
-//    systems quietly turn one hour into sixteen.
+// spawn_agents tool: parallel sub-agents with fresh contexts that share the
+// parent's budget. Depth is capped at one; sub-agents get no spawn tool.
 
 import { runAgent } from './agentLoop.js';
 
@@ -23,14 +8,9 @@ import { runAgent } from './agentLoop.js';
 const MIN_SUB_ITERATIONS = 3;
 const MIN_SUB_TOOL_CALLS = 5;
 
-// How many sub-agents may be mid-generation at once.
-//
-// Deliberately small. Sub-agents share ONE local engine, so firing six at it
-// does not make them six times faster: Ollama serialises requests per model, so
-// they queue anyway, while the machine holds six live contexts and six open
-// sockets. On a 16 GB laptop running a 12B model that is how you turn a working
-// session into swap. Raise MIRABILIS_AGENT_FANOUT_CONCURRENCY only when the
-// engine is genuinely able to serve requests in parallel (a real vLLM box).
+// Sub-agents share one local engine and Ollama serialises per model, so more in
+// flight only adds memory pressure. Raise MIRABILIS_AGENT_FANOUT_CONCURRENCY only
+// for an engine that serves requests in parallel, such as vLLM.
 const DEFAULT_FANOUT_CONCURRENCY = 2;
 
 function fanoutConcurrency() {
@@ -100,8 +80,7 @@ export function createSpawnTool({ budget, profile, makeRegistry, callModel, onEv
       const running = list.slice(0, granted);
       const deferred = list.slice(granted);
 
-      // Slice what is ACTUALLY left, not what the tier started with. Reserve a
-      // share for the parent, which still has to synthesise the results.
+      // Split what remains, keeping 30% for the parent to synthesise the results.
       const remaining = budget.remaining();
       const share = (total) => Math.max(1, Math.floor((total * 0.7) / running.length));
       /** @type {import('./effortProfiles.js').EffortProfile} */
@@ -141,8 +120,7 @@ export function createSpawnTool({ budget, profile, makeRegistry, callModel, onEv
         }
       }), fanoutConcurrency());
 
-      // Charge the parent for everything the children spent, so delegation is
-      // never a way to escape the ceiling.
+      // Charge child spend to the parent so delegation cannot escape the ceiling.
       let spentTokens = 0;
       let spentToolCalls = 0;
       for (const s of settled) {

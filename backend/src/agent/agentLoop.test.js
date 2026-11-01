@@ -9,7 +9,7 @@ import { resolveEffort } from './effortProfiles.js';
 import { createToolRegistry } from './tools.js';
 import { STOP_REASONS } from './budget.js';
 
-/** A scripted model: each entry is the next reply. Records what it was asked. */
+/** A scripted model: each entry is the next reply. Records what it is asked. */
 function scriptedModel(replies) {
   const calls = [];
   let i = 0;
@@ -80,7 +80,7 @@ test('the tool actually ran: its real output reaches the transcript', async () =
     'the observation must be the real file contents, not a model hallucination');
 });
 
-// budget enforcement is the whole feature
+// budget enforcement
 
 test('the iteration ceiling stops a model that never finishes', async () => {
   const dir = await sandbox();
@@ -142,7 +142,7 @@ test('an abort stops the run promptly', async () => {
   assert.ok(out.budget.iterations < 10);
 });
 
-// running out of budget must still produce useful work
+// salvage on an exhausted budget
 
 test('an exhausted budget still returns a salvaged answer, not an empty failure', async () => {
   const dir = await sandbox();
@@ -199,9 +199,7 @@ test('a failed validation triggers a repair that reaches the model', async () =>
 
 test('repairs are capped, and the answer says so instead of looping', async () => {
   const dir = await sandbox();
-  // Keyed on purpose rather than call order: the agent always proposes a
-  // finish, and the validator always rejects it, so the only thing that can
-  // stop this run is the repair cap.
+  // Keyed on purpose: the validator rejects every finish, so only the repair cap ends the run.
   const model = {
     fn: async ({ purpose }) => {
       if (purpose === 'validate') return { text: '{"pass": false, "reason": "not good enough"}', tokens: 5 };

@@ -1,20 +1,6 @@
 // @ts-check
-// backend/src/providerKeys.js
-// Provider API keys, held by the backend and never handed to the renderer.
-//
-// They used to live in browser local storage and travel on every request. That
-// exposes them to any script that runs in the page: an XSS, a browser
-// extension, a devtools paste. It also means the key sits in the browser
-// profile directory in plain text, which is a file a great many things can read.
-//
-// Moving them here removes the whole renderer surface. The UI can SET a key and
-// see a masked hint of it, and that is all: the value never travels back. The
-// file is written 0600, the same discipline already used for the MCP token.
-//
-// Be honest about the limit. This is not protection against someone who is
-// already running as you on this machine; on a single-user desktop, a process
-// with your uid can read the OS keychain too. What it removes is the much wider
-// set of things that can read a browser profile or run script in the page.
+// Provider API keys, stored 0600 by the backend. The UI can set a key and see a masked hint, never the value.
+// Keeps keys out of page script and the browser profile; it does not defend against code running as this user.
 
 import { readFile, writeFile, rename, mkdir, chmod, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -44,8 +30,7 @@ export function createProviderKeyStore(file) {
     await mkdir(dirname(file), { recursive: true });
     await writeFile(tmp, JSON.stringify({ keys }), { encoding: 'utf8', mode: 0o600 });
     await rename(tmp, file);
-    // rename preserves the temp file's mode, but be explicit: this file must
-    // never be group or world readable.
+    // Must never be group or world readable; chmod explicitly rather than trust rename.
     await chmod(file, 0o600).catch(() => {});
   }
 

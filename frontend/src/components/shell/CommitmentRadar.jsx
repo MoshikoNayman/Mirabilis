@@ -1,9 +1,5 @@
-// frontend/src/components/shell/CommitmentRadar.jsx
-// Commitment Radar: an ambient, read-only pass over the CURRENT conversation.
-// It surfaces commitments, asks, and decisions that were made in the chat so
-// they can be filed into IntelLedger with one click - nothing is persisted
-// until the user chooses to file. The scan itself runs on the backend via the
-// read-only /api/intelledger/scan endpoint and writes nothing.
+// Read-only scan of the current chat for commitments, asks and decisions to file
+// into IntelLedger. Nothing persists until the user files.
 'use client';
 
 import { Modal, Badge, Button, Spinner, RadarIcon, ContradictionIcon } from '../ui/primitives';
@@ -37,9 +33,7 @@ export default function CommitmentRadar({
   const hasSignals = Array.isArray(signals) && signals.length > 0;
   const hasConflicts = Array.isArray(conflicts) && conflicts.length > 0;
 
-  // Jump to the past chat or ledger session behind a flagged conflict, then close.
-  // Both events are handled upstream (open-chat by the chat view, open-session
-  // switches to the Ledger tab), so no extra tab wiring is needed here.
+  // Both events are handled upstream, including the switch to the Ledger tab.
   function jumpToPast(past) {
     try {
       if (past?.source === 'chat' && past.chatId) {

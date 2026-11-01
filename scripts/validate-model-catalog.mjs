@@ -1,9 +1,5 @@
-// Structural checks on backend/models.json.
-//
-// This file is fetched at runtime by every install, so a malformed edit stops
-// updates for everyone. The loader is defensive and falls back to the bundled
-// copy, which means a broken file fails SILENTLY: exactly the kind of error
-// that survives for months. Catch it here instead.
+// Structural checks on backend/models.json. Every install fetches it, and the
+// loader falls back to the bundled copy without reporting a broken file.
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -12,8 +8,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CATALOG = path.join(ROOT, 'backend', 'models.json');
 
-// Must match modelCatalog.js and the pull route. An id that fails this is
-// dropped at runtime, so the entry would simply never appear.
+// Must match modelCatalog.js and the pull route, which drop ids that fail it.
 const SAFE_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]{0,99}$/i;
 
 const problems = [];

@@ -41,8 +41,7 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
   const conversation = messages
     .filter((message) => message.role === 'user' || message.role === 'assistant')
     .map((message) => {
-      // Vision: when a turn carries images, send Anthropic content blocks
-      // (base64 image parts + a text part) instead of a bare string.
+      // Turns with images become content blocks (base64 images + text).
       const imgs = Array.isArray(message.images) ? message.images : [];
       if (imgs.length) {
         return {
@@ -55,8 +54,7 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
       }
       return { role: message.role, content: String(message.content || '') };
     });
-  // Anthropic rejects a conversation that does not start with a user turn; the
-  // sliding history window can leave a leading assistant turn, so drop them.
+  // Anthropic requires a leading user turn; the history window can start on an assistant turn.
   while (conversation.length && conversation[0].role !== 'user') conversation.shift();
 
   // Anthropic only accepts temperature in [0, 1]; the UI slider goes to 2.
@@ -65,14 +63,9 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
   const payload = {
     model,
     messages: conversation,
-    // Anthropic requires max_tokens. Default high so replies are not silently
-    // truncated (Ollama/OpenAI-compatible send no cap); the user override still wins.
+    // Required by Anthropic. High default to match the uncapped providers.
     max_tokens: maxTokens != null ? maxTokens : 8192,
-    // Stream properly. With stream:false the whole reply arrived as one blob and
-    // was handed to onToken in a single call, so the UI showed nothing at all
-    // until the model was completely finished. It also made the performance
-    // receipt meaningless: time-to-first-token was recorded at the moment the
-    // LAST token arrived, so generation time always computed as roughly zero.
+    // Streaming keeps the UI live and time-to-first-token accurate.
     stream: true,
     ...(system ? { system } : {}),
     ...(clampedTemp != null ? { temperature: clampedTemp } : {})
@@ -128,8 +121,7 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
           continue; // partial frame; the next chunk completes it
         }
 
-        // Anthropic reports mid-stream failures as an `error` event on an
-        // already-200 response, the same trap the other adapters had.
+        // Mid-stream failures arrive as an `error` event on a 200 response.
         if (frame.type === 'error') {
           const detail = frame.error?.message || 'stream error';
           throw new Error(`${providerLabel} API error: ${detail}`);
@@ -137,7 +129,7 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
         if (frame.type === 'content_block_delta' && typeof frame.delta?.text === 'string') {
           if (frame.delta.text) { onToken(frame.delta.text); emitted = true; }
         }
-        // Exact counts, so the receipt stops guessing from character length.
+        // Exact token counts for the receipt.
         if (frame.type === 'message_start' && frame.message?.usage) {
           usage.inputTokens = frame.message.usage.input_tokens ?? null;
         }
@@ -152,8 +144,7 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
     }
     if (!emitted) throw new Error(`${providerLabel} returned no text content.`);
   } catch (error) {
-    // Propagate real failures (aborts are user-initiated) so the stream handler
-    // sends an `error` event and rolls back instead of saving the error as reply.
+    // Aborts are user-initiated; everything else propagates so the route rolls back.
     if (error.name === 'AbortError') return;
     throw error;
   }

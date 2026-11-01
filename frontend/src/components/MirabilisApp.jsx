@@ -1,4 +1,3 @@
-// frontend/src/components/MirabilisApp.jsx
 // Main app wrapper: tabs between Chat and IntelLedger
 
 'use client';
@@ -194,17 +193,11 @@ export default function MirabilisApp() {
     safeStorageSet(LAST_ACTIVE_TAB_STORAGE_KEY, value);
   };
 
-  // OmniSearch dispatches this when a ledger result is clicked. Switch to the
-  // Tell the desktop shell whether Go Dark is on, once, on load.
-  //
-  // The Electron main process is what would contact the update server, and it
-  // refuses to do so until it has been told the lockdown is off. Without this
-  // first report it never learns, so updates would silently never be checked
-  // for a user who has never touched the Go Dark switch.
+  // Electron main checks for updates only once told Go Dark is off, so report on load.
   useEffect(() => { publishGoDark(); }, []);
 
-  // ledger tab and hand the id to IntelLedgerApp to open (it only mounts on the
-  // intel tab, so the tab switch has to happen here first).
+  // OmniSearch opens a ledger session: switch tabs here first, since
+  // IntelLedgerApp only mounts on the intel tab.
   useEffect(() => {
     const onOpenSession = (e) => {
       const id = e?.detail?.id;
@@ -236,11 +229,8 @@ export default function MirabilisApp() {
 
       {/* Content area */}
       <div className={`h-full w-full overflow-hidden ${activeTab === 'intel' ? 'pb-7 sm:pb-8' : ''}`}>
-        {/* ChatApp stays MOUNTED when the Ledger tab is active, hidden rather
-            than unmounted. It owns the autonomous run: unmounting it tore down
-            the SSE reader and the AbortController, so a 5-hour run at the full
-            tool policy kept executing shell commands on the backend with no
-            panel, no stop button, and the one-run-at-a-time guard reset. */}
+        {/* Keep ChatApp mounted (hidden) on the Ledger tab: it owns the run's SSE
+            reader and AbortController, and unmounting leaves the run with no stop. */}
         <div
           className="h-full w-full"
           style={activeTab === 'chat' ? undefined : { display: 'none' }}
@@ -1428,9 +1418,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                   return (
                 <div
                   key={session.id}
-                  // Stable hook for the e2e spec. Selecting this card by its CSS
-                  // classes broke silently when `rounded-2xl` became a token, and
-                  // nothing caught it because the spec never ran in CI.
+                  // Stable e2e hook; CSS class names change with design tokens.
                   data-testid="session-card"
                   className={`group rounded-[var(--r-lg)] border text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_30px_-18px_rgba(15,23,42,0.35)] ${
                     isSelected

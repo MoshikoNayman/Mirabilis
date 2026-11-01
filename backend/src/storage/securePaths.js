@@ -1,19 +1,6 @@
 // @ts-check
-// backend/src/storage/securePaths.js
-// Every file this app writes holds something private.
-//
-// The stores were created with the process umask, which is normally 022, so they
-// landed 0644: world readable. That put the entire chat history, the IntelLedger,
-// the indexed config vault (which exists to hold the contents of config files,
-// and config files are where credentials live) and the agent audit logs in reach
-// of any other account on the machine. Only the two token files were protected,
-// because those were the only ones written with an explicit mode.
-//
-// What this does NOT claim: it is not encryption, and it does not defend against
-// something already running as this user. It closes the other-local-user and
-// stray-copy cases, which are the ones a file mode can actually close. For
-// protection against offline access to the disk, use whole-disk encryption
-// (FileVault, BitLocker, LUKS), which is the right tool and already exists.
+// Owner-only modes for everything the app writes. Guards against other local
+// accounts, not against this user or offline disk access (use disk encryption).
 
 import { chmod, mkdir, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -44,10 +31,7 @@ export async function ensureSecureDir(path) {
 }
 
 /**
- * Bring an existing data directory up to the current standard.
- *
- * Without this the fix only applies to files written from now on, and every
- * machine already running keeps its world-readable history forever.
+ * Tighten existing files and directories under `dir` to owner-only modes.
  *
  * @param {string} dir
  * @param {number} [depth] how far to recurse (agent-runs lives one level down)

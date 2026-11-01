@@ -29,7 +29,7 @@ test('a run records what it was permitted to do and everything it did', async ()
   assert.equal(header.fsRoot, '/work');
   assert.equal(header.model, 'gemma3:12b');
 
-  // The single most important field: the command that actually ran.
+  // The command that ran must be on the record.
   assert.match(entries[1].args, /rm -rf \.\/build/);
   assert.equal(entries[1].mutating, true);
   assert.equal(entries[3].stopReason, 'completed');
@@ -84,12 +84,7 @@ test('a long command is truncated but its beginning is preserved', async () => {
 });
 
 test('auditing never throws, even when the directory cannot be written', async () => {
-  // A read-only volume or a full disk must not be able to fail a run.
-  //
-  // The unwritable path is a directory whose PARENT is a file, which gives
-  // ENOTDIR instantly on every platform. An earlier version used /proc, which
-  // does not exist on macOS (instant ENOENT) but is a real mounted filesystem
-  // on Linux: the test passed locally and hung the whole suite in CI.
+  // Parent is a file, so ENOTDIR on every OS; do not use /proc (hangs on Linux).
   const base = await tmp();
   const asFile = path.join(base, 'not-a-directory');
   await fs.writeFile(asFile, 'x', 'utf8');

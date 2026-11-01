@@ -1,24 +1,6 @@
 // @ts-check
-// backend/src/storage/dataAccess.js
-// Turning filesystem permission failures into something a person can act on.
-//
-// A user hit this: every attempt to start a chat failed with
-//
-//   EACCES: permission denied, open '/Users/lnayman/mirabilis-data/chats.json'
-//
-// The cause was that the app had once been launched with sudo, so chats.json
-// was owned by root. Nothing in the app said so. The message named the errno
-// and the path and left the user to work out that a file in their own home
-// directory belonged to another account, and what to do about it.
-//
-// Two things are needed, and this module provides both: a boot-time check that
-// reports the problem before the first failed click, and a translation of the
-// raw errno into the command that actually fixes it.
-//
-// Note the interaction with the 0600 hardening: when these files were 0644, a
-// root-owned file could still be READ by the user, so the failure was partial
-// and confusing. At 0600 it is a clean, total failure. That is the correct
-// trade for privacy, but it makes a clear message mandatory rather than nice.
+// Reports data files the app cannot write (usually root-owned after a sudo
+// launch), with the command that fixes them.
 
 import { stat, access, mkdir } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -45,15 +27,14 @@ function describeOwner(uid) {
 }
 
 /**
- * The command that actually fixes an ownership problem.
+ * The command that fixes an ownership problem.
  * @param {string} filePath
  */
 function chownFix(filePath) {
   if (process.platform === 'win32') {
     return `takeown /F "${filePath}"`;
   }
-  // $(id -un) rather than a literal name: the message is copied and pasted, and
-  // it should stay correct for whoever runs it.
+  // $(id -un), not a literal name, so the pasted command is right for whoever runs it.
   return `sudo chown "$(id -un):$(id -gn)" "${filePath}"`;
 }
 
@@ -90,10 +71,7 @@ export function describeStorageError(error, filePath) {
 }
 
 /**
- * Is anything in the data directory going to fail the first time it is used?
- *
- * Checked at boot so the problem is reported before the user's first click,
- * rather than as a failed action with an errno in it.
+ * Boot-time check for data files that would fail on first use.
  *
  * @param {string} dir
  * @returns {Promise<{ ok: boolean, problems: Array<{ file: string, reason: string, fix: string, critical: boolean }> }>}

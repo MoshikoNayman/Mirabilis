@@ -1,11 +1,6 @@
 // @ts-check
-// backend/src/agent/routes.js
-// HTTP surface for autonomous runs.
-//
-// Deliberately separate from the chat stream route. A chat turn is a request and
-// a reply; an agent run is a job with a lifetime, a budget, a live event feed and
-// a stop button, and pretending it is a chat message would mean either blocking
-// the chat route for five hours or losing the run when the socket blinks.
+// HTTP routes for agent runs. Separate from chat because a run is a long-lived
+// job with a budget and a stop control that must survive a dropped socket.
 
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
@@ -31,13 +26,8 @@ const runs = new Map();
 const FINISHED_TTL_MS = 10 * 60_000;
 
 /**
- * How many runs may be executing at once.
- *
- * The UI allows one, but that is a convenience, not a control: this endpoint
- * takes a token, and anything holding it could start runs in a loop. Each one
- * carries its own budget and, at the full policy, its own shell, so an
- * unbounded count is a resource-exhaustion hole with a local-code-execution
- * flavour. Two, so a second run is possible deliberately but a loop is not.
+ * Concurrent run cap, enforced here because any token holder can start runs and
+ * each may carry its own shell. Two allows a deliberate second run but stops a loop.
  */
 const MAX_CONCURRENT_RUNS = Math.max(
   1,
@@ -67,12 +57,11 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
   const router = Router();
   // One append-only log per run, beside the other stores.
   const auditDir = join(dirname(config.chatStorePath || '.'), 'agent-runs');
-  // Housekeeping at startup so the record never becomes the thing that fills the disk.
+  // Prune at startup so audit logs cannot fill the disk.
   pruneRunAudits(auditDir).catch(() => {});
 
-  // Durable run index. Reconciles on boot: anything the index still calls live
-  // cannot be, since this process just started, so it is marked interrupted
-  // rather than left as a run that appears to be going but never finishes.
+  // Durable run index. On boot, runs still marked live are marked interrupted,
+  // since this process cannot be running them.
   const runStore = createRunStore(auditDir);
   const storeReady = runStore.init()
     .then(({ interrupted }) => {
@@ -83,8 +72,7 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
     .catch(() => {});
   if (guard) router.use(guard);
 
-  // What the UI needs to render the effort picker, straight from the source of
-  // truth so the two can never disagree about what "1 hour" means.
+  // Effort picker data, served from the profiles so UI and server agree.
   router.get('/effort-profiles', (_req, res) => {
     res.json({
       order: EFFORT_ORDER,
@@ -123,8 +111,7 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
     });
   });
 
-  // The record of what a run did, after the fact. This is the whole point of
-  // the audit log: the live feed is gone once the tab closes.
+  // Audit log of a past run; the live feed is gone once the tab closes.
   router.get('/runs/:id/audit', async (req, res) => {
     try {
       res.json({ id: req.params.id, entries: await readRunAudit(auditDir, req.params.id) });
@@ -136,8 +123,8 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
   router.post('/runs/:id/stop', (req, res) => {
     const run = runs.get(req.params.id);
     if (!run) { res.status(404).json({ error: 'No such run.' }); return; }
-    // Only a live run can be stopped. Flipping a finished run to "stopping"
-    // left it permanently mislabelled in the run list.
+    // Only a live run may move to "stopping", or a finished run is mislabelled
+    // in the run list.
     const live = run.status === 'running';
     if (live) {
       run.abort.abort();
@@ -147,9 +134,7 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
     res.json({ ok: true, id: run.id, status: run.status, alreadyFinished: !live });
   });
 
-  // Start a run and stream its progress. The response is SSE for the same reason
-  // the chat route is: the interesting part is what happens over the next hour,
-  // not the final byte.
+  // Start a run and stream its progress over SSE.
   router.post('/runs', async (req, res) => {
     const {
       goal, effort = 'high', provider, model, providerBaseUrl, providerApiKey,
@@ -172,10 +157,8 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
       return;
     }
 
-    // The 'full' policy is a real shell running unattended. Requiring an
-    // explicit acknowledgement means it can never be reached by a default, a
-    // remembered setting, or a caller that did not think about it. Checked on
-    // the server so it holds for any client, not just this app's UI.
+    // 'full' is an unattended shell, so it needs an explicit acknowledgement that
+    // no default or remembered setting can supply. Checked here for every client.
     if (toolPolicy === 'full' && acknowledgeFullPolicy !== true) {
       res.status(400).json({
         error: 'The "full" tool policy lets this run execute shell commands unattended. '
@@ -185,9 +168,8 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
       });
       return;
     }
-    // Write and full runs change files, so they need a folder to work in.
-    // Without one, relative paths resolved against the backend's own directory
-    // and absolute paths could reach anything in the home directory.
+    // Write and full runs need a project folder; without one, relative paths
+    // resolve against the backend directory and absolute paths reach all of home.
     const requestedRoot = typeof fsRoot === 'string' && fsRoot.trim() ? resolveUserPath(fsRoot) : '';
     if ((toolPolicy === 'write' || toolPolicy === 'full') && !requestedRoot && !getFsRoot()) {
       res.status(400).json({
@@ -216,8 +198,7 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
       });
       return;
     }
-    // Go Dark applies to an agent exactly as it applies to a chat turn, and
-    // matters more: a long run makes many calls.
+    // Go Dark applies to agent runs exactly as to chat turns.
     if (localOnly === true || isGoDark()) {
       const scope = classifyProviderScope(provider || config.aiProvider, providerBaseUrl);
       if (scope.offDevice) {
@@ -248,7 +229,7 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
     };
     runs.set(id, record);
 
-    // A disconnect must not silently keep an hour-long job running.
+    // Abort on disconnect so a long job does not outlive its client.
     res.on('close', () => { if (!res.writableEnded) abort.abort(); });
 
     const auditor = createRunAuditor({ dir: auditDir, runId: id });
@@ -260,10 +241,8 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
     send('run-accepted', { id, effort: profile.id, policy: toolPolicy, limits: profile, auditLog: auditor.file });
 
     try {
-      // A caller-supplied fsRoot may only NARROW the operator's jail, never
-      // replace it. Previously a request body could set fsRoot: "/" and quietly
-      // discard MIRABILIS_MCP_FS_ROOT, which is the one setting an operator uses
-      // to contain these runs.
+      // A caller-supplied fsRoot may only narrow the operator's
+      // MIRABILIS_MCP_FS_ROOT jail, never replace it.
       const operatorRoot = getFsRoot();
       let effectiveRoot = requestedRoot || operatorRoot || undefined;
       if (requestedRoot && operatorRoot) {
@@ -280,15 +259,13 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
       const buildRegistry = () => createToolRegistry({
         policy: TOOL_POLICIES.includes(toolPolicy) ? toolPolicy : 'read-only',
         fsRoot: effectiveRoot,
-        // Relative paths and commands start in the project, not the backend.
+        // Relative paths and commands start in the project folder.
         workDir: workDir ? resolveUserPath(workDir) : effectiveRoot,
         signal: abort.signal
       });
       const registry = buildRegistry();
 
-      // Resolve the model the same way the chat route does. The picker's "Auto"
-      // sends no model at all, and passing that straight through made every
-      // agent run die on the first call with "model is required".
+      // Resolve the model as the chat route does; the picker's "Auto" sends none.
       const activeProvider = provider || config.aiProvider;
       const effectiveModel = typeof getEffectiveModel === 'function'
         ? await getEffectiveModel({ provider: activeProvider, model, config })
@@ -336,16 +313,15 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
 
       const outcome = await runAgent({
         goal, profile, registry, callModel, systemPrompt,
-        // Sub-agents need their own registry. Without this factory the loop
-        // never registers spawn_agents, so maxSubAgents was a no-op on every
-        // real run even though the tier advertised it.
+        // Sub-agents need their own registry; without this factory the loop does
+        // not register spawn_agents and maxSubAgents has no effect.
         makeRegistry: buildRegistry,
         signal: abort.signal,
         onEvent: (/** @type {any} */ event) => {
           if (event?.budget) record.budget = event.budget;
           send('progress', event);
-          // Mirror the security-relevant events to disk. Fire and forget: the
-          // auditor swallows its own failures so it can never sink a run.
+          // Mirror security-relevant events to disk. Fire and forget: the
+          // auditor swallows its own failures.
           if (event?.type === 'tool-call') {
             auditor.tool({ iteration: event.iteration, tool: event.tool, args: event.args, mutating: event.mutating });
           } else if (event?.type === 'tool-result') {
@@ -364,11 +340,8 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
         finishedAt: new Date().toISOString()
       });
 
-      // Persist the run into the chat HERE rather than from the client. The
-      // frontend used to POST the goal and the answer to a route that does not
-      // exist, so every run's result lived only in the panel and vanished with
-      // it. Doing it server-side also keeps the two messages atomic and honours
-      // the clear-chats epoch guard.
+      // Persist to the chat server side so goal and answer are saved together
+      // and the clear-chats epoch guard applies.
       let persistedTo = null;
       if (chatId && chats?.getChat) {
         try {

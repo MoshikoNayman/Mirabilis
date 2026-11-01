@@ -23,7 +23,6 @@ const APPLE_BANDWIDTH_MAP = [
 
 // More specific entries before less specific (e.g. 'm1 pro' before 'm1')
 const APPLE_MEMORY_TYPE_MAP = [
-  // Pro/Max/Ultra variants must appear before base entries
   ['apple m4 max', 'LPDDR5X'],
   ['apple m4 pro', 'LPDDR5X'],
   ['apple m4', 'LPDDR5'],       // base M4
@@ -244,8 +243,7 @@ function buildProfile({
 }) {
   const coresLabel = `${computeCores || cpuCores || 1}C`;
   const memoryLimit = memorySize || 'Unknown';
-  // Parse the human strings back into numbers so downstream tuning (autoTune.js)
-  // can actually use the hardware instead of just displaying it.
+  // Numeric values for autoTune.js.
   const numFrom = (s, re) => { const m = String(s || '').match(re); return m ? parseFloat(m[1]) : null; };
   const ramGbNum = numFrom(memorySize, /([\d.]+)\s*GB/i);
   const bandwidthNum = numFrom(bandwidth, /([\d.]+)\s*GB\/s/i);
@@ -299,8 +297,7 @@ function buildProfile({
       label: 'Change Engine',
       options: [backend, 'CPU']
     },
-    // Machine-readable hardware facts for inference auto-tuning. Static specs only;
-    // available (free) memory is read fresh at tune time, not from here.
+    // Static specs for auto-tuning; free memory is read at tune time.
     raw: {
       backend: backend || 'CPU',
       vendor: vendor || 'generic',
@@ -521,7 +518,7 @@ async function getWindowsProfile() {
   const rawCpuMHz = Number(cpuInfo.MaxClockSpeed) || 0;
   const cpuClock = rawCpuMHz > 0 ? `${(rawCpuMHz / 1000).toFixed(1)} GHz` : null;
 
-  // CPU caches - wmic reports L2/L3 in KB
+  // CPU caches: wmic reports L2/L3 in KB
   const l2Kb = Number(cpuInfo.L2CacheSize) || 0;
   const l3Kb = Number(cpuInfo.L3CacheSize) || 0;
   const cpuCaches = {

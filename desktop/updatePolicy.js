@@ -1,18 +1,6 @@
 'use strict';
-// desktop/updatePolicy.js
-// When may Mirabilis talk to the update server, and what may it do with the answer?
-//
-// This is deliberately separate from the Electron glue so it can be tested
-// without booting a browser process. Every rule here is a decision that would
-// otherwise be buried in a callback and impossible to assert on.
-//
-// The rule that matters most: Go Dark promises that nothing leaves the machine.
-// That promise is enforced in the renderer and the backend send path, and the
-// Electron main process is outside both. An update check started from main is
-// egress that Go Dark cannot see, so a naive "check on launch" would quietly
-// break the one guarantee the product makes. The check therefore FAILS CLOSED:
-// it does not run until the renderer has told us the lockdown is off. Not
-// knowing is treated exactly like being locked down.
+// Update-check rules, kept out of the Electron glue so they can be tested.
+// Main-process egress bypasses Go Dark, so checks wait until the renderer reports it off.
 
 /** Do not re-check more than once every six hours. */
 const MIN_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -55,8 +43,7 @@ function compareVersions(a, b) {
  * @returns {{ check: boolean, reason: string }}
  */
 function shouldCheck({ isPackaged, localOnly, enabled, now, lastCheckAt = 0, minIntervalMs = MIN_CHECK_INTERVAL_MS }) {
-  // A dev build has no published counterpart, and electron-updater throws
-  // rather than no-oping, so this is a guard and not a nicety.
+  // Dev builds have no published release, and electron-updater throws on them.
   if (!isPackaged) return { check: false, reason: 'development build' };
   if (enabled === false) return { check: false, reason: 'update checks are turned off' };
   // Fail closed. Unknown lockdown state is treated as locked down.
@@ -71,13 +58,8 @@ function shouldCheck({ isPackaged, localOnly, enabled, now, lastCheckAt = 0, min
 }
 
 /**
- * What may we do with an update once we know about it?
- *
- * macOS refuses to install an update over an unsigned app: Squirrel.Mac
- * validates the code signature of the running bundle and fails the swap. Until
- * the app is signed and notarized, the only honest option on macOS is to tell
- * the user and send them to the download page. Pretending otherwise produces a
- * download that fails at the last step, which is worse than not offering it.
+ * How an available update may be applied. Squirrel.Mac rejects an update over
+ * an unsigned bundle, so unsigned macOS builds go to the download page.
  *
  * @param {string} platform  process.platform
  * @param {boolean} signed   whether this build is code signed

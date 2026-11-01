@@ -1,18 +1,12 @@
-// backend/src/autoTune.js
-// Capability-first inference tuning: map detected hardware + the selected model to
-// safe, ambitious Ollama runtime options. The headline is num_ctx - Ollama otherwise
-// defaults to ~2048/4096 regardless of a model's real window, so a 128K model runs
-// blind. We size num_ctx to the model's true window capped by a memory budget, so a
-// capable box uses its whole context instead of a toy slice. Every value here is a
-// DEFAULT that the user's Inference Cockpit overrides.
+// Derives Ollama runtime defaults from hardware and model size, mainly num_ctx.
+// The Inference Cockpit overrides every value here.
 
 const MIN_CTX = 2048;
 const DEFAULT_CTX = 8192;
 const CTX_STEP = 2048;
 
-// Coarse fp16 KV-cache cost per token, derived from param count. A 7B model is
-// ~0.5 MB/token; approximate as params(B) * 0.075 MB with a floor. Deliberately
-// generous so we under-fill memory rather than OOM. Refine later via /api/show arch.
+// Coarse fp16 KV-cache cost per token from param count. Errs high so we
+// under-fill memory rather than OOM.
 function kvBytesPerToken(paramsB) {
   return Math.max(0.05, (paramsB || 7) * 0.075) * 1e6;
 }
@@ -48,14 +42,11 @@ export function deriveInferenceDefaults({ profileRaw = {}, availableGb = null, m
 
   const options = {};
 
-  // num_ctx: spend the leftover budget (after weights) on KV cache, capped at the
-  // model's real window. If weights already eat the budget, fall back to a small ctx.
+  // Ollama's default num_ctx ignores the model's real window. Spend the budget
+  // left after weights on KV cache, capped at that window.
   const kvBudgetBytes = Math.max(0, budgetGb - weightsGb) * 1e9;
-  // Clamp UP to the floor, never out to DEFAULT_CTX. When the weights consume
-  // the whole budget the KV allowance rounds down to 0 tokens, and the previous
-  // `ctx || DEFAULT_CTX` fallback read that 0 as "unknown" and granted 8192.
-  // That handed the largest window out exactly when memory was tightest, so a
-  // model a hair under the budget got 4x the context of one a hair over it.
+  // Zero KV tokens means memory is exhausted. Clamp up to MIN_CTX; falling back to
+  // DEFAULT_CTX would give the largest window when memory is tightest.
   const kvTokens = kvBudgetBytes > 0 ? Math.floor(kvBudgetBytes / kvBytesPerToken(paramsB)) : 0;
   let ctx = Math.max(kvTokens, MIN_CTX);
   ctx = Math.min(ctx, modelContextWindow || DEFAULT_CTX);

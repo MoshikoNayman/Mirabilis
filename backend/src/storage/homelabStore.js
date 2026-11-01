@@ -1,9 +1,5 @@
-// backend/src/storage/homelabStore.js
-// Atomic JSON storage for the Homelab Roster: the user's own machines (routers,
-// NAS, servers, a Raspberry Pi) saved as ICQ-style buddy contacts. Mirrors the
-// chatStore.js style: a single write lock plus temp-file + fsync + rename so a
-// crash mid-write never leaves a truncated file. Passwords are NEVER persisted
-// here - password auth is entered at connect time only.
+// Atomic JSON storage for Homelab Roster hosts. Passwords are never stored;
+// password auth is entered at connect time.
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -16,8 +12,7 @@ const HOST_TYPES = ['router', 'nas', 'server', 'pi', 'other'];
 const AUTH_TYPES = ['agent', 'key', 'password'];
 const HOSTNAME_RE = /^[a-zA-Z0-9._-]+$/;
 
-// Module-level read cache - invalidated on every write so reads within the same
-// request cycle never hit the filesystem more than once.
+// Read cache, invalidated on every write.
 let _cache = null;
 let _cachePath = null;
 
@@ -26,7 +21,7 @@ function invalidateCache() {
   _cachePath = null;
 }
 
-// Serializes all write operations to prevent concurrent read-modify-write data loss.
+// Serializes writes so concurrent read-modify-write cycles cannot lose data.
 let _lock = Promise.resolve();
 function withLock(fn) {
   let release;
@@ -55,8 +50,7 @@ async function readStore(filePath) {
     _cachePath = filePath;
     return _cache;
   } catch (parseError) {
-    // The primary file is corrupt. Try the last-known-good backup before giving
-    // up so a later write does not overwrite the corrupt file and destroy hosts.
+    // Corrupt primary: fall back to .bak so the next write cannot destroy hosts.
     try {
       const backupRaw = await fs.readFile(`${filePath}.bak`, 'utf8');
       _cache = JSON.parse(backupRaw);
@@ -66,7 +60,7 @@ async function readStore(filePath) {
         const healTmp = `${filePath}.heal-${process.pid}`;
         await fs.writeFile(healTmp, backupRaw, 'utf8');
         await fs.rename(healTmp, filePath);
-      } catch { /* best effort - cache already holds good data */ }
+      } catch { /* best effort: cache already holds good data */ }
       console.warn(`[homelabStore] ${filePath} was corrupt; recovered from ${filePath}.bak and healed the primary`);
       return _cache;
     } catch {
@@ -80,9 +74,8 @@ async function readStore(filePath) {
   }
 }
 
-// Atomic write: serialize to a temp file, fsync, then rename over the target
-// (atomic on POSIX). The previous good copy is kept as .bak, except on a
-// { shred: true } write, which removes data by intent and must not leave a copy.
+// Temp file, fsync, rename. Keeps the previous copy as .bak, except on
+// { shred: true }, which removes data by intent and must not leave a copy.
 async function writeStore(filePath, data, { shred = false } = {}) {
   invalidateCache();
   const serialized = JSON.stringify(data, null, 2);
@@ -106,8 +99,7 @@ async function writeStore(filePath, data, { shred = false } = {}) {
   _cachePath = filePath;
 }
 
-// Normalize + validate an incoming host. Returns { host } on success or
-// { error } with a human-readable message. NEVER keeps a password field.
+// Returns { host } or { error }. Never keeps a password field.
 export function normalizeHost(input) {
   const raw = input || {};
   const host = String(raw.host || '').trim();

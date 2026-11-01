@@ -1,6 +1,5 @@
-// frontend/src/components/shell/OmniSearch.jsx
-// One search across chats + providers (+ IntelLedger when reachable). Results
-// are grouped with quick previews; Enter opens the first match.
+// One search across chats, providers and IntelLedger (when reachable), grouped with
+// previews; Enter opens the first match.
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -53,8 +52,7 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
     }
   }, [open]);
 
-  // Search IntelLedger sessions server-side (semantic ranking lives in the
-  // backend). Debounced; only fires for non-trivial queries.
+  // Semantic ranking lives in the backend; debounced and skipped for trivial queries.
   useEffect(() => {
     const term = debounced.trim();
     if (!open || term.length < 2) {
@@ -129,8 +127,7 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
     }
   }
 
-  // Flat, ordered view of all results so the arrow keys can move a single highlight across
-  // the Chats / IntelLedger / Providers groups (mirrors CommandPalette).
+  // Flat list so arrow keys move one highlight across all groups, as in CommandPalette.
   const flat = useMemo(() => [
     ...chatResults.map((c) => ({ type: 'chat', item: c })),
     ...ledger.map((s) => ({ type: 'session', item: s })),

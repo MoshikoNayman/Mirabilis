@@ -1,13 +1,6 @@
 // @ts-check
-// backend/src/providerScope.js
-// Single source of truth for "does this provider send data off the device".
-//
-// Go Dark and the Privacy Receipt both need that answer, and getting it from the
-// provider ID alone is wrong: openai-compatible, vllm and llamacpp all take an
-// arbitrary base URL, so the same ID can point at localhost or at a cloud
-// endpoint. Classification lives here so the server and its tests agree, and so
-// adding a provider without classifying it fails a test rather than silently
-// defaulting to "allowed under Go Dark".
+// Decides whether a provider sends data off the device, for Go Dark and the
+// Privacy Receipt. Base-URL providers are judged by host, not id.
 
 import { isLocalHostUrl } from './security.js';
 

@@ -52,12 +52,8 @@ const exes = files.filter((f) => f.toLowerCase().endsWith('.exe'));
 const blockmaps = files.filter((f) => f.toLowerCase().endsWith('.blockmap'));
 const yml = files.filter((f) => f.toLowerCase().endsWith('.yml'));
 
-// The packaged app runs the backend as a separate Node process out of
-// resources/backend, so that copy needs its own node_modules. Nothing else in
-// the pipeline checks for it, and when it went missing the build succeeded, the
-// installer was valid, the window opened, and only the backend was dead. The
-// cause was an electron-builder upgrade that stopped copying node_modules out
-// of extraResources. Assert the dependencies are actually there.
+// The packaged backend runs from resources/backend and needs its own node_modules.
+// Nothing else checks this, and without them the app opens with a dead backend.
 const backendDeps = files.filter((f) =>
   f.includes(`backend${path.sep}node_modules${path.sep}`)
 );
@@ -107,10 +103,8 @@ if (target === 'mac' || target === 'darwin') {
 }
 
 if (target === 'win' || target === 'windows' || target === 'win32') {
-  // The NSIS installer is the top-level dist\*.exe. Its exact name follows the
-  // configured artifactName (e.g. "Mirabilis AI-26.2.29-x64.exe"), so do NOT
-  // require the literal word "Setup". Exclude the NSIS uninstaller stub and any
-  // exe nested under win-unpacked\ (those are app internals, not the installer).
+  // The installer is the top-level dist\*.exe named by artifactName, so do not
+  // require "Setup". Skip the uninstaller stub and anything under win-unpacked\.
   const installerExes = exes.filter((f) => {
     const base = path.basename(f).toLowerCase();
     if (base.includes('uninstall')) return false;

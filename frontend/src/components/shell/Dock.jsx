@@ -1,8 +1,4 @@
-// frontend/src/components/shell/Dock.jsx
-// The floating control cluster (top-right), kept deliberately minimal in the ICQ
-// spirit: just the presence orb and one "..." menu that holds every secondary
-// control (search, recall, homelab, commands, off-the-record, go dark, and
-// appearance). The Chat / Ledger switch lives next to the wordmark instead.
+// Top-right cluster: the presence orb plus one menu holding every secondary control.
 'use client';
 
 import { useEffect, useRef, useState } from 'react';

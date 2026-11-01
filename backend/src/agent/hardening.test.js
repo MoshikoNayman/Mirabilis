@@ -1,6 +1,4 @@
-// Regression tests for defects found by an adversarial hunt over this feature.
-// Each one describes a specific way the agent could exceed its limits, escape
-// its jail, keep running after a stop, or misreport its own result.
+// Tests that the agent stays inside its limits and jail, stops on request, and reports honestly.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,8 +15,6 @@ import { runCommand } from '../services/proc.js';
 // the destructive-command blocklist
 
 test('the blocklist is not bypassed by flag order or an indirect target', () => {
-  // The pattern used to anchor on a target starting with / or ~, so every one
-  // of these walked straight through while still destroying the machine.
   const mustBlock = [
     'rm -rf /', 'rm -rf /*', 'rm -fr /',
     'cd / && rm -rf .',
@@ -38,8 +34,7 @@ test('the blocklist is not bypassed by flag order or an indirect target', () => 
 });
 
 test('the blocklist does not block ordinary development commands', () => {
-  // A blocklist that fires on `npm test` is worse than none: it trains the
-  // agent to work around it.
+  // False positives teach the agent to route around the blocklist.
   for (const cmd of ['npm test', 'ls -la', 'echo ok', 'grep -r TODO src',
                      'git rm --cached f', 'rm file.txt', 'chmod 644 f',
                      'chmod -R 755 /var/www', 'node --test']) {
@@ -57,7 +52,7 @@ test('a symlink inside the root does not grant access outside it', async () => {
   await fs.writeFile(path.join(outside, 'secret.txt'), 'SECRET', 'utf8');
   await fs.symlink(outside, path.join(root, 'data'));
 
-  // Containment was lexical, so every one of these looked confined.
+  // Each of these is lexically inside the root.
   assert.throws(() => safeResolvePath('data/secret.txt', root), /symlink|escapes/);
   assert.throws(() => safeResolvePath('data/newfile.txt', root), /symlink|escapes/,
     'a WRITE target that does not exist yet must be checked against its real parent');
@@ -66,7 +61,7 @@ test('a symlink inside the root does not grant access outside it', async () => {
   const ok = safeResolvePath('inside.txt', root);
   assert.ok(ok.startsWith(root), 'a legitimate path must still resolve');
 
-  // And the tool layer must refuse it too, not just the primitive.
+  // The tool layer must refuse it as well.
   const reg = createToolRegistry({ policy: 'write', fsRoot: root });
   const read = await reg.dispatch('read_file', { path: 'data/secret.txt' });
   assert.equal(read.ok, false);
@@ -82,10 +77,7 @@ test('a symlink inside the root does not grant access outside it', async () => {
 test('an aborted signal stops a shell command and kills its children', async () => {
   const ac = new AbortController();
   const started = Date.now();
-  // A command that outlives its parent unless the whole group is signalled.
-  // Short sleeps on purpose: a backgrounded grandchild can escape the process
-  // group depending on the shell, so the test must not depend on the kill
-  // landing in order to terminate.
+  // Short sleeps: on some shells a backgrounded grandchild escapes the process group.
   const p = runCommand('/bin/sh', ['-c', 'sleep 5 & sleep 5'], { signal: ac.signal, timeoutMs: 20_000 });
   setTimeout(() => ac.abort(), 200);
   await assert.rejects(() => p, /cancelled/);
@@ -104,9 +96,7 @@ test('a registry whose run was cancelled refuses further tool calls', async () =
 // reporting the truth about a result
 
 test('a validation-rejected answer is never returned as though it passed', async () => {
-  // The rejected summary used to survive in finalAnswer while the run repaired.
-  // If the budget then ran out, it was handed back verbatim with no hint that a
-  // validator had refused it.
+  // The budget runs out while repairing; the rejected summary must not come back as-is.
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-reject-'));
   const model = {
     fn: async ({ purpose }) => {
@@ -134,8 +124,7 @@ test('a validation-rejected answer is never returned as though it passed', async
 // the wall clock
 
 test('each model call is bounded by the remaining wall clock', async () => {
-  // The budget was only consulted at loop boundaries, so a provider that
-  // accepted the connection and then stalled carried the run past its ceiling.
+  // A provider that connects and then stalls must not carry the run past its ceiling.
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-clock-'));
   const seen = [];
   const model = {
@@ -181,12 +170,10 @@ test('the salvage wrap-up gets a small fixed deadline, not the spent budget', as
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-// defects found by running against a REAL local model
+// real local model behaviour
 
 test('search_files is case-insensitive by default', async () => {
-  // Observed with gemma3:12b: it searched for "error", the log said "ERROR",
-  // grep found nothing, and the agent reported that the app had no errors.
-  // A search tool that quietly returns the wrong answer is worse than none.
+  // A case-sensitive miss on "ERROR" leads the agent to report a clean log.
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-search-'));
   await fs.writeFile(path.join(dir, 'app.log'), 'INFO ok\nERROR disk full on /dev/sda1\n', 'utf8');
   const reg = createToolRegistry({ fsRoot: dir });
@@ -202,8 +189,7 @@ test('search_files is case-insensitive by default', async () => {
 });
 
 test('a tool name placed in the action field is understood', async () => {
-  // Also observed live: the model emitted {"action":"read_file","args":{...}},
-  // which was rejected as an unrecognised action and cost a whole iteration.
+  // Local models emit {"action":"read_file",...}; rejecting it wastes an iteration.
   const { parseAgentAction } = await import('./protocol.js');
   const a = parseAgentAction('{"action":"read_file","args":{"path":"a.txt"}}');
   assert.equal(a.kind, 'tool');

@@ -1,7 +1,5 @@
-// frontend/src/components/shell/CommandPalette.jsx
-// Cmd+K Spotlight-style command palette. Drives theme/scheme/font/sounds directly
-// (shared modules) and emits CustomEvents for chat-specific actions so it stays
-// decoupled from the ChatApp monolith.
+// Cmd+K command palette. Sets theme, font and sounds directly and emits
+// CustomEvents for chat actions, so it does not depend on ChatApp.
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';

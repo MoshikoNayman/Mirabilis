@@ -1,25 +1,12 @@
-// Which providers need an API key, and whether one is actually available.
-//
-// This exists because of a defect with the same shape as the tool-policy
-// lockout: keys were moved out of the browser and into the backend, which was
-// the right call, but the send path kept gating on the page-held copy that the
-// same change had stopped populating. Every cloud provider became permanently
-// unusable. Saving a key made the panel say "Stored in the app", and the next
-// send still refused, because the two halves were looking at different places.
-//
-// The key can now live in either of two places, and either is sufficient:
-//   - the backend store, reported to the page as a hint with hasKey
-//   - a page-held value, which is only a legacy or in-session case
-//
-// Keeping that question in one named function means the send path, the health
-// probe and the settings panel cannot drift apart again.
+// Which providers need an API key, and whether one is available: either the
+// backend store (hint.hasKey) or a page-held value. One check for all call sites.
 
 /** Providers that cannot work without a key. */
 export const KEY_REQUIRED_PROVIDERS = new Set([
   'openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas'
 ]);
 
-/** Display names, so the three call sites stop maintaining their own ladders. */
+/** Display names shared by every call site. */
 const PROVIDER_LABELS = {
   openai: 'OpenAI',
   grok: 'xAI',
@@ -53,7 +40,7 @@ export function hasUsableKey(provider, { pageKey = '', hints = {} } = {}) {
 }
 
 /**
- * The message to show when a key really is missing.
+ * Message shown when a required key is missing.
  * @param {string} provider
  */
 export function missingKeyMessage(provider) {

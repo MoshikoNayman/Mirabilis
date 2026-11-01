@@ -6,10 +6,7 @@ import {
 
 describe('restoreToolPolicy', () => {
   it('never restores full from a previous session', () => {
-    // The bug this exists for: `full` was persisted while the acknowledgement
-    // that makes it usable was not, so every session after the one where it was
-    // chosen restored a policy the backend refuses. Every run failed, and the
-    // stored value was reapplied on each load, so the app could not recover.
+    // The acknowledgement is per session, so a restored `full` would be refused.
     expect(restoreToolPolicy('full')).toBe(SAFE_POLICY);
     expect(restoreToolPolicy('full')).not.toBe('full');
   });
@@ -44,8 +41,6 @@ describe('needsFullAcknowledgement', () => {
 
 describe('describeRunError', () => {
   it('reads the sentence the server sent instead of dumping JSON', () => {
-    // What the user actually saw: the entire response body, braces, escaped
-    // quotes and all.
     const body = JSON.stringify({
       error: 'The "full" tool policy lets this run execute shell commands unattended.',
       requiresAcknowledgement: 'full-policy'

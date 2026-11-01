@@ -25,9 +25,8 @@ import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 
-// Voice chat: map the male/female toggle to local Piper voices. When a model is
-// not installed we still speak instantly via a browser voice and fetch the
-// Piper model in the background for higher-quality local TTS next time.
+// Male/female toggle to Piper voices. Until a model is installed, a browser
+// voice speaks while the Piper model downloads in the background.
 const VOICE_GENDER_PIPER = { male: 'en_US-ryan-medium', female: 'en_US-amy-medium' };
 // Best-effort name hints for picking a male/female browser voice fallback.
 const BROWSER_VOICE_HINTS = {
@@ -35,12 +34,8 @@ const BROWSER_VOICE_HINTS = {
   male: ['male', 'daniel', 'alex', 'fred', 'thomas', 'oliver', 'george', 'david', 'mark', 'rishi', 'aaron', 'arthur', 'gordon', 'lee']
 };
 
-// Effort levels shown in the composer toolbar dropdown (least to most effort).
-//
-// The first five control how the model ANSWERS: they are prompt hints and the
-// send stays a single request. The last three control how much WORK it does:
-// they run the autonomous loop on the backend with a hard budget, so they are
-// marked `agentic` and routed to /api/agent/runs instead of the chat stream.
+// The first five are prompt hints on a single request. The `agentic` ones run
+// the backend loop with a hard budget via /api/agent/runs.
 const EFFORT_LABELS = {
   instant: 'Instant', fast: 'Fast', balanced: 'Balanced', thorough: 'Thorough', deep: 'Deep',
   high: 'High effort', hour: '1 hour', session: '5 hours'
@@ -59,8 +54,7 @@ const EFFORT_OPTIONS = [
 
 const AGENTIC_EFFORTS = new Set(EFFORT_OPTIONS.filter((o) => o.agentic).map((o) => o.value));
 
-// What an autonomous run is allowed to touch. Read-only by default: the long
-// tiers run unattended, so write and exec are a deliberate grant, not a default.
+// Read-only by default: long tiers run unattended, so write and exec must be granted.
 const TOOL_POLICY_OPTIONS = [
   { value: 'read-only', label: 'Read only', hint: 'inspect files' },
   { value: 'write',     label: 'Read + write', hint: 'can edit files' },
@@ -213,13 +207,11 @@ function formatUsagePercent(estUsd, budgetUsd) {
   if (pct > 0 && pct < 1) return '<1%';
   return `${Math.min(100, Math.round(pct))}%`;
 }
-// Providers carry a `group` so the picker can scale: Local (on this machine),
-// Remote (self-hosted GPU servers you point at), and Cloud APIs (keyed SaaS).
+// Picker groups: Local (this machine), Remote (self-hosted servers), Cloud APIs (keyed).
 const PROVIDER_GROUPS = ['Local', 'Remote', 'Cloud APIs'];
 const PROVIDER_OPTIONS = [
   { id: 'ollama', label: 'Ollama', scope: 'Local', group: 'Local' },
-  // First-class local llama.cpp engine (Metal-native on Apple Silicon), managed
-  // by Mirabilis. Runs your models itself - no Ollama daemon needed at inference.
+  // Managed llama.cpp server; runs GGUFs directly, no Ollama daemon at inference.
   { id: 'llamacpp', label: 'llama.cpp', scope: 'Local', group: 'Local' },
   { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server', group: 'Local' },
   { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp', group: 'Local' },
@@ -235,11 +227,8 @@ const PROVIDER_OPTIONS = [
   { id: 'openrouter', label: 'OpenRouter', scope: 'Remote', group: 'Cloud APIs' },
   { id: 'cerebras', label: 'Cerebras', scope: 'Remote', group: 'Cloud APIs' }
 ];
-// Two separate budgets. Time-to-first-token on a big local model includes cold load
-// + long-context prefill and can legitimately take minutes, so it gets a very
-// generous budget (effectively "wait, trust Stop"). Once tokens are flowing, a short
-// gap means a genuinely dead stream. Splitting these stops the old 120s single timer
-// from aborting a healthy slow-starting local generation.
+// First token on a big local model includes cold load and prefill and can take
+// minutes. Once tokens flow, a short gap means the stream is dead.
 const STREAM_FIRST_TOKEN_BUDGET_MS = 900000; // 15 min before the first token
 const STREAM_STALL_TIMEOUT_MS = 60000;       // 60s gap between tokens = dead
 
@@ -265,8 +254,8 @@ function isUncensoredModelRecord(item) {
   );
 }
 
-// Models with guaranteed 128K+ context window - preferred when conversation is large.
-// (phi4=16K, mistral/mixtral=32K are excluded intentionally)
+// Models with a guaranteed 128K+ context, preferred for large conversations.
+// phi4 (16K) and mistral/mixtral (32K) stay out.
 const LARGE_CONTEXT_PRIORITY = [
   'qwen2.5', 'llama3.1', 'gemma3', 'qwen3', 'deepseek-r1', 'gemma4:e2b', 'gemma4:e4b',
   'gemma3:12b', 'gemma3:27b', 'gemma4:26b', 'gemma4:31b', 'llama3.3', 'llama3'
@@ -386,9 +375,7 @@ function isImageRequest(text) {
 }
 
 async function api(path, options = {}) {
-  // Privileged routes (remote control, workspace, vault) require the local
-  // session token. Sending it on every call keeps the call sites unchanged;
-  // unguarded routes simply ignore the header.
+  // Privileged routes need the session token; unguarded routes ignore the header.
   const token = await getSessionToken();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
@@ -411,9 +398,7 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-// Smart web-search classifier
-// Returns 'search' when the query clearly needs live/current data,
-// or 'skip' for everything that can be answered from training knowledge.
+// 'search' when the query needs live data, 'skip' when training knowledge suffices.
 function classifyWebSearch(text) {
   const t = text.toLowerCase();
 
@@ -438,7 +423,7 @@ function classifyWebSearch(text) {
 
   if (hasLiveSignal) return 'search';
   if (hasSkipVerb) return 'skip';
-  // Default to search when www is on - let the AI decide if the context is useful
+  // Default to search when www is on; the model decides if the context helps.
   return 'search';
 }
 
@@ -471,10 +456,8 @@ function formatTokenCount(value) {
   return `${amount.toLocaleString()} tok`;
 }
 
-// Pre-pull model-fit estimate: compare a model's on-disk weight size against
-// total device memory, leaving headroom for KV cache and the OS. Returns a small
-// verdict {tier,label,title} or null when we lack the numbers. Deliberately a
-// rough guide, not a promise: quantization and context length shift the real cost.
+// Rough pre-pull fit: weight size vs device memory, with headroom for KV cache
+// and the OS. Returns {tier,label,title}, or null without the numbers.
 function computeModelFit(item, ramGb) {
   if (!Number.isFinite(ramGb) || ramGb <= 0) return null;
   let weightsGb = null;
@@ -600,13 +583,11 @@ function CopyMessageButton({ text, className }) {
   );
 }
 
-// Detects whether text contains Hebrew or Arabic characters so we can force RTL
-// on the entire message block instead of relying on the browser's `dir="auto"` scan,
-// which is unreliable for list containers when content is mixed or nested.
+// Hebrew/Arabic forces RTL on the whole block; `dir="auto"` is unreliable on
+// mixed or nested lists.
 const RTL_CHARS_RE = /[\u0590-\u05FF\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
 
-// Syntax highlight theme - CSS-var-driven so it instantly reacts to scheme changes.
-// Defined at module level so it's never recreated per render.
+// CSS-var driven so it follows scheme changes without re-rendering.
 const SYNTAX_THEME = {
   'code[class*="language-"]': {
     color: 'var(--code-text)',
@@ -656,10 +637,8 @@ const SYNTAX_THEME = {
   'line-numbers-rows > span:before': { color: 'color-mix(in srgb, var(--code-text) 30%, transparent)' },
 };
 
-// Static markdown component overrides - defined at module level so they're never recreated.
-// These elements intentionally carry NO `dir` attribute; they inherit direction from the
-// outer wrapper which is set explicitly in renderMessageContent via RTL_CHARS_RE.
-// `p` and headings keep `dir="auto"` for correct per-paragraph alignment in mixed-lang replies.
+// Lists and tables inherit `dir` from the wrapper set in renderMessageContent.
+// `p` and headings keep `dir="auto"` for per-paragraph alignment in mixed text.
 const MD_STATIC_COMPONENTS = {
   h1: ({ children }) => <h1 className="mb-2 mt-3 text-xl font-bold" dir="auto">{children}</h1>,
   h2: ({ children }) => <h2 className="mb-1.5 mt-3 text-lg font-bold" dir="auto">{children}</h2>,
@@ -687,15 +666,8 @@ const MD_STATIC_COMPONENTS = {
   td: ({ children }) => <td className="px-3 py-1.5 text-[color:var(--text-main)]">{children}</td>,
 };
 
-// Remote Control state for code blocks, delivered by context rather than by
-// threading refs down through renderMessageContent.
-//
-// The refs were a correctness bug, not just a style choice: `execResults` is
-// state, but the renderer read it through a ref, and MessageRow's memo
-// comparator does not include it. A ref mutation changes nothing the comparator
-// can see, so the row never re-rendered and the output of a remote "Run" was
-// never displayed. Context updates bypass React.memo, so only the rows holding
-// an affected code block re-render.
+// Remote Control state for code blocks. Must be context, not a ref: MessageRow's
+// memo comparator ignores execResults, and context updates bypass React.memo.
 const RemoteExecContext = createContext({
   remoteConnected: false,
   remoteTarget: '',
@@ -710,14 +682,8 @@ const MessageIdContext = createContext('msg');
 const SHELL_LANGS = ['bash', 'sh', 'shell', 'zsh', 'fish', 'cmd', 'powershell', 'ps1'];
 const isShellLang = (l) => SHELL_LANGS.includes(l);
 
-// Module-scope code renderer.
-//
-// This used to be defined inline inside renderMessageContent, which rebuilt the
-// components object on every render. React keys reconciliation on component
-// IDENTITY, so a fresh `code` function each time meant every fenced block was a
-// new element type: React unmounted and remounted the whole figure, Prism
-// re-tokenized from scratch, any text selection inside a streaming code block
-// was destroyed each frame, and CopyButton lost its own "Copied" state.
+// Kept at module scope: a new component identity per render remounts every code
+// block, losing selection and CopyButton state and re-running Prism.
 function MarkdownCode({ inline, className, children, ...props }) {
   const { remoteConnected, remoteTarget, execResults, onRunCommand } = useContext(RemoteExecContext);
   const messageId = useContext(MessageIdContext);
@@ -725,8 +691,7 @@ function MarkdownCode({ inline, className, children, ...props }) {
   const lang = (className || '').replace('language-', '') || '';
   const displayLang = lang || 'code';
   const codeText = String(children).replace(/\n$/, '');
-  // react-markdown v9+ no longer passes `inline` - detect it ourselves: inline
-  // code has no language class and no newlines inside it.
+  // react-markdown v9+ omits `inline`: inline code has no language class and no newline.
   const isInline = inline || (!className?.includes('language-') && !codeText.includes('\n'));
   if (isInline) {
     return (
@@ -797,8 +762,7 @@ function MarkdownCode({ inline, className, children, ...props }) {
   );
 }
 
-// The full components map, frozen at module scope so ReactMarkdown always sees
-// the same component identities and never remounts a block.
+// Frozen at module scope so component identities stay stable.
 const MD_COMPONENTS = Object.freeze({ ...MD_STATIC_COMPONENTS, code: MarkdownCode });
 
 function renderMessageContent(content, message = {}) {
@@ -809,12 +773,10 @@ function renderMessageContent(content, message = {}) {
         style={{ width: 288, height: 288 }}
         aria-label="Generating image..."
       >
-        {/* Shimmer sweep - pure CSS, GPU-only */}
         <div
           className="img-shimmer pointer-events-none absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/10"
           style={{ willChange: 'transform' }}
         />
-        {/* Bottom label */}
         <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-gradient-to-t from-black/25 to-transparent rounded-b-xl">
           <svg className="h-3.5 w-3.5 text-white/80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="3" y="3" width="18" height="18" rx="3" />
@@ -844,8 +806,7 @@ function renderMessageContent(content, message = {}) {
 
   const text = content || '';
 
-  // Detect RTL once from the full text so the entire block - including list
-  // containers - gets a concrete direction that all descendants inherit.
+  // A concrete direction on the block so list containers inherit it.
   const dir = RTL_CHARS_RE.test(text) ? 'rtl' : 'ltr';
 
   return (
@@ -855,8 +816,7 @@ function renderMessageContent(content, message = {}) {
   );
 }
 
-// Memoised sidebar chat row - comparator ignores callbacks so typing / streaming
-// never causes the full chat list to reconcile; only the affected item re-renders.
+// Comparator ignores callbacks so typing or streaming does not reconcile the whole list.
 const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, onSelect, onToggleMenu, onDelete, onRename, onExport, onTogglePin, onBranch }) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
@@ -1022,9 +982,8 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
   prev.isPinned === next.isPinned
 ));
 
-// Memoised message bubble - only re-renders when its own data or speaking state changes.
-// During streaming, only the last message gets a new `message` object reference, so all prior
-// messages are skipped by the custom comparator, preventing O(n) re-renders per token.
+// While streaming only the last message gets a new object, so the comparator
+// skips every earlier row instead of re-rendering O(n) per token.
 const MessageRow = memo(function MessageRow({
   message,
   isLast,
@@ -1055,8 +1014,7 @@ const MessageRow = memo(function MessageRow({
           : { background: 'color-mix(in srgb, var(--text-main) 4%, transparent)' }
       }
     >
-      {/* Scope the message id so the module-scope code renderer can key its
-          blocks without the id being threaded through as an argument. */}
+      {/* Lets the module-scope code renderer key its blocks by message. */}
       <MessageIdContext.Provider value={message.id}>
         {renderMessageContent(message.content, message)}
       </MessageIdContext.Provider>
@@ -1122,8 +1080,7 @@ const MessageRow = memo(function MessageRow({
                   const shortModel = rawModel
                     ? (rawModel.length > 22 ? rawModel.slice(0, 22) + '...' : rawModel)
                     : '';
-                  // Privacy Receipt: a green on-device stamp, or an amber "left the
-                  // machine" stamp naming the cloud provider it was sent to.
+                  // Privacy Receipt: green on-device, or amber naming the cloud provider.
                   return (
                     <span
                       title={onDevice
@@ -1141,9 +1098,7 @@ const MessageRow = memo(function MessageRow({
                   );
                 })() : null}
                 {(() => {
-                  // Show the EXACT output token count (from Ollama eval metrics) when
-                  // we have it; fall back to the live char/4 estimate while streaming
-                  // or for providers that do not report counts. No tilde either way.
+                  // Exact count from Ollama eval metrics when present, else the char/4 estimate.
                   const p = message.performance;
                   const exactOut = p && p.source === 'ollama' && !p.isEstimate && p.tokens != null;
                   const count = exactOut ? p.tokens : (message.tokenEstimate || 0);
@@ -1241,8 +1196,7 @@ export default function ChatApp() {
   const speechSynthesisRef = useRef(null);
   const piperAudioRef = useRef(null);
   const chatScrollPositions = useRef({});
-  // Incremented by clearAllChats so any in-flight refreshChats() calls that started
-  // before the clear (and resolve after it) bail out instead of resurrecting deleted chats.
+  // Bumped by clearAllChats so a refreshChats() in flight across a clear cannot restore deleted chats.
   const chatListEpochRef = useRef(0);
   // Refs for renderMessageContent (stable across renders without re-passing as props)
   const lastKeyboardMenuTriggerRef = useRef(null);
@@ -1278,10 +1232,7 @@ export default function ChatApp() {
   const [colorScheme, setColorScheme] = useState(() => {
     if (typeof window !== 'undefined') {
       const v = safeStorageGet('mirabilis-color-scheme', 'mirabilis');
-      // 'arctic' is a real scheme (globals.css, lib/theme.js, the Dock picker) -
-      // it was missing here, so picking Arctic worked until reload, then got
-      // silently coerced back to 'mirabilis'. Keep this list in sync with
-      // lib/theme.js SCHEMES.
+      // Keep in sync with lib/theme.js SCHEMES; anything missing resets on reload.
       return ['mirabilis','arctic','ember','summit'].includes(v) ? v : 'mirabilis';
     }
     return 'mirabilis';
@@ -1310,8 +1261,7 @@ export default function ChatApp() {
       gpuaas: { baseUrl: '', apiKey: '' },
       'openai-compatible': { baseUrl: 'http://127.0.0.1:8000/v1', apiKey: '' },
       'koboldcpp': { baseUrl: 'http://127.0.0.1:5001/v1', apiKey: '' },
-      // Empty by default so selecting vLLM opens the endpoint config to enter the
-      // remote server URL (e.g. http://gpu-host:8000/v1).
+      // Empty so selecting vLLM opens the endpoint config for a server URL.
       'vllm': { baseUrl: '', apiKey: '' },
       // Managed llama.cpp server; Mirabilis launches it on this port.
       'llamacpp': { baseUrl: 'http://127.0.0.1:8080/v1', apiKey: '' }
@@ -1340,8 +1290,7 @@ export default function ChatApp() {
   });
   const [systemPrompt, setSystemPrompt] = useState(buildDefaultSystemPrompt(provider));
   const [statusText, setStatusText] = useState('Ready');
-  // Ambient engine reachability. null while unknown, so a brand new user is not
-  // told anything is wrong before the first check has answered.
+  // Engine reachability; null until the first check answers.
   const [engineUp, setEngineUp] = useState(null);
   const [openChatMenuId, setOpenChatMenuId] = useState(null);
   const [clearArmed, setClearArmed] = useState(false); // two-click confirm for "clear all"
@@ -1384,17 +1333,13 @@ export default function ChatApp() {
   const [agentRun, setAgentRun] = useState(null);
   const agentAbortRef = useRef(null);
   const agentRunRef = useRef(null);
-  // restoreToolPolicy, not the raw stored value. `full` must never come back
-  // from a previous session: its acknowledgement is per session by design, so a
-  // restored `full` is a policy the backend refuses on every single run, and
-  // the stored value is reapplied on every load, so the app cannot recover.
+  // Never restore `full`: its acknowledgement is per session, so the backend
+  // would refuse every run with no way to recover.
   const [toolPolicy, setToolPolicy] = useState(() => restoreToolPolicy(safeStorageGet('mirabilis-tool-policy', 'read-only')));
-  // Acknowledgement for the shell-capable policy. Deliberately NOT persisted:
-  // granting a background process a terminal should be a decision each session,
-  // not something a setting quietly remembers from last week.
+  // Not persisted: granting shell access is a per-session decision.
   const [fullPolicyAcknowledged, setFullPolicyAcknowledged] = useState(false);
 
-  // Masked hints for the keys the BACKEND holds. The page never sees a value.
+  // Masked hints for keys the backend holds; the page never sees a value.
   const [keyHints, setKeyHints] = useState({});
   // What the user is currently typing, before it is saved. Never persisted.
   const [keyDraft, setKeyDraft] = useState('');
@@ -1450,10 +1395,8 @@ export default function ChatApp() {
   const [piperModels, setPiperModels] = useState([]);
   const [downloadingPiperModelId, setDownloadingPiperModelId] = useState(null);
 
-  // Voice chat (hands-free spoken conversation)
-  // The overlay is a dumb view; the whole listen -> send -> speak -> listen loop
-  // is driven from here because speech recognition, the streaming send, and TTS
-  // all live in this component.
+  // Voice chat. The overlay is only a view; the listen, send, speak loop runs
+  // here because capture, the streaming send and TTS live in this component.
   const voiceChatOpen = useAppStore((s) => s.voiceChatOpen);
   const [voicePhase, setVoicePhase] = useState('idle'); // idle | listening | thinking | speaking
   const [voiceInterim, setVoiceInterim] = useState('');
@@ -1476,8 +1419,8 @@ export default function ChatApp() {
   const voiceSawSpeakingRef = useRef(false);   // saw isSpeaking flip true after speak
   const voiceRestartTimerRef = useRef(null);   // debounce re-listen after empty turn
   const voiceSpeakWatchdogRef = useRef(null);  // fallback if TTS never starts
-  // MediaRecorder-based capture (webkitSpeechRecognition is dead in Electron, so
-  // the loop records audio and transcribes via the local whisper.cpp backend).
+  // MediaRecorder capture transcribed by backend whisper.cpp; webkitSpeechRecognition
+  // does not work in Electron.
   const voiceStreamRef = useRef(null);         // active getUserMedia MediaStream
   const voiceRecorderRef = useRef(null);       // active MediaRecorder
   const voiceChunksRef = useRef([]);           // recorded audio chunks this turn
@@ -1492,11 +1435,8 @@ export default function ChatApp() {
   const voiceSpeakRef = useRef(null);
   const voiceStopSpeakRef = useRef(null);
   const messagesRef = useRef([]);
-  // Current active chat id, mirrored for handlers that a memoized row may have
-  // captured in an older closure. ChatItem's comparator deliberately ignores its
-  // callback props, so a row that does not re-render keeps a STALE loadChat, and
-  // reading activeChatId from that closure saved the scroll position under the
-  // previously-open chat instead of the one being left.
+  // Mirrors activeChatId for handlers held by memoized ChatItem rows, whose
+  // comparator ignores callbacks and so can keep a stale closure.
   const activeChatIdRef = useRef(null);
   // Always-fresh voice settings so a retained speakText closure uses current values.
   const voiceSettingsRef = useRef({});
@@ -1504,8 +1444,7 @@ export default function ChatApp() {
   const [isDragOverChat, setIsDragOverChat] = useState(false);
   const [deepWebEnabled, setDeepWebEnabled] = useState(() => {
     if (typeof window !== 'undefined') {
-      // Off by default. Earlier builds defaulted it on and saved that, so the
-      // saved value is reset once.
+      // Off by default; the v2 flag resets a stored default-on value once.
       if (safeStorageGet('mirabilis-web-default-v2') !== '1') {
         safeStorageSet('mirabilis-web-default-v2', '1');
         safeStorageSet('local-ai-deep-web-enabled', 'false');
@@ -1516,9 +1455,7 @@ export default function ChatApp() {
     return true;
   });
   const [webSearchStatus, setWebSearchStatus] = useState('idle'); // 'idle' | 'searching' | 'error'
-  // Config Vault: cited local RAG over a folder of config files. When enabled and
-  // indexed, each send retrieves the most relevant config chunks (fully offline
-  // via local embeddings) and folds them in as grounding context.
+  // Config Vault: offline cited RAG over a config folder, added to each send.
   const [configVaultEnabled, setConfigVaultEnabled] = useState(() => {
     if (typeof window !== 'undefined') return safeStorageGet('mirabilis-config-vault-enabled') === 'true';
     return false;
@@ -1532,16 +1469,9 @@ export default function ChatApp() {
   const [pullingModels, setPullingModels] = useState({});
   // Free-text "pull any Ollama model" field in the model menu.
   const [customModelInput, setCustomModelInput] = useState('');
-  // What the registry says about what has been typed, so a typo is caught in
-  // the field instead of becoming a failed multi-gigabyte download.
   const [customModelLookup, setCustomModelLookup] = useState(null);
 
-  // Ask the registry about the typed name, debounced.
-  //
-  // The field used to pull whatever was typed, so "qwen2.5:7bb" became a
-  // download that failed somewhere inside the pull, long after the user had
-  // committed to it. Now the answer, including the size, arrives before the
-  // Pull button is worth pressing.
+  // Debounced registry lookup so a typo and the size show before Pull, not mid-download.
   useEffect(() => {
     const name = customModelInput.trim();
     if (!name) { setCustomModelLookup(null); return; }
@@ -1567,15 +1497,8 @@ export default function ChatApp() {
   const autoScrollRef = useRef(true); // ref mirror - readable synchronously in scroll handler
   const [memoryItems, setMemoryItems] = useState([]);
   const [memoryInput, setMemoryInput] = useState('');
-  // Re-arm the watched folder on the backend after it restarts.
-  //
-  // The pinned paths are persisted in the browser, but the watched ROOT they
-  // are relative to is in-memory state in the backend process, which the
-  // desktop app respawns on every launch. So the composer kept showing
-  // "N workspace files" while every single fetch for those files failed and the
-  // model was answering about code it had never seen. The root is persisted
-  // here, so send it back rather than waiting for the user to guess that they
-  // must reopen the Workspace panel.
+  // The backend keeps the watched root in memory and restarts each launch;
+  // re-send the persisted root so pinned paths resolve again.
   useEffect(() => {
     const root = appStore.getWorkspaceRoot ? appStore.getWorkspaceRoot() : '';
     if (!root) return;
@@ -1584,8 +1507,7 @@ export default function ChatApp() {
       try {
         await api('/api/workspace/watch', { method: 'POST', body: JSON.stringify({ path: root }) });
       } catch {
-        // The folder may be gone or on an unmounted volume. The send path now
-        // reports skipped pins loudly, so this stays quiet.
+        // The folder may be gone; the send path reports skipped pins.
         if (!cancelled) { /* nothing to do */ }
       }
     })();
@@ -1593,8 +1515,7 @@ export default function ChatApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Watched Workspace: pinned files (relative paths) whose FRESH contents are
-  // folded into each send. Reactive so the composer chip updates as pins change.
+  // Pinned relative paths whose current contents go into each send.
   const workspacePins = useAppStore((s) => s.workspacePins);
 
   // Remote Control
@@ -1634,9 +1555,7 @@ export default function ChatApp() {
     }
     return null;
   });
-  // Inference Cockpit: advanced Ollama sampling/load knobs (null = provider default).
-  // Persisted as one object so power users can tune local generation the way LM
-  // Studio / Jan allow. Only sent to Ollama; cloud providers ignore these.
+  // Inference Cockpit: Ollama sampling/load knobs (null = provider default). Ollama only.
   const [ollamaParams, setOllamaParams] = useState(() => {
     if (typeof window !== 'undefined') {
       try { const v = safeStorageGet('mirabilis-ollama-params'); return v ? JSON.parse(v) : {}; } catch { return {}; }
@@ -1840,16 +1759,14 @@ export default function ChatApp() {
       try {
         const cfgBase = String(providerConfigs?.[provider]?.baseUrl || '').trim();
         const cfgKey = String(providerConfigs?.[provider]?.apiKey || '').trim();
-        // Same rule as the send path: a backend-held key is a real key. This
-        // probe used to announce "Add API key in Configure endpoint" for a
-        // provider whose key was already saved.
+        // Same rule as the send path: a backend-held key counts.
         if (providerNeedsKey(provider) && !hasUsableKey(provider, { pageKey: cfgKey, hints: keyHints })) {
           setStatusText(`${providerLabel(provider)} selected. Add API key in Configure endpoint.`);
           return;
         }
         const query = new URLSearchParams({ provider });
         if (cfgBase) query.set('baseUrl', cfgBase);
-        // API key travels in a header, never the URL (query strings leak into logs/history).
+        // Key in a header, never the URL: query strings leak into logs and history.
         const keyHeader = ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') && cfgKey)
           ? { 'x-provider-key': cfgKey } : undefined;
         const health = await api(`/api/providers/health?${query.toString()}`, keyHeader ? { headers: keyHeader } : undefined);
@@ -1869,7 +1786,7 @@ export default function ChatApp() {
   }, [provider, providerConfigs, keyHints]);
 
   useEffect(() => {
-    // Backfill provider config defaults for existing users with empty/legacy settings.
+    // Fill defaults into empty or legacy stored provider configs.
     setProviderConfigs((prev) => {
       const existingOpenAiBase = prev?.['openai-compatible']?.baseUrl || '';
       const normalizedOpenAiBase = String(existingOpenAiBase).trim() === 'http://127.0.0.1:8080/v1'
@@ -1923,11 +1840,8 @@ export default function ChatApp() {
     });
   }, []);
 
-  // Persist provider settings WITHOUT the API keys. Keys live in the backend
-  // now (see backend/src/providerKeys.js): keeping them in local storage exposed
-  // them to any script in the page and to anything that can read the browser
-  // profile directory. A key typed here is pushed to the backend and dropped
-  // from the object that gets persisted.
+  // Persist without API keys. Keys live in the backend (providerKeys.js) so page
+  // scripts and the browser profile never hold them.
   useEffect(() => {
     const withoutKeys = Object.fromEntries(
       Object.entries(providerConfigs || {}).map(([id, cfg]) => {
@@ -1938,9 +1852,7 @@ export default function ChatApp() {
     safeStorageSet('mirabilis-provider-configs', JSON.stringify(withoutKeys));
   }, [providerConfigs]);
 
-  // One-time migration: existing installs have keys sitting in local storage.
-  // Move them to the backend and erase the originals, otherwise the exposure
-  // this change is meant to remove simply stays behind on every current machine.
+  // One-time migration: move keys found in local storage to the backend, then erase them.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1975,15 +1887,8 @@ export default function ChatApp() {
     safeStorageSet('mirabilis-openclaw', openClawMode ? 'true' : 'false');
   }, [openClawMode]);
 
-  // Make a restored OpenClaw actually mean something.
-  //
-  // openClawMode is persisted, but everything that IMPLEMENTS it is not:
-  // uncensoredMode starts false, usePersonalMemory starts true, and the system
-  // prompt comes back in full. So after a relaunch the rose dot said "on" and
-  // was counted in the Options badge while the app quietly behaved in exactly
-  // the opposite way to what the indicator promised. A mode indicator that lies
-  // about privacy is worse than one that is off, so re-apply the mode instead
-  // of merely displaying it.
+  // openClawMode is persisted but the state that implements it is not, so
+  // re-apply it on load or the indicator says "on" while the app is not.
   const openClawRestoredRef = useRef(false);
   useEffect(() => {
     if (openClawRestoredRef.current) return;
@@ -2075,7 +1980,7 @@ export default function ChatApp() {
         });
       }
     } catch {
-      // silently ignore
+      // Best effort.
     }
   }
 
@@ -2185,8 +2090,7 @@ export default function ChatApp() {
       if (s?.running && s?.baseUrl) {
         setProviderConfigs((prev) => ({ ...prev, llamacpp: { ...prev.llamacpp, baseUrl: s.baseUrl } }));
       }
-      // Launchable models = the GGUFs you already have (your downloaded/Ollama
-      // models). llama.cpp runs those files directly - no Ollama daemon at inference.
+      // Launchable models are the local GGUFs, including Ollama's, run directly by llama.cpp.
       try {
         const m = await api('/api/models?provider=ollama');
         const ids = (m.models || []).filter((x) => x.available !== false).map((x) => x.id);
@@ -2232,8 +2136,7 @@ export default function ChatApp() {
   }
 
   function stopStreaming() {
-    // During an autonomous run there is no chat stream to abort, so this button
-    // was a no-op while the most prominent Stop on screen. Route it to the run.
+    // An autonomous run has no chat stream, so Stop goes to the run.
     if (agentAbortRef.current) {
       stopAgentRun();
       return;
@@ -2255,8 +2158,7 @@ export default function ChatApp() {
   }
 
   function speakText(text, messageId = null) {
-    // Read live settings from the ref so a memoized row's retained closure still
-    // uses the CURRENT voice/rate/pitch (falls back to the render-time state).
+    // Read from the ref so a memoized row's stale closure uses current settings.
     const vs = voiceSettingsRef.current || {};
     const engine = vs.voiceEngine ?? voiceEngine;
     const voiceUri = vs.selectedVoiceUri ?? selectedVoiceUri;
@@ -2341,22 +2243,17 @@ export default function ChatApp() {
     }
   }
 
-  /* Voice chat loop
-     listen (SR) -> send (stream) -> speak (TTS) -> listen, hands-free, until the
-     user taps End. State lives in refs so the recognition callbacks never read a
-     stale phase, and send/speak are invoked through refs kept fresh every render
-     (see the effect just below) so a mid-conversation provider/voice switch is
-     always honoured. */
+  /* Voice loop: listen, send, speak, repeat until End. Phase lives in refs so
+     callbacks never read it stale; send/speak go through refs refreshed each
+     render so a provider or voice switch mid-conversation applies. */
 
   function setVoicePhaseBoth(next) {
     voicePhaseRef.current = next;
     setVoicePhase(next);
   }
 
-  // Is the selected engine actually reachable? The status chip used to read
-  // "Ready" on a machine with nothing running, and the welcome text invited the
-  // user to start talking, so the first thing a new install did was fail with a
-  // transport error. Checked on mount, on provider change, and on a slow timer.
+  // Engine reachability, so the status chip does not claim "Ready" with nothing
+  // running. Checked on mount, on provider change and every 30s.
   useEffect(() => {
     let cancelled = false;
     const check = async () => {
@@ -2368,8 +2265,7 @@ export default function ChatApp() {
         if (cancelled) return;
         const up = Boolean(payload?.reachable);
         setEngineUp(up);
-        // Clear a stale failure label once the engine is back, so the header
-        // does not keep reporting a problem the user has already fixed.
+        // Clear a stale failure label once the engine is back.
         if (up) setStatusText((prev) => (prev === 'No engine' || prev === 'Error' ? 'Ready' : prev));
       } catch {
         if (!cancelled) setEngineUp(false);
@@ -2387,11 +2283,10 @@ export default function ChatApp() {
       const next = {};
       for (const k of (payload?.keys || [])) next[k.provider] = k;
       setKeyHints(next);
-      // Returned as well as stored: the send path needs the answer NOW, and
-      // reading it from state would race the fetch on an early first message.
+      // Also returned: the send path cannot wait for state on an early first message.
       return next;
     } catch {
-      return null; // the settings panel simply shows nothing stored
+      return null; // settings panel shows nothing stored
     }
   }, []);
 
@@ -2427,23 +2322,18 @@ export default function ChatApp() {
     voiceStopSpeakRef.current = stopSpeaking;
     messagesRef.current = messages;
     activeChatIdRef.current = activeChatId;
-    // Voice settings, mirrored to refs so a memoized message row that captured an
-    // older speakText closure still speaks with the CURRENT voice/rate/pitch.
+    // Lets a memoized row's stale speakText closure use current voice settings.
     voiceSettingsRef.current = { voiceEngine, selectedVoiceUri, voiceRate, voicePitch, selectedPiperModelId, availableVoices };
   });
 
-  // The live loop records audio and transcribes on the backend (whisper.cpp),
-  // so it needs mic capture + MediaRecorder - NOT the Web Speech API, which is
-  // dead inside the packaged Electron app.
+  // The loop needs getUserMedia and MediaRecorder; Web Speech does not work in Electron.
   useEffect(() => {
     const supported = typeof window !== 'undefined'
       && Boolean(navigator.mediaDevices?.getUserMedia) && Boolean(window.MediaRecorder);
     setVoiceLoopSupported(supported);
   }, []);
 
-  // Tear the whole capture path down: stop the recorder, release the mic (this
-  // is what turns the macOS orange mic indicator OFF), close the audio context,
-  // and clear every VAD timer. Idempotent - safe to call repeatedly.
+  // Idempotent. Releasing the mic tracks is what turns the OS mic indicator off.
   function stopVoiceRecognition() {
     const timers = voiceVadTimersRef.current || {};
     for (const k of Object.keys(timers)) { clearTimeout(timers[k]); }
@@ -2467,7 +2357,7 @@ export default function ChatApp() {
       try { voiceAudioCtxRef.current.close(); } catch { /* already closed */ }
       voiceAudioCtxRef.current = null;
     }
-    // Legacy Web Speech handle, in case an old recognizer is somehow still around.
+    // Web Speech recognizer, if one is still attached.
     const legacy = voiceRecognitionRef.current;
     if (legacy) {
       try { legacy.onresult = null; legacy.onend = null; legacy.onerror = null; legacy.stop(); } catch { /* noop */ }
@@ -2475,8 +2365,7 @@ export default function ChatApp() {
     }
   }
 
-  // Decode a recorded audio Blob and re-encode it as a 16 kHz mono PCM16 WAV -
-  // the format whisper.cpp consumes directly, so no server-side ffmpeg is needed.
+  // 16 kHz mono PCM16 WAV is what whisper.cpp reads directly, so no server ffmpeg.
   async function encodeWavFromBlob(blob) {
     const arrayBuf = await blob.arrayBuffer();
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -2522,8 +2411,7 @@ export default function ChatApp() {
     return new Blob([view], { type: 'audio/wav' });
   }
 
-  // Pick the closest male/female browser voice by name (best effort - the Web
-  // Speech API does not expose gender). Also flips the engine to 'browser'.
+  // Matches by name since Web Speech does not expose gender. Switches the engine to 'browser'.
   function pickBrowserVoiceForGender(gender) {
     setVoiceEngine('browser');
     const voices = availableVoices || [];
@@ -2539,8 +2427,7 @@ export default function ChatApp() {
     if (pick) setSelectedVoiceUri(pick.voiceURI);
   }
 
-  // Route the chosen gender to a local Piper voice when installed; otherwise
-  // speak instantly with a browser voice and fetch Piper in the background.
+  // Piper when installed; otherwise a browser voice while Piper downloads.
   function ensureVoiceForGender(gender) {
     const modelId = VOICE_GENDER_PIPER[gender];
     const model = (piperModels || []).find((m) => m.id === modelId);
@@ -2561,7 +2448,7 @@ export default function ChatApp() {
           setVoiceNote('');
         })
         .catch(() => {
-          // Stay on the browser voice - never crash the loop over a download.
+          // A failed download keeps the browser voice.
           setVoiceNote('');
         });
     }
@@ -2610,7 +2497,7 @@ export default function ChatApp() {
     recorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) voiceChunksRef.current.push(e.data); };
     recorder.onerror = () => { /* surfaced via onstop */ };
 
-    // Finalize once - the VAD, the max-duration cap, and an orb tap can all race.
+    // Finalize once: the VAD, the max-duration cap and an orb tap can race.
     let finalized = false;
     const finalize = () => {
       if (finalized) return; finalized = true;
@@ -2623,7 +2510,7 @@ export default function ChatApp() {
     voiceStopCaptureRef.current = finalize;
 
     recorder.onstop = async () => {
-      // Release the mic immediately - this is what turns the orange indicator off.
+      // Release the mic now so the OS mic indicator turns off.
       if (voiceStreamRef.current) { try { voiceStreamRef.current.getTracks().forEach((t) => t.stop()); } catch { /* noop */ } voiceStreamRef.current = null; }
       if (voiceAudioCtxRef.current) { try { voiceAudioCtxRef.current.close(); } catch { /* noop */ } voiceAudioCtxRef.current = null; }
       voiceRecorderRef.current = null;
@@ -2660,7 +2547,7 @@ export default function ChatApp() {
         }
       } catch (err) {
         if (!voiceActiveRef.current) return;
-        // STT unavailable or failed: stop the loop cleanly. Never blink forever.
+        // STT unavailable or failed: end the loop instead of retrying forever.
         voiceActiveRef.current = false;
         stopVoiceRecognition();
         const msg = String(err?.message || '');
@@ -2677,8 +2564,7 @@ export default function ChatApp() {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new Ctx();
       voiceAudioCtxRef.current = audioCtx;
-      // May start suspended under the autoplay policy after our awaits; resume so
-      // the analyser actually processes audio (otherwise VAD would never fire).
+      // Autoplay policy can leave it suspended after the awaits; without resume the VAD never fires.
       if (audioCtx.state === 'suspended') { audioCtx.resume().catch(() => {}); }
       const source = audioCtx.createMediaStreamSource(stream);
       const analyser = audioCtx.createAnalyser();
@@ -2742,25 +2628,17 @@ export default function ChatApp() {
     const send = voiceSendRef.current;
     if (send) {
       Promise.resolve(send(text)).then(() => {
-        // The send path can REFUSE WITHOUT THROWING: Go Dark with a cloud
-        // provider, a provider with no usable key, a chat that could not be
-        // created. Each shows a toast and returns normally, so the catch below
-        // never fired and the orb sat on "Thinking..." forever with taps
-        // deliberately ignored in that phase. The only escape was End.
-        //
-        // If the promise settled and nothing ever started streaming, the turn
-        // was refused. Note it and go back to listening.
-        //
-        // This cannot misfire on a normal reply: the completion effect clears
-        // voiceAwaitingReplyRef before this can see it, and while a stream is in
-        // flight voiceSawStreamingRef is already true.
+        // The send path can refuse without throwing (Go Dark, no key, no chat).
+        // Settled with nothing streamed means refused: go back to listening.
+        // A normal reply cannot reach this: the completion effect clears
+        // voiceAwaitingReplyRef first, and a live stream sets voiceSawStreamingRef.
         if (voiceAwaitingReplyRef.current && !voiceSawStreamingRef.current) {
           voiceAwaitingReplyRef.current = false;
           setVoiceNote('That turn could not be sent. Check the provider, its API key, or Go Dark.');
           if (voiceActiveRef.current) startVoiceListening();
         }
       }).catch(() => {
-        // Send failed to even start - drop back to listening so we're not stuck.
+        // Send failed to start; go back to listening.
         voiceAwaitingReplyRef.current = false;
         if (voiceActiveRef.current) startVoiceListening();
       });
@@ -2785,8 +2663,7 @@ export default function ChatApp() {
       setVoicePhaseBoth('idle');
       return;
     }
-    // Only open the mic once we know a speech-to-text engine is actually usable,
-    // so we never hold the mic (blinking indicator) with nothing to transcribe.
+    // Open the mic only once STT is usable, so it is never held with nothing to transcribe.
     setVoicePhaseBoth('thinking');
     fetch(`${API_BASE}/api/voice/stt-status`).then((r) => r.json()).then((s) => {
       if (!voiceActiveRef.current) return;
@@ -2798,8 +2675,7 @@ export default function ChatApp() {
         setVoicePhaseBoth('idle');
       }
     }).catch(() => {
-      // Status unknown (backend slow/unreachable): try anyway; the transcribe
-      // error path will guide the user if STT is genuinely missing.
+      // Status unknown: try anyway; the transcribe error path reports missing STT.
       if (voiceActiveRef.current) startVoiceListening();
     });
   }
@@ -2982,8 +2858,7 @@ export default function ChatApp() {
     safeStorageSet('mirabilis-color-scheme', colorScheme);
   }, [colorScheme]);
 
-  // Drive the Aurora StatusOrb's "busy" breathing from the real streaming state.
-  // AuroraChrome listens for these; without them the orb never showed activity.
+  // AuroraChrome listens for these to drive the StatusOrb busy state.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent(isStreaming ? 'mirabilis:stream-start' : 'mirabilis:stream-stop'));
@@ -3168,9 +3043,7 @@ export default function ChatApp() {
     }
   }
 
-  // A stable identity for runCommand, via a ref that is refreshed on every
-  // render. Without this the context value below would be new on every render
-  // and the memoisation would buy nothing.
+  // Stable identity so the context value below stays memoized.
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
   const stableRunCommand = useCallback((command, key) => runCommandRef.current(command, key), []);
@@ -3181,8 +3054,7 @@ export default function ChatApp() {
     [remoteConnected, remoteTarget, execResults, stableRunCommand]
   );
 
-  // True while the assistant has been asked but has not produced any text yet.
-  // Drives the standalone typing indicator that replaced the per-row one.
+  // True while the assistant has been asked but has no text yet.
   const lastMessage = messages[messages.length - 1];
   const showTypingIndicator = isStreaming
     && !!lastMessage
@@ -3711,19 +3583,15 @@ export default function ChatApp() {
   async function refreshChats() {
     const epoch = chatListEpochRef.current;
     const payload = await api('/api/chats');
-    // Bail out if clearAllChats() ran while we were awaiting - would resurrect deleted chats
+    // clearAllChats() ran during the await; applying this would restore deleted chats.
     if (chatListEpochRef.current !== epoch) return;
     setChats(payload.chats || []);
   }
 
   async function loadChat(chatId) {
-    // A stream is bound to the chat it started in; switching away while it runs
-    // would let its tokens land in the newly opened chat. Stop it first.
+    // Stop the stream first or its tokens land in the newly opened chat.
     if (streamAbortRef.current) stopStreaming();
-    // Clear a FINISHED run's panel on navigation: its result is already in its
-    // own chat, so leaving it pinned above an unrelated conversation is wrong.
-    // A live run keeps its panel, because it is still spending the budget and
-    // the stop button has to stay reachable.
+    // Drop a finished run's panel; a live run keeps it so Stop stays reachable.
     if (!agentAbortRef.current) setAgentRun(null);
     setIsTeachPanelOpen(false);
     // Save scroll position of the current chat before switching
@@ -3867,11 +3735,9 @@ export default function ChatApp() {
   }
 
   async function removeChat(chatId) {
-    // Read from the ref, not the closure: a memoized ChatItem may be holding an
-    // older removeChat whose captured activeChatId is stale, which would skip
-    // aborting the stream for the chat actually being deleted.
+    // From the ref: a memoized ChatItem may hold a removeChat with a stale activeChatId.
     const currentChatId = activeChatIdRef.current;
-    // Abort any in-flight stream so the post-stream saveChat doesn't resurrect the chat
+    // Abort first so the post-stream saveChat cannot re-create the chat.
     if (currentChatId === chatId) stopStreaming();
     await api(`/api/chats/${chatId}`, { method: 'DELETE' });
     setOpenChatMenuId((current) => (current === chatId ? null : current));
@@ -3885,22 +3751,19 @@ export default function ChatApp() {
   }
 
   async function clearAllChats() {
-    // Abort stream first - otherwise the post-stream saveChat fires after the
-    // DELETE and immediately re-adds the last chat (intermittent "comes back" bug)
+    // Abort first, or the post-stream saveChat re-adds the last chat after the DELETE.
     stopStreaming();
     chatListEpochRef.current++; // invalidate any in-flight refreshChats() calls
-    // Clear UI immediately - don't wait for the network roundtrip
     setActiveChatId(null);
     setActiveChatMeta(null);
     setSelectedSnapshotId('');
     setMessages([]);
     setChats([]);
     setChatSearch('');
-    // Then flush to backend (fire and forget error - UI is already clear)
     try {
       await api('/api/chats', { method: 'DELETE' });
     } catch {
-      // ignore - UI is already empty
+      // UI is already empty.
     }
   }
 
@@ -4095,7 +3958,7 @@ export default function ChatApp() {
         return options[0] || '';
       });
     } catch {
-      // Fallback for older/failed profile detection: still expose processor details.
+      // Profile detection failed: still expose processor details.
       try {
         const specs = await api('/api/system/specs');
         const cpuModel = String(specs?.cpuModel || specs?.arch || '').trim();
@@ -4159,13 +4022,11 @@ export default function ChatApp() {
           if (Number.isFinite(ram) && ram > 0) setDeviceRamGb(ram);
         } catch { /* fit pill just won't show */ }
       }
-      // If current model is 'auto', no override needed - it resolves at send time.
-      // Only fall back if the explicitly chosen model is no longer installed.
+      // 'auto' resolves at send time; fall back only if the chosen model is gone.
       setModel((currentModel) => {
         if (currentModel === 'auto') return 'auto';
         const stillInstalled = available.some((item) => item.id === currentModel && item.available !== false);
         if (stillInstalled) return currentModel;
-        // Model was removed - fall back to auto
         return 'auto';
       });
     } catch {
@@ -4230,15 +4091,10 @@ export default function ChatApp() {
       ? (firstAvailableModel || (provider === 'openai' ? 'gpt-4o-mini' : provider === 'grok' ? 'grok-3-mini' : provider === 'groq' ? 'llama-3.3-70b-versatile' : provider === 'openrouter' ? 'meta-llama/llama-3.3-70b-instruct:free' : provider === 'gemini' ? 'gemini-2.5-flash' : provider === 'cerebras' ? 'llama-3.3-70b' : provider === 'claude' ? 'claude-3-5-sonnet-latest' : provider === 'gpuaas' ? 'model.gguf' : ''))
       : model;
 
-    // A key counts whether the BACKEND holds it or the page does. Gating on the
-    // page copy alone made every cloud provider permanently unusable, because
-    // the change that moved keys to the backend also stopped anything writing
-    // that copy. Saving a key said "Stored in the app" and the next send still
-    // refused, with no way to fix it from inside the app.
+    // A key counts whether the backend or the page holds it; nothing writes the page copy.
     const configuredApiKey = String(providerConfigs[provider]?.apiKey || '').trim();
     if (providerNeedsKey(provider) && !hasUsableKey(provider, { pageKey: configuredApiKey, hints: keyHints })) {
-      // Confirm with the server before refusing: on an early first message the
-      // hints fetch may not have landed yet, and refusing there would be wrong.
+      // Confirm with the server before refusing; hints may not have loaded yet.
       const fresh = await refreshKeyHints();
       if (!hasUsableKey(provider, { pageKey: configuredApiKey, hints: fresh || {} })) {
         setIsProviderConfigOpen(true);
@@ -4403,9 +4259,6 @@ export default function ChatApp() {
     })();
   }
 
-  // Keep refs in sync so renderMessageContent always sees latest values
-
-    // Close all dropdown/panel menus
     function closeAllDropdowns() {
       setIsProviderMenuOpen(false);
       setIsProviderConfigOpen(false);
@@ -4424,9 +4277,7 @@ export default function ChatApp() {
       setOpenChatMenuId(null);
     }
 
-    // Count of options/modes that are currently on - drives the Options badge.
-    // OpenClaw stays here; Uncensored also has a direct toolbar toggle but is still
-    // counted here since it lives in the Options Modes list too.
+    // Options badge count. Uncensored counts too: it is also in the Options Modes list.
     const optionsActiveCount =
       (uncensoredMode ? 1 : 0) +
       (openClawMode ? 1 : 0) +
@@ -4599,27 +4450,22 @@ export default function ChatApp() {
     }
 
     fetchUtilization();
-    // Poll every 30 s so image device chip stays current.
-    // Hardware profile is cached server-side after first call - no need to re-poll.
+    // Hardware profile is cached server-side; only the image service is re-polled.
     const interval = setInterval(() => {
       checkImageService();
     }, 30000);
-    // Poll utilization every 15 s (backend caches at 3 s, so no benefit polling faster)
     const utilInterval = setInterval(fetchUtilization, 15000);
     return () => { clearInterval(interval); clearInterval(utilInterval); };
   }, []);
 
-  // Probe local vLLM capability/status whenever the vLLM provider is active or its
-  // config panel opens, so the panel can offer a local launch or explain why not.
+  // Re-probe on panel open so it can offer a local launch or explain why not.
   useEffect(() => {
     if (provider === 'vllm') checkVllmStatus();
     if (provider === 'llamacpp') checkLlamacppStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, isProviderConfigOpen]);
 
-  // When the endpoint config panel CLOSES, re-list models so a newly entered
-  // server URL / key is reflected immediately (refreshModels only re-runs on a
-  // provider change, not on a base-URL edit).
+  // Re-list models when the config panel closes; a base-URL edit is not a provider change.
   const prevProviderConfigOpenRef = useRef(false);
   useEffect(() => {
     if (prevProviderConfigOpenRef.current && !isProviderConfigOpen && provider !== 'ollama') {
@@ -4633,10 +4479,8 @@ export default function ChatApp() {
     refreshModels();
   }, [provider]);
 
-  // Aurora shell integration: the floating dock + Cmd+K command palette now own
-  // the global keyboard shortcut, and drive chat actions through these DOM
-  // CustomEvents. We intentionally no longer bind Cmd+K here to avoid double-firing
-  // (palette opening AND a new chat) with the shell.
+  // The Aurora shell owns Cmd+K and drives chat actions through these events.
+  // Do not bind Cmd+K here or it fires twice.
   useEffect(() => {
     const onNewChat = () => shortcutRef.current.createChat?.();
     const onNewEphemeralChat = () => shortcutRef.current.createChat?.({ ephemeral: true });
@@ -4692,10 +4536,8 @@ export default function ChatApp() {
     safeStorageSet('mirabilis-engine-option', selectedEngine);
   }, [selectedEngine]);
 
-  // Auto-scroll to bottom while streaming new tokens - throttled to one rAF per frame.
-  // IMPORTANT: we re-check autoScrollRef.current INSIDE the RAF, not just at effect entry.
-  // This closes the race where the effect runs (ref=true), queues a RAF, the user scrolls
-  // up (ref->false), then the RAF fires anyway and overrides the user's position.
+  // One scroll per frame while streaming. autoScrollRef is re-checked inside the rAF
+  // because the user can scroll up between queueing and firing.
   useEffect(() => {
     if (!isStreaming || !messagesScrollRef.current) return;
     const el = messagesScrollRef.current;
@@ -4722,7 +4564,7 @@ export default function ChatApp() {
     requestAnimationFrame(() => { isProgrammaticScrollRef.current = false; });
   }, [activeChatId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // systemPrompt tokens isolated so typing in messages never re-runs estimateTokens(systemPrompt)
+  // Separate memo so typing does not re-estimate the system prompt.
   const systemPromptTokens = useMemo(() => estimateTokens(systemPrompt), [systemPrompt]);
 
   // Pinned-first, search-filtered chat list for the sidebar
@@ -4734,7 +4576,7 @@ export default function ChatApp() {
     return [...pinned, ...unpinned];
   }, [chats, chatSearch, pinnedChatIds]);
 
-  // Single-pass over messages for all token accounting (was two separate useMemo loops)
+  // Single pass over messages for all token accounting.
   const { chatTokenSummary, contextUsage } = useMemo(() => {
     let inputTokens = 0;
     let outputTokens = 0;
@@ -4801,9 +4643,7 @@ export default function ChatApp() {
 
     let chatId = activeChatId;
     if (!chatId) {
-      // Guard the auto-create: if it throws, it happens BEFORE the try below, so
-      // without this catch isStreaming would stay true (composer locked) and the
-      // rejection would go unhandled.
+      // Runs before the try below; a throw here would leave isStreaming stuck true.
       try {
         const payload = await api('/api/chats', {
           method: 'POST',
@@ -4836,7 +4676,7 @@ export default function ChatApp() {
     const placeholderId = `local-img-${Date.now()}`;
 
     if (!imageServiceAvailable) {
-      // Service offline - show a helpful local message, do NOT route to LLM
+      // Service offline: show setup steps instead of routing to the LLM.
       const offlineMsg = {
         id: placeholderId,
         role: 'assistant',
@@ -4924,11 +4764,10 @@ export default function ChatApp() {
 
   async function regenerate() {
     if (isStreaming || !activeChatId) return;
-    // Find the last user message
     const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user');
     if (!lastUserMsg) return;
 
-    // Remove all messages after and including the last assistant message that followed
+    // Drop everything after the last user message.
     const lastUserIdx = messages.lastIndexOf(lastUserMsg);
     const trimmed = messages.slice(0, lastUserIdx + 1);
     // Also trim the server-side chat
@@ -4936,7 +4775,7 @@ export default function ChatApp() {
     const serverMessages = chat.chat?.messages || [];
     const serverUserIdx = serverMessages.map((m) => m.id).lastIndexOf(lastUserMsg.id);
     if (serverUserIdx < 0) {
-      // Temp ID not on server (e.g. message from a failed/aborted stream) - don't patch
+      // Temp ID from a failed or aborted stream is not on the server: do not patch.
       setMessages(messages.slice(0, messages.lastIndexOf(lastUserMsg) + 1));
       setInput(lastUserMsg.content);
       setTimeout(() => sendMessageWithContent(lastUserMsg.content), 0);
@@ -4952,13 +4791,7 @@ export default function ChatApp() {
     setTimeout(() => sendMessageWithContent(lastUserMsg.content), 0);
   }
 
-  // Chat -> Ledger loop: turn the current conversation into an IntelLedger session,
-  // extracting signals/actions from it, then jump straight to that session. Reuses
-  // the existing create-session + ingest/text endpoints (extraction has a heuristic
-  // fallback, so this works even without a live model).
-  // Build the plain-text transcript of the current conversation. Shared by the
-  // Chat -> Ledger commit flow and the Commitment Radar preview scan so both see
-  // exactly the same text.
+  // Shared by Chat -> Ledger and Commitment Radar so both see the same text.
   function buildChatTranscript() {
     return messages
       .filter((m) => m.content && (m.role === 'user' || m.role === 'assistant'))
@@ -4966,9 +4799,7 @@ export default function ChatApp() {
       .join('\n\n');
   }
 
-  // Commitment Radar: ambient, read-only pass over the current chat. Posts the
-  // transcript to the preview-only /scan endpoint (which persists nothing) and
-  // opens the radar panel with the detected commitments/asks/decisions.
+  // Read-only: /scan is preview-only and persists nothing.
   async function runCommitmentRadar() {
     if (radarLoading) return;
     const transcript = buildChatTranscript();
@@ -4983,9 +4814,8 @@ export default function ChatApp() {
       return;
     }
     setRadarLoading(true);
-    // The contradiction pass embeds the whole history and asks a local model to
-    // judge each candidate, so it runs alongside (and slower than) the fast
-    // heuristic scan. It writes nothing and is best-effort: any failure is silent.
+    // The contradiction pass uses embeddings and a local model, so it runs beside
+    // the faster heuristic scan. Best effort; writes nothing.
     setRadarConflictsLoading(true);
     postJSON('/api/recall/contradictions', { text: transcript }, { timeoutMs: 120000 })
       .then((payload) => {
@@ -5036,7 +4866,6 @@ export default function ChatApp() {
       setStatusText('Committed to Ledger - signals extracted.');
       appStore.toast('Committed to Ledger', { kind: 'success' });
       playReceive();
-      // Close the loop: open the new session in the Ledger tab.
       window.dispatchEvent(new CustomEvent('mirabilis:open-session', { detail: { id: sessionId } }));
     } catch (err) {
       setStatusText(`Commit to Ledger failed: ${err.message}`);
@@ -5054,11 +4883,8 @@ export default function ChatApp() {
   }
 
 
-  // Autonomous runs
-  // An agentic effort tier does not send a chat message: it starts a job on the
-  // backend and streams its progress. The transcript still gets the goal and the
-  // final result, so the conversation reads normally afterwards, but everything
-  // in between belongs to the run panel.
+  // Autonomous runs. An agentic tier starts a backend job and streams progress to
+  // the run panel; the transcript gets only the goal and the final result.
   function stopAgentRun() {
     const run = agentRunRef.current;
     if (run?.id) {
@@ -5069,7 +4895,6 @@ export default function ChatApp() {
     setAgentRun((prev) => (prev ? { ...prev, status: 'stopping' } : prev));
   }
 
-  // Ask for the shell acknowledgement, and remember the answer for this session.
   // Shared by the policy menu and the send path so the wording cannot drift.
   function confirmFullPolicy() {
     const ok = window.confirm(
@@ -5084,19 +4909,14 @@ export default function ChatApp() {
   }
 
   async function runAgentGoal(goal) {
-    // One run at a time. Two concurrent runs would share agentRunRef, so only
-    // the newer one could be stopped and the older would keep burning budget
-    // invisibly.
+    // One run at a time: runs share agentRunRef, so an older one could not be stopped.
     if (agentAbortRef.current) {
       appStore.toast('A run is already in progress. Stop it before starting another.', { kind: 'warn' });
       return;
     }
 
-    // Ask rather than let the server refuse. Reaching the backend without the
-    // acknowledgement produces a rejection the user cannot act on, so whenever
-    // the policy needs one and does not have it, get it here. Declining falls
-    // back to the policy that does real work without opening a shell, which is
-    // far better than refusing to run at all.
+    // Ask here instead of letting the server refuse. Declining falls back to
+    // 'write', which still works without a shell.
     let policyForRun = toolPolicy;
     let acknowledged = fullPolicyAcknowledged;
     if (needsFullAcknowledgement(policyForRun, acknowledged)) {
@@ -5163,21 +4983,17 @@ export default function ChatApp() {
       });
 
       if (!res.ok || !res.body) {
-        // The server writes a plain sentence in `error`. Printing the raw body
-        // put a wall of escaped JSON on screen for what is usually a simple,
-        // actionable refusal.
+        // Show the server's `error` sentence, not the raw JSON body.
         const detail = await res.text().catch(() => '');
         throw new Error(describeRunError(res.status, detail));
       }
 
-      // Accepted. Only now is it safe to take the text away.
+      // Clear only after the server accepts the run, so a refusal keeps the text.
       setInput('');
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      // Shared, tested parser rather than an inline one. The inline version
-      // required exactly "data: " with a space, so a server writing "data:{...}"
-      // produced no events at all and the run appeared to hang.
+      // Shared parser; accepts "data:" with or without the space.
       const sse = createSseParser();
 
       while (true) {
@@ -5206,11 +5022,7 @@ export default function ChatApp() {
               status: payload.ok ? 'completed' : 'stopped',
               stopReason: payload.stopReason,
               answer: payload.answer,
-              // Keep the reason. The backend computes an actionable sentence for
-              // a failed run ("Could not reach ollama ... Start it with
-              // `ollama serve`") and this handler used to drop it, so the panel
-              // collapsed to the bare word "Stopped" and the user was told
-              // nothing at all about what went wrong.
+              // Keep the backend's actionable failure sentence for the panel.
               error: payload.ok ? '' : (payload.error || prev.error || ''),
               budget: payload.budget
             } : prev));
@@ -5219,9 +5031,7 @@ export default function ChatApp() {
             }
             // The backend writes the run into the chat; reload to show it.
             if (payload.persistedTo) {
-              // Only reload if the user is still in the run's chat. An hour-long
-              // run finishing used to force-navigate them out of whatever they
-              // had moved on to, discarding an in-progress draft.
+              // Reload only if the user is still in the run's chat, so a draft elsewhere survives.
               if (activeChatIdRef.current === payload.persistedTo) {
                 await loadChat(payload.persistedTo).catch(() => {});
               }
@@ -5231,14 +5041,7 @@ export default function ChatApp() {
           }
           if (currentEvent !== 'progress') continue;
 
-          // Progress: keep the meters current and narrate what happened.
-          //
-          // Only the PARENT's budget belongs in the meters. Sub-agent events
-          // carry their own much smaller allowance, so during fan-out the panel
-          // reported a child's numbers as the run's: time-left jumped to the
-          // child's, "step 4/12" became "step 1/3", and the Agents meter
-          // vanished because a child is not allowed to spawn any. Fan-out is
-          // exactly when the meters matter most.
+          // Meters show only the parent's budget; sub-agent events carry their own smaller one.
           if (payload.budget && payload.subAgent === undefined) {
             setAgentRun((prev) => (prev ? { ...prev, budget: payload.budget } : prev));
           }
@@ -5277,28 +5080,16 @@ export default function ChatApp() {
   }
 
   async function sendMessageWithContent(content) {
-    // If the user recently attached an image, they are analyzing it (vision),
-    // not asking to generate one - don't let the "show/make ... image" wording
-    // heuristic misfire into image generation.
-    // An autonomous effort tier is a job, not a message: hand it to the agent
-    // runner and return. The run panel takes over from here.
-    //
-    // This is checked BEFORE the image-wording heuristic on purpose. A goal like
-    // "show me a snapshot of which services are listening" contains image words,
-    // and the heuristic used to win, silently turning a chosen 5-hour run into
-    // an image generation. An explicit tier beats a guess.
+    // An agentic tier is a job for the run panel. Checked before the image-wording
+    // heuristic because goals often contain image words; an explicit tier wins.
     if (AGENTIC_EFFORTS.has(effortLevel)) {
-      // Deliberately NOT clearing the composer here. An agent goal is usually
-      // several sentences of carefully specified instructions, and every path
-      // that refuses the run (Go Dark with a cloud provider, a run already in
-      // flight, a goal the server rejects) used to destroy that text before the
-      // server had agreed to anything. runAgentGoal clears it once the run is
-      // actually accepted, which is what the chat path below already does.
+      // Do not clear the composer: runAgentGoal clears it once the run is accepted.
       playSend();
       runAgentGoal(content);
       return;
     }
 
+    // A recently attached image means vision, so skip the image-generation heuristic.
     const recentImage = (messages || []).slice(-4).some(
       (m) => Array.isArray(m.attachments) && m.attachments.some((a) => /^image\//i.test(a?.mimeType || ''))
     );
@@ -5345,9 +5136,8 @@ export default function ChatApp() {
         'Effort: thorough. Work through the key considerations and give a complete, well-structured answer.'
       );
     }
-    // balanced: no extra instruction.
-    // Treat effort "deep" as equivalent to the deep-thinking toggle so the two do not
-    // double up: push the deep lines once if either is set.
+    // balanced: no extra instruction. Effort "deep" and the deep-thinking toggle
+    // share one set of lines so they do not double up.
     if (deepThinkingEnabled || effortLevel === 'deep') {
       behaviorInstructions.push(
         'Deep thinking mode: reason carefully, compare alternatives, and include key trade-offs.',
@@ -5358,8 +5148,7 @@ export default function ChatApp() {
       outboundContent = [content, '', ...behaviorInstructions].join('\n');
     }
 
-    // Canvas: when enabled, fold the user's canvas notes into the message as
-    // working context (previously the canvas text never reached the model).
+    // Canvas notes go into the message as working context.
     if (canvasEnabled && canvasText.trim()) {
       outboundContent = `${outboundContent}\n\n[Canvas notes - treat as the user's working context]\n${canvasText.trim()}`;
     }
@@ -5374,9 +5163,8 @@ export default function ChatApp() {
       ].join(' ');
       outboundContent = `${outboundContent}\n\n[System: ${disclaimer}]`;
     }
-    // Go Dark blocks web search regardless of which model is selected: the query
-    // is the user's raw text and would go to a third-party search API. The
-    // provider check above only covers the model call, not this one.
+    // Go Dark blocks web search for any model: the raw query would go to a
+    // third-party API, and the provider check above covers only the model call.
     if (deepWebEnabled && appStore.getGoDark()) {
       appStore.toast('Go Dark is on - web search is off, so this answer uses local knowledge only.', { kind: 'warn' });
     }
@@ -5423,11 +5211,8 @@ export default function ChatApp() {
       }
     }
 
-    // Watched Workspace: fold pinned files' FRESH contents (pulled from disk at
-    // this exact moment, not a stale upload) into the outbound message as live
-    // context. Only the pinned relative paths are ever persisted - the file bytes
-    // are fetched on demand here and prepended. Capped so a large pin set cannot
-    // blow up the prompt; missing/oversize files are skipped, never fatal.
+    // Pinned files are read from disk at send time; only their paths persist.
+    // Capped so a large pin set cannot blow up the prompt; failures are skipped.
     const pins = appStore.getWorkspacePins ? appStore.getWorkspacePins() : [];
     if (pins.length > 0) {
       const MAX_WORKSPACE_CONTEXT = 40 * 1024; // ~40 KB combined budget
@@ -5452,10 +5237,7 @@ export default function ChatApp() {
         ].filter(Boolean).join('\n');
         outboundContent = `${header}\n\n${blocks.join('\n\n')}\n\n${outboundContent}`;
       }
-      // Every pin failed. This is the case that used to be completely silent:
-      // the note above only rendered when at least one file succeeded, so the
-      // total failure - the one that matters - said nothing at all, and the
-      // composer went on claiming the files were live context.
+      // Every pin failed; the header above renders only when one succeeds.
       if (blocks.length === 0 && skipped > 0) {
         appStore.toast(
           `None of the ${skipped} pinned workspace file(s) could be read, so they were not sent. Reopen Workspace and re-pick the folder.`,
@@ -5464,10 +5246,7 @@ export default function ChatApp() {
       }
     }
 
-    // Config Vault: cited RAG over the user's own config folder. Fully local
-    // (Ollama embeddings), so it is allowed even under Go Dark. Retrieves the
-    // most relevant config chunks for this message and folds them in with their
-    // file:line citations so the model can ground its answer and cite sources.
+    // Config Vault uses local Ollama embeddings, so it is allowed under Go Dark.
     if (configVaultEnabled && configVaultStatus && configVaultStatus.chunkCount > 0) {
       try {
         setStatusText('Searching your config vault...');
@@ -5492,9 +5271,8 @@ export default function ChatApp() {
       }
     }
 
-    // resolveProviderForSend throws when a cloud provider has no API key (or its
-    // health check fails). The composer was already cleared above, so restore the
-    // draft and surface the error instead of losing input to an unhandled reject.
+    // Throws on a missing key or failed health check; the composer is already
+    // cleared, so restore the draft.
     let resolvedProvider;
     try {
       resolvedProvider = await resolveProviderForSend();
@@ -5508,12 +5286,8 @@ export default function ChatApp() {
 
     let chatId = activeChatId;
     if (!chatId) {
-      // Guarded for the same reason as resolveProviderForSend above. This call
-      // is the first thing a message sends on a cold start, which is exactly
-      // when the backend may not be listening yet. Unguarded, it rejected out of
-      // a function invoked bare from the composer: the typed text was gone, the
-      // transcript stayed empty, no error appeared anywhere, and the status chip
-      // read "Streaming response..." forever.
+      // First request on a cold start, when the backend may not be up yet.
+      // Restore the draft and report instead of rejecting unhandled.
       try {
         const payload = await api('/api/chats', {
           method: 'POST',
@@ -5599,13 +5373,7 @@ export default function ChatApp() {
       });
 
       if (!response.ok || !response.body) {
-        // describeRunError, not the raw body. A refusal the user can act on was
-        // arriving in the chat bubble as escaped JSON:
-        //   Error: {"error":"Go Dark is on - the endpoint resolves to a
-        //   non-local host. Pick a local model ..."}
-        // The server already writes that sentence in `error`; show only that.
-        // This is the same fix already applied to the agent path, which is the
-        // rarer of the two.
+        // Show the server's `error` sentence, not the raw JSON body.
         const details = await response.text().catch(() => '');
         throw new Error(describeRunError(response.status, details));
       }
@@ -5615,10 +5383,8 @@ export default function ChatApp() {
       let buffer = '';
       refreshStallWatchdog();
 
-      // Coalesce streamed tokens: buffer incoming tokens and flush at most once per
-      // animation frame. Previously every token did its own setMessages, which
-      // re-parsed the whole (growing) message through Markdown + Prism on each
-      // token - O(n^2) for long answers. One flush per frame keeps rendering smooth.
+      // Flush at most once per frame; a setMessages per token re-parses the whole
+      // message through Markdown and Prism, O(n^2) on long answers.
       let pendingTokens = '';
       let tokenRafId = null;
       let tokenTimerId = null;
@@ -5642,9 +5408,7 @@ export default function ChatApp() {
           return next;
         });
       };
-      // rAF renders smoothly in-focus; the setTimeout fallback keeps output flowing
-      // when the window is backgrounded (rAF is throttled/paused there), so a long
-      // local generation never looks frozen while the user is in another app.
+      // The setTimeout fallback keeps output flowing when a background window pauses rAF.
       const scheduleFlush = () => {
         if (canRaf && tokenRafId == null) tokenRafId = requestAnimationFrame(flushTokens);
         if (tokenTimerId == null) tokenTimerId = setTimeout(flushTokens, 250);
@@ -5657,9 +5421,7 @@ export default function ChatApp() {
         pendingTokens = '';
       };
 
-      // Live during-stream progress in the status line: real generated-token count,
-      // elapsed seconds, and rolling tok/s (replaces the faked "Thinking..." ladder).
-      // Before the first token it shows a genuine "loading" state, not a wall-clock guess.
+      // Status line: token count, tok/s and elapsed time; a loading state before the first token.
       let liveTokenCount = 0;
       let liveFirstTokenTs = null;
       liveProgressTimer = setInterval(() => {
@@ -5743,7 +5505,7 @@ export default function ChatApp() {
           }
 
           if (event === 'notice' && payload.message) {
-            // OOM auto-retry (or similar) reduced the runtime settings; surface it.
+            // For example, an OOM retry reduced the runtime settings.
             setStatusText(payload.message);
           }
 
@@ -5753,8 +5515,7 @@ export default function ChatApp() {
           }
 
           if (event === 'done') {
-            // The full message supersedes any buffered tokens; drop the pending
-            // flush so a late frame can't append stale tokens after finalization.
+            // The full message supersedes buffered tokens; a late flush would append stale ones.
             cancelTokenFlush();
             playReceive(); // ICQ "message received" two-tone cue
             setMessages((prev) => {
@@ -5764,8 +5525,7 @@ export default function ChatApp() {
               }
               return next;
             });
-            // Voice chat drives its own TTS via the loop; skip auto-speak there
-            // so the reply is not spoken twice.
+            // The voice loop speaks the reply itself; skip auto-speak to avoid doubling.
             if (autoSpeakEnabled && !voiceActiveRef.current && payload?.message?.role === 'assistant') {
               speakText(payload.message.content || '', payload.message.id || null);
             }
@@ -5781,13 +5541,8 @@ export default function ChatApp() {
         }
       }
 
-      // refreshChats() intentionally removed from the stream success path.
-      // New chats are already in the sidebar (added before streaming started).
-      // Titles are updated via the 'titleUpdate' SSE event during the stream.
-      // Calling refreshChats() here was the second failure path for the
-      // "clear all -> chats come back" bug: if the stream finished just after
-      // clearAllChats(), this call would return the backend-saved chat and
-      // overwrite the just-emptied chats list.
+      // No refreshChats() here: finishing just after clearAllChats() would restore
+      // the cleared list. New chats and titles already arrive via the stream.
       if (trainingMode === 'fine-tuning') {
         await refreshTrainingStats();
       }
@@ -5819,17 +5574,13 @@ export default function ChatApp() {
           return next;
         });
       } else {
-        // Short label only. The full explanation is in the message bubble, and
-        // the status line is a fixed-width chip in a crowded header: putting a
-        // sentence there overflowed it into the hardware chips.
+        // Short label only: the status chip is fixed-width; the bubble has the detail.
         setStatusText(/Could not reach/i.test(String(error.message)) ? 'No engine' : 'Error');
         playError(); // ICQ error cue
         setMessages((prev) => {
           const next = [...prev];
           if (next.length > 0 && next[next.length - 1].role === 'assistant' && !next[next.length - 1].content) {
-            // Drop the provider/model stamp on a failed turn. Nothing ran, so
-            // badging it "On-device llama3" claimed a model that was never used
-            // and, on a fresh install, is not even installed.
+            // No provider/model stamp on a failed turn: nothing ran.
             const { effectiveProvider, effectiveModel, provider: _p, model: _m, performance, ...rest } = next[next.length - 1];
             next[next.length - 1] = { ...rest, failed: true, content: `Error: ${error.message}` };
           }
@@ -5843,8 +5594,7 @@ export default function ChatApp() {
     }
   }
 
-  // Always keep shortcut ref in sync with latest handlers (avoids stale closure
-  // in the Aurora shell CustomEvent listeners).
+  // Refreshed every render so the shell event listeners never call a stale closure.
   shortcutRef.current.createChat = createChat;
   shortcutRef.current.loadChat = loadChat;
 
@@ -5960,8 +5710,6 @@ export default function ChatApp() {
               onChange={(e) => setChatSearch(e.target.value)}
               className="min-w-0 flex-1 rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-1.5 text-xs outline-none placeholder:text-[color:var(--text-muted)] focus:border-accent dark:placeholder:text-[color:var(--text-muted)]"
             />
-            {/* New chat: a compact accent button beside the search, so a fresh
-                chat is one click away without spending a full sidebar row. */}
             <button
               onClick={() => createChat()}
               title="New chat"
@@ -5972,10 +5720,7 @@ export default function ChatApp() {
                 <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
               </svg>
             </button>
-            {/* Clear all: a subtle icon that arms on first click and clears on the
-                second, so nuking every chat is never a single misclick. Hidden
-                entirely when there is nothing to clear. Per-chat delete lives on
-                the row itself (hover the chat). */}
+            {/* Clear all: arms on the first click, clears on the second. */}
             {chats.length > 0 && (
               <button
                 onClick={() => { if (clearArmed) { clearAllChats(); setClearArmed(false); } else { setClearArmed(true); } }}
@@ -6071,9 +5816,7 @@ export default function ChatApp() {
                   {engineUp === false && statusText === 'Ready' ? 'No engine' : statusText}
                 </p>
 
-                {/* hardware chips - one per logic/memory/compute/npu, live utilization + per-chip popover.
-                    No overflow wrapper: it would clip each chip's absolute popover. The chips are
-                    compact (CPU % / RAM % / GPU / NPU) so they fit the row without scrolling. */}
+                {/* No overflow wrapper: it would clip each chip's absolute popover. */}
                 <div className="flex min-w-0 items-center gap-1.5">
                   {['logic', 'memory', 'compute', 'npu'].map((key) => {
                     const item = hardwareProfile[key];
@@ -6194,8 +5937,7 @@ export default function ChatApp() {
                     title={`Context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens (${contextUsage.usedPct}%). Click for details.`}
                     aria-label={`Context ${contextUsage.usedPct} percent used`}
                   >
-                    {/* The flower doubles as the usage dial: the ring fills as the
-                        window does, and turns amber then red as it runs out. */}
+                    {/* Usage dial: the ring fills with the context window, amber then red. */}
                     <span className="relative inline-flex h-6 w-6 items-center justify-center">
                       <svg viewBox="0 0 36 36" className="absolute inset-0 h-6 w-6 -rotate-90" aria-hidden="true">
                         <circle cx="18" cy="18" r="15.5" fill="none" strokeWidth="3"
@@ -6403,9 +6145,7 @@ export default function ChatApp() {
                     : activeChatId ? 'Type a message below to get started.' : 'See who is online in the flower, pick a model in the bar, and start talking.'}
                 </p>
 
-                {/* First run: a fresh install has no engine, so inviting the user
-                    to "start talking" sent them straight into a transport error
-                    with no idea what to do. Say what is missing and how to fix it. */}
+                {/* No engine reachable: say what is missing and how to fix it. */}
                 {engineUp === false && (
                   <div className="w-full max-w-md rounded-[var(--r-lg)] border border-amber-400/40 bg-amber-50/70 p-4 text-left dark:border-amber-400/25 dark:bg-amber-950/20">
                     <p className="mb-2 text-[length:var(--text-sm)] font-semibold text-amber-900 dark:text-amber-200">
@@ -6454,8 +6194,7 @@ export default function ChatApp() {
 
             <RemoteExecContext.Provider value={remoteExecValue}>
             {messages.map((message, idx) => {
-              // While the reply is still empty the trailing assistant turn is
-              // represented by the typing indicator below, not by an empty bubble.
+              // An empty trailing reply is drawn by the typing indicator below.
               if (showTypingIndicator && idx === messages.length - 1) return null;
               return (
               <MessageRow
@@ -6473,9 +6212,7 @@ export default function ChatApp() {
               />
               );
             })}
-            {/* Rendered as a sibling rather than inside the last MessageRow, so
-                the streaming flags never have to be broadcast to every row and
-                invalidate their memo on each transition. */}
+            {/* Outside MessageRow so streaming flags do not invalidate every row's memo. */}
             {showTypingIndicator && (
               <div
                 className="w-full rounded-[var(--r-lg)] px-4 py-2.5"
@@ -6544,10 +6281,7 @@ export default function ChatApp() {
           )}
 
           <footer className="mt-3 border-t border-black/10 pt-3">
-            {/* The autonomous run used to be a block here. It now sits inline in
-                the composer action row below, in space that was already empty. */}
-
-            {/* ROW 1: slim toolbar. Left: model, effort, options. Right: status + tokens. */}
+            {/* Toolbar. Left: model, effort, options. Right: status + tokens. */}
             <div className="mb-2 flex items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-1.5">
                 {/* Model unit: provider and model triggers read as one pill */}
@@ -6604,10 +6338,7 @@ export default function ChatApp() {
                       <div className="min-h-0 flex-1 overflow-y-auto p-1">
                         {(() => {
                           const q = providerSearch.trim().toLowerCase();
-                          // vLLM is grouped by intent: "Local" until you point it at a
-                          // remote server URL, then it moves to "Remote". (On Apple Silicon
-                          // local vLLM can't actually launch - the config panel explains
-                          // that and offers llama.cpp/MLX or a remote URL instead.)
+                          // vLLM shows under "Local" until given a remote URL, then "Remote".
                           const vllmHasRemote = !!String(providerConfigs?.vllm?.baseUrl || '').trim();
                           const effGroup = (o) => (o.id === 'vllm' ? (vllmHasRemote ? 'Remote' : 'Local') : o.group);
                           const groups = PROVIDER_GROUPS
@@ -6915,8 +6646,7 @@ export default function ChatApp() {
                             </button>
                           ) : null}
                         </div>
-                        {/* The value is never sent back to the page, so show only
-                            what is stored and enough of it to recognise. */}
+                        {/* The key never returns to the page; show only the masked hint. */}
                         <p className="mb-2 text-[10px] text-[color:var(--text-muted)]">
                           {keyHints[provider]?.hasKey
                             ? `Stored in the app: ${keyHints[provider].hint}. Keys are held by the backend, not the browser.`
@@ -7032,13 +6762,8 @@ export default function ChatApp() {
                                         setStatusText(`${plabel} loads a GGUF at launch and cannot pull models. Drop a .gguf into mirabilis/models, or start ${plabel} with your model, then it will appear here.`);
                                       }
                                     } else if (isInstalled) {
-                                      // Only the locally hosted GGUF servers need the
-                                      // backend to load a different file. For everything
-                                      // else the model id just travels with each request,
-                                      // so picking one is a local state change. Posting
-                                      // them all to switch-model made choosing a model
-                                      // impossible for ten providers: the route 400s, and
-                                      // setModel lived inside the .then() that never ran.
+                                      // Only local GGUF servers need switch-model; elsewhere the
+                                      // id travels with each request and the route returns 400.
                                       if (!needsServerModelSwitch(provider)) {
                                         setModel(item.id);
                                         setStatusText(`Active model: ${item.label}`);
@@ -7187,8 +6912,7 @@ export default function ChatApp() {
                         })()
                       )}
 
-                    {/* Pull any model not in the list (Ollama mode) - reuses the
-                        existing install-job pipeline via installModel(). */}
+                    {/* Pull any Ollama model by name via installModel(). */}
                     {provider === 'ollama' && (
                       <div className="mt-1 border-t border-black/10 px-2 py-2">
                         <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Add any model</div>
@@ -7217,9 +6941,7 @@ export default function ChatApp() {
                             disabled={
                               !customModelInput.trim()
                               || !!pullingModels[customModelInput.trim()]
-                              // Only block on a definite "no such model". An
-                              // unreachable registry must never stop someone
-                              // installing a model they know is real.
+                              // Block only on a definite "no such model", not an unreachable registry.
                               || customModelLookup?.status === 'missing'
                               || customModelLookup?.status === 'invalid'
                             }
@@ -7259,9 +6981,7 @@ export default function ChatApp() {
                       </div>
                     )}
 
-                    {/* KoboldCpp / custom-endpoint runtimes load one GGUF at launch and
-                        cannot pull models on demand. Explain how to get a model in,
-                        instead of showing a dead "install" row. */}
+                    {/* These runtimes load one GGUF at launch and cannot pull on demand. */}
                     {(provider === 'koboldcpp' || provider === 'openai-compatible') && (
                       <div className="mt-1 border-t border-black/10 px-2 py-2">
                         <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Loading a model</div>
@@ -7427,8 +7147,7 @@ export default function ChatApp() {
                         </button>
                       ))}
 
-                      {/* Autonomous tiers. Separated because picking one changes
-                          what SEND does: it starts a budgeted job, not a turn. */}
+                      {/* Separate group: these make Send start a budgeted job, not a turn. */}
                       <div className="mt-1 border-t border-[var(--hairline)] px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
                         Autonomous work
                       </div>
@@ -7478,9 +7197,7 @@ export default function ChatApp() {
                     </div>
                   )}
                 </div>
-                {/* Direct one-click Uncensored toggle. No menu: a single click flips it.
-                    Uncensored is a pure on/off, so it earns a top-level toggle; the
-                    other modes stay in Options (MCP needs a server pick, not a toggle). */}
+                {/* Uncensored is a plain on/off, so it gets a toolbar toggle; other modes stay in Options. */}
                 <button
                   type="button"
                   onClick={toggleUncensoredMode}
@@ -7495,9 +7212,7 @@ export default function ChatApp() {
                 >
                   Uncensored
                 </button>
-                {/* Direct one-click web-search toggle (the "www" chip). Same chip template
-                    as its siblings; on is the default so it stays neutral, and only the
-                    off state tints (our danger-rose), matching the Aurora chip look. */}
+                {/* The "www" web-search chip; only the off state tints. */}
                 <button
                   type="button"
                   onClick={() => setDeepWebEnabled((prev) => !prev)}
@@ -7522,7 +7237,7 @@ export default function ChatApp() {
                 >
                   www
                 </button>
-                {/* Options dropdown: relocated tools, training, modes, and voice */}
+                {/* Options dropdown: tools, training, modes and voice */}
                 <div data-menu-container="true" className="relative">
                   <button
                     type="button"
@@ -8162,9 +7877,7 @@ export default function ChatApp() {
                       <span className="text-[10px] text-[color:var(--text-muted)]">{voiceSupported ? 'TTS ready' : 'Unavailable'}</span>
                     </div>
 
-                    {/* Speech-to-text (talking to the assistant). The live voice loop
-                        records audio and transcribes locally via whisper.cpp - the
-                        browser Web Speech API does not work in the desktop app. */}
+                    {/* Speech-to-text runs on local whisper.cpp; Web Speech does not work in the desktop app. */}
                     <div className="mb-2 rounded-lg border border-[var(--hairline)] p-2">
                       <div className="mb-1 flex items-center justify-between">
                         <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Speech to Text (talking)</span>
@@ -8402,7 +8115,7 @@ export default function ChatApp() {
               </div>
             </div>
 
-            {/* ROW 2: input bar - single-container composer. textarea on top, then one action row: [attach mic voice] ... [Send]. */}
+            {/* Composer: textarea, then one action row. */}
             <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] focus-within:border-[color:var(--accent)] transition">
               <input
                 ref={fileInputRef}
@@ -8476,8 +8189,7 @@ export default function ChatApp() {
                     <WaveIcon size={16} className="h-4 w-4" />
                   </button>
                 </div>
-                {/* The gap this fills was pure whitespace. min-w-0 so a long
-                    last-event line truncates instead of shoving Send off. */}
+                {/* min-w-0 so a long last-event line truncates instead of pushing Send off. */}
                 {agentRun && (
                   <AgentRunPanel
                     run={agentRun}

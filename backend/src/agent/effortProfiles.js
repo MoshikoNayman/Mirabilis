@@ -1,18 +1,6 @@
 // @ts-check
-// backend/src/agent/effortProfiles.js
-// Execution-effort profiles.
-//
-// The pre-existing "effort" setting (instant/fast/balanced/thorough/deep) is a
-// STYLE hint: it appends a sentence to the system prompt and changes how verbose
-// the answer is. It cannot change how much WORK happens, because the chat path
-// is single-shot.
-//
-// These profiles are the other axis: how much work the agent is allowed to do.
-// A profile is a hard budget (wall clock, iterations, tool calls, tokens) plus a
-// shape (does it plan, does it validate, may it fan out to sub-agents). The
-// budget is enforced in code by budget.js, never by asking the model nicely,
-// because a model that has lost the thread is exactly the one that will claim it
-// needs "just one more" iteration.
+// Effort profiles: hard work budgets plus run shape (plan, validate, sub-agents).
+// budget.js enforces the numbers in code; the model is never trusted to stop itself.
 
 /**
  * @typedef {object} EffortProfile
@@ -31,16 +19,13 @@
  * @property {string} [styleHint]       Appended to the system prompt.
  */
 
-/** Minutes and hours, spelled out so the numbers below stay readable. */
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 
 /** @type {Record<string, EffortProfile>} */
 export const EFFORT_PROFILES = {
-  // Non-agentic: today's behaviour, preserved exactly.
-  // These stay single-shot on purpose. Most messages are a question, not a job,
-  // and putting a planning pass in front of "what does this flag do" would make
-  // the app feel broken.
+  // Single-shot tiers: most messages are questions, and a planning pass would
+  // only add latency.
   instant: {
     id: 'instant', label: 'Instant',
     description: 'One shot, shortest correct answer.',
@@ -78,10 +63,8 @@ export const EFFORT_PROFILES = {
     id: 'high', label: 'High effort',
     description: 'Plan, execute with tools, validate, repair. Minutes.',
     agentic: true,
-    // 30 minutes, not 10: twelve iterations with a validation pass and repairs
-    // needs real room. Note the wall clock means different things either side of
-    // this line. For the single-shot tiers above it is a safety timeout on one
-    // generation; from here down it is an actual work budget.
+    // On single-shot tiers maxWallMs is a timeout for one generation; from here
+    // down it is a work budget sized for iterations plus validation and repairs.
     maxWallMs: 30 * MIN, maxIterations: 12, maxToolCalls: 60, maxOutputTokens: 40_000,
     plan: true, validate: true, maxRepairAttempts: 2, maxSubAgents: 0
   },
@@ -107,11 +90,8 @@ export const DEFAULT_EFFORT_ID = 'balanced';
 export const EFFORT_ORDER = ['instant', 'fast', 'balanced', 'thorough', 'high', 'hour', 'session'];
 
 /**
- * Resolve an effort id, optionally with caller overrides, into a concrete
- * profile. Overrides are clamped to the profile's own ceiling: a request can ask
- * for LESS work than the tier allows, never more. Otherwise "effort" would be a
- * suggestion again, and a client bug (or a prompt-injected argument) could hand
- * an agent an unbounded budget.
+ * Resolve an effort id plus overrides into a concrete profile. Overrides can only
+ * lower the tier's limits, so a client bug or injected argument cannot raise them.
  *
  * @param {string} [id]
  * @param {Partial<EffortProfile>} [overrides]
@@ -132,7 +112,7 @@ export function resolveEffort(id, overrides = {}) {
   for (const key of ['maxWallMs', 'maxIterations', 'maxToolCalls', 'maxOutputTokens', 'maxRepairAttempts', 'maxSubAgents']) {
     clampNumber(key);
   }
-  // Booleans may only be turned OFF, for the same reason.
+  // Booleans may only be turned off, for the same reason.
   for (const key of ['plan', 'validate', 'agentic']) {
     if (overrides[key] === false) out[key] = false;
   }

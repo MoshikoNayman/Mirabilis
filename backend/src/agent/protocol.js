@@ -1,14 +1,6 @@
 // @ts-check
-// backend/src/agent/protocol.js
-// The wire format between the loop and the model, and a forgiving parser for it.
-//
-// Native tool-calling is not an option here. Mirabilis targets whatever the user
-// has installed, including small local GGUF models, and support ranges from
-// excellent to absent. So the contract is plain JSON in the reply text, and the
-// parser is deliberately generous: models fence it in ```json, prefix it with
-// "Sure!", emit smart quotes, or add a trailing comma. Every one of those is a
-// recoverable formatting slip, and failing the whole iteration over it would
-// burn the user's budget on punctuation.
+// Agent actions as plain JSON in the reply text, since small local models lack
+// native tool calls. The parser repairs fences, prose, smart quotes and trailing commas.
 
 /** @typedef {{kind:'tool', tool:string, args:object, thought:string}} ToolAction */
 /** @typedef {{kind:'finish', summary:string, thought:string}} FinishAction */
@@ -84,10 +76,8 @@ export function parseAgentAction(text) {
     };
   }
 
-  // Accept {action:"tool", tool:"x"}, the shorthand {tool:"x"}, and the form a
-  // real model actually produced: {action:"read_file", args:{...}}, where the
-  // tool name is put in the action field. That last one used to be rejected as
-  // an unrecognised action and cost the run an entire iteration.
+  // Accept {action:"tool", tool:"x"}, {tool:"x"}, and {action:"read_file", args:{...}},
+  // which local models emit.
   let toolName = String(parsed.tool || parsed.tool_name || parsed.name || '').trim();
   const looksLikeToolName = action && action !== 'tool' && action !== 'finish'
     && action !== 'done' && action !== 'complete'

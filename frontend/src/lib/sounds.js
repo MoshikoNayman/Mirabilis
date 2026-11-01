@@ -1,7 +1,5 @@
-// frontend/src/lib/sounds.js
-// Tiny Web Audio engine - synthesized tones, no copyrighted assets.
-// The iconic two-tone "message received" nod to ICQ, plus subtle send /
-// presence / error cues. Respects a global mute and prefers-reduced-motion.
+// Synthesized Web Audio cues (receive, send, presence, error); no audio assets.
+// Respects a global mute and prefers-reduced-motion.
 
 import { safeStorageGet, safeStorageSet } from './storage';
 

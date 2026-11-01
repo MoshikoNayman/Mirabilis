@@ -14,14 +14,10 @@ async function sandbox() {
   return dir;
 }
 
-/**
- * A model that fans out once, then finishes. Sub-agents immediately finish with
- * a per-goal answer so the test measures the fan-out, not the sub-agent.
- */
+/** A model that fans out once; each sub-agent finishes at once with a per-goal answer. */
 function fanoutModel(tasks) {
   const seen = { fanout: 0, subGoals: [] };
-  // Match the goal HEADER, not a loose substring. The parent's later prompts
-  // quote the sub-results, so `prompt.includes(task)` would count those too.
+  // Match the goal header; later parent prompts quote the sub-results.
   const subGoalOf = (prompt) => tasks.find((t) => prompt.includes(`Goal:\n${t}`));
   return {
     seen,
@@ -107,8 +103,6 @@ test('sub-agents run in parallel, not one after another', async () => {
   assert.ok(peak >= 2, `expected concurrent sub-agents, peak was ${peak}`);
 });
 
-// the budget rules that stop fan-out being an escape hatch
-
 test('the sub-agent cap is enforced and the surplus is reported as deferred', async () => {
   const dir = await sandbox();
   // 'hour' allows 3 sub-agents; ask for 5.
@@ -124,8 +118,7 @@ test('the sub-agent cap is enforced and the surplus is reported as deferred', as
 
 test('sub-agent spend is charged back to the parent budget', async () => {
   const dir = await sandbox();
-  // Distinct names: a task called 'a' would prefix-match the parent's own
-  // "Goal:\naudit three things" header and be mistaken for a sub-agent.
+  // Distinct names so no task prefix-matches the parent's own goal header.
   const tasks = ['inspect the alpha module', 'inspect the beta module'];
   const model = fanoutModel(tasks);
   const out = await run(dir, model, resolveEffort('hour'));
@@ -212,9 +205,7 @@ test('a sub-agent that fails does not sink the whole fan-out', async () => {
 });
 
 test('fan-out concurrency is capped so a weak machine is not stampeded', async () => {
-  // Sub-agents share one local engine. Firing all six at once does not make
-  // them faster (Ollama serialises per model) but does hold six live contexts,
-  // which is how a 16 GB laptop ends up in swap.
+  // Sub-agents share one local engine, so running all six at once only adds memory.
   const dir = await sandbox();
   const tasks = ['task alpha', 'task bravo', 'task charlie', 'task delta', 'task echo', 'task foxtrot'];
   let inFlight = 0;

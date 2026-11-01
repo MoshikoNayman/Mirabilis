@@ -1,651 +1,178 @@
-# Mirabilis AI - Changelog
+# Changelog
 
-Versioning follows Junos-style tags.
+Versions use Junos-style tags. Newest first.
 
 ## [Unreleased]
 
-### Controllable execution effort (autonomous agent)
-
-Effort used to control only how the model ANSWERS: five levels that appended a
-sentence to the system prompt. It could not control how much WORK happened,
-because the chat path was single-shot. There are now two axes.
-
-- **Answer style** (Instant, Fast, Balanced, Thorough, Deep) is unchanged. These
-  stay single-shot, so an ordinary question still answers in one request.
-- **Autonomous work** (High effort, 1 hour, 5 hours) runs a real loop: plan,
-  act with tools, observe, validate, repair. Each tier is a hard budget on wall
-  clock, iterations, tool calls, tokens, repairs and sub-agents.
-
-Notes on how it behaves:
-
-- **The budget is enforced in code, not asked of the model.** The model is told
-  what remains so it can prioritise, and nothing more. Request overrides can only
-  ever LOWER a tier, never raise it.
-- **Running out of budget still returns work.** Hitting a ceiling triggers a
-  wrap-up from what was actually established, plus an explicit note about what
-  was left undone.
-- **A result that fails validation is never returned as though it passed.** The
-  rejection and its reason travel with the text.
-- **Tools are least privilege by default.** A run gets read-only tools unless it
-  is explicitly granted `write` or `full`. Note that `full` is a real shell:
-  the filesystem root sets where a command starts, not what it can reach.
-- **Sub-agents** share the parent budget rather than adding to it, are capped at
-  one level of depth, and run at most two at a time. Six at once against a single
-  local engine is not faster (Ollama serialises per model) but does hold six live
-  contexts, which is how a 16 GB machine ends up swapping. Raise with
-  `MIRABILIS_AGENT_FANOUT_CONCURRENCY` on hardware that can serve in parallel.
-- **Runs are their own surface**: `POST /api/agent/runs` streams progress and can
-  be stopped. Stopping kills the whole process group, so a forked build or
-  install does not outlive the run. Runs are held in memory, so a backend restart
-  loses one that is in flight.
-- The run panel shows the live phase, every tool call, and a meter per budget
-  axis. It is collapsed to one line by default.
-- The context chip is now the flower inside a usage ring: it fills as the context
-  window does, amber at 70 percent and red at 90.
-
-### Hardening found while building it
-
-- The destructive-command blocklist anchored on a leading `/` or `~`, so
-  `cd / && rm -rf .`, `rm -rf $HOME` and `rm -rf --no-preserve-root /` all passed.
-- The filesystem jail was lexical only: a single symlink inside the root exposed
-  everything it pointed at. Paths are now checked against their real location,
-  including write targets that do not exist yet.
-- `search_files` was case-sensitive, so a search for `error` missed `ERROR` and an
-  agent reported that an application had no errors when it had two. Now
-  case-insensitive by default.
+- Autonomous runs (High effort, 1 hour, 5 hours): plan, act, validate, repair
+  under a hard budget enforced in code. Answer styles stay single-shot.
+- Out of budget returns the work so far; failed validation is reported as such.
+- Read-only tools by default; `write` and `full` are explicit grants.
+- Sub-agents share the parent budget, two at a time by default.
+- `POST /api/agent/runs` streams progress; stop kills the process group.
+- Run panel with tool calls and budget meters; context usage ring.
+- Fixed: command blocklist gaps (`rm -rf $HOME`, `--no-preserve-root`).
+- Fixed: path jail checks real paths, so symlinks cannot escape the root.
+- `search_files` is case-insensitive by default.
 
 ## [26.3R1-S1] - 2026-07-19
 
-### Local-First Engine + Capability Routing + Security Hardening
-
-- **Vision input**: attach an image and ask about it. Images are forwarded to vision-capable models (Ollama reports the capability precisely; a non-vision model gets the image stripped and a clear "pick a vision model" notice). Works with gemma3, gemma4:e4b, llava, and OpenAI-compatible or cloud vision models.
-- **llama.cpp as a first-class local engine**: pick one of your models and Start a Metal-native `llama-server` that runs the model itself (KV-cache quant + flash attention), independent of the Ollama daemon. Selectable as its own provider.
-- **LaTeX math + exact token counts**: `$...$` and `$$...$$` render as real math (KaTeX). Per-message token counts show the exact output count from Ollama with no approximation marks, alongside the exact tokens/sec.
-- **Searchable, grouped provider picker**: type to filter, grouped Local / Remote / Cloud APIs, height-capped with internal scrolling so the whole menu is always on screen.
-- **Managed llama.cpp runtime**: Mirabilis can now supervise a `llama-server` process directly, exposing the knobs Ollama hides: KV-cache quantization (q8_0 roughly halves KV memory), flash attention, and server slots. It runs your existing Ollama GGUF blobs with no re-download, one managed server at a time so unified-memory Macs stay safe.
-- **Runtime registry**: runtimes (Ollama, llama.cpp, vLLM, OpenAI-compatible, KoboldCpp) are now declarative with capability flags; vLLM is gated off Apple Silicon automatically.
-- **Capability model router**: an `auto` model picks the best installed model for the task lane (coding / reasoning / general / experimental) using a cheap keyword classifier, honoring the hardware memory ceiling. Explicit Uncensored intent routes to the experimental lane.
-- **Hardware auto-tune**: `num_ctx` is sized to the model's real context window capped by a memory budget derived from device RAM, with `low_vram` and thread counts tuned to the machine. Local generation is no longer bounded by cloud-shaped defaults.
-- **Resilient local streaming**: adaptive timeouts, OOM auto-retry with a graceful option ladder, live progress while a model loads, and split first-token / stall watchdogs so long local generations are not cut short.
-- **Local speech-to-text (voice chat)**: the hands-free voice loop now records audio and transcribes it with local whisper.cpp instead of the browser Web Speech API, which does not work in the desktop app. Fully offline; one-click install from Voice Settings downloads the engine and a small English model. The mic is released the moment a turn ends (no more stuck microphone indicator), and voice detection auto-ends a turn on a natural pause.
-- **KoboldCpp / custom endpoints**: the model menu no longer lists models these runtimes cannot install. They load a single GGUF at launch, so the menu now shows only what is actually loaded plus your local GGUF files, with a short note on how to add one. (Only Ollama pulls models on demand.)
-- **vLLM, local and remote**: vLLM is a first-class provider that works both ways. On a machine with a supported NVIDIA GPU, Mirabilis launches and manages a local `vllm serve` process (a high-throughput alternative to Ollama) from the vLLM config; on any machine you can instead point it at a remote vLLM server URL. It streams chat over the OpenAI-compatible transport and loads that server's models automatically. On Apple Silicon local vLLM is unsupported (CUDA-only), so the config says so and steers you to llama.cpp/MLX locally or a remote vLLM, without hiding the option.
-- **Scalable provider picker**: the provider selector is now a searchable command palette - type to filter, providers grouped into Local / Remote / Cloud APIs, capped height with internal scrolling so the whole menu is always on-screen no matter how many providers exist.
-- **Security**: hardened the llama.cpp runtime against path traversal. A crafted model ref or spoofed blob digest could previously resolve to a file outside the Ollama store; model refs are now charset-validated, resolved paths are confirmed inside the store root, blob digests are validated before use, and an explicit model path must be a real `.gguf` file. KV-cache quant types are whitelisted and numeric flags are clamped.
-- **Housekeeping**: the MCP client handshake version is now generated from the single VERSION source, so it can never drift from the release again.
+- Vision input; managed llama.cpp runtime (KV-cache quant, flash attention).
+- vLLM provider, local on NVIDIA/CUDA or remote; runtime registry.
+- `auto` model router per task lane; hardware auto-tune of context and threads.
+- Local streaming: adaptive timeouts, OOM retry, first-token and stall watchdogs.
+- Voice chat transcribes with local whisper.cpp.
+- KaTeX math, exact token counts, searchable grouped provider picker.
+- Security: llama.cpp model refs, digests and paths validated against traversal.
 
 ## [26.2R1-S33] - 2026-07-18
 
-### Config Vault, Inference Cockpit, Performance Receipt, Voice Chat
-
-- **Config Vault**: cited local retrieval over your own folder of network and homelab config files. Mirabilis indexes and embeds them on-device (reusing the Recall Orb embedding path, not a second vector stack) and each chat pulls the most relevant excerpts as grounding, with exact file:line citations. Fully offline, allowed under Go Dark, and jailed to the folder you choose. The index is skipped and a re-index is requested if the embedding model changes, and indexing is capped so a large tree can never run away.
-- **Inference Cockpit**: generation controls for local Ollama models under the model menu: temperature, top-p, top-k, repeat penalty, context window (num_ctx), GPU layers (num_gpu), and a fixed seed for reproducible output. Persisted, and applied only to local models.
-- **Performance Receipt**: every reply shows real tokens/sec and time-to-first-token, taken from Ollama's exact eval metrics (cloud providers fall back to measured timing). The model picker also shows a pre-pull Fits / Tight / Will-swap estimate sized against your device memory, so you can judge a model before downloading gigabytes.
-- **Voice Chat**: a hands-free spoken conversation mode with a pulsing flower orb and a male or female local voice (Piper).
-- **Quick toggles**: the two controls you flip most, Uncensored and web search (www), are now one-click toggles in the composer toolbar instead of options buried in a menu. Web search stays enabled by default; Uncensored is off by default.
+- Config Vault: cited on-device retrieval over a chosen folder.
+- Inference Cockpit for local Ollama sampling, context, GPU layers and seed.
+- Performance Receipt: tokens/sec, time to first token, model-fit estimate.
+- Voice Chat with Piper voices; Uncensored and web search composer toggles.
 
 ## [26.2R1-S32] - 2026-07-13
 
-### Chat status line: Effort control + running token total
-
-- **Effort** control under the chat (Fast / Balanced / Deep) that shapes each reply: Fast keeps it concise and direct, Deep reasons through alternatives and trade-offs. Persists across sessions.
-- **Running token total** for the conversation shown beside it (input plus output), with an input/output breakdown on hover.
-- **Launcher fix**: the image service (Stable Diffusion) now starts in the background instead of blocking startup for up to 900s on its first-run model download. Set MIRABILIS_SKIP_IMAGE=1 to skip it or MIRABILIS_WAIT_IMAGE=1 to wait.
+- Effort control (Fast, Balanced, Deep) and a running token total.
+- Image service starts in the background; `MIRABILIS_SKIP_IMAGE=1` skips it,
+  `MIRABILIS_WAIT_IMAGE=1` waits for it.
 
 ## [26.2R1-S31] - 2026-07-13
 
-### Local-First Features + Aurora Chrome Refresh
-
-- **Go Dark**: a one-flip local-only lockdown for the session. Remote/cloud providers are blocked in the UI and refused at the send path, so a session can be guaranteed to stay on the machine.
-- **Privacy Receipt**: every reply is stamped on-device or with the remote provider it was sent to, plus a token estimate.
-- **Off the Record**: an ephemeral chat kept in memory only and never written to disk; gone when you quit.
-- **Model Warmth**: the local Ollama buddy shows which model is currently warm in memory (via Ollama /api/ps), so presence reflects real readiness.
-- **Recall Orb**: local semantic recall over your own past chats and IntelLedger signals, ranked on-device with Ollama embeddings and cited. No cloud.
-- **Your Past Self Disagrees**: flags when a decision in the current conversation contradicts or supersedes an earlier one, shown inside the Commitment Radar.
-- **Commitment Radar**: scans a conversation for commitments, asks, and dated promises and files them into IntelLedger in one click (preview-only until you file).
-- **While You Were Away**: an ICQ-style panel on open surfacing overdue and due-today ledger items with resolve, snooze, and jump.
-- **Homelab Roster**: your own machines shown as ICQ-style contacts with live reachability dots; connect to one over the existing SSH path.
-- **Watched Workspace**: point Mirabilis at a folder and pin files as live context; their contents are read fresh from disk at send time. All reads are jailed to the watched root.
-- **Local Change Journal**: the MCP file tools snapshot a file's old bytes before overwriting it, so a change is reversible, and log every write and command.
-- **Chrome refresh**: the top-right dock is reduced to the presence orb plus a single menu that holds every secondary control; the Chat/Ledger switch now sits next to the wordmark. All UI glyphs are monochrome line icons that follow the active theme. A sizing pass aligned paddings, text sizes, and radii to the design scale.
-- **Housekeeping**: the MCP server reports the real app version and exposes all providers; removed a non-functional engine picker.
+- Go Dark: local-only lockdown, enforced in the UI and at the send path.
+- Privacy Receipt: each reply marked on-device or with its remote provider.
+- Off the Record: in-memory chat, never written to disk.
+- Recall Orb, Commitment Radar, Homelab Roster, Watched Workspace and more.
+- Local Change Journal snapshots files before MCP writes.
 
 ## [26.2R1-S30] - 2026-07-12
 
-### Logo System and Aurora Polish
-
-- **ICQ logo system**: rebuilt the flower mark from the authentic ICQ petal paths. The sidebar keeps the classic true-color ICQ heritage mark; the dock presence orb and the chat welcome bloom share a themeable duotone flower that recolors with the active accent. App icon and browser favicon set to the classic ICQ.
-- **Welcome screen**: the welcome flower is now a hero-sized bloom that fills its ring (fixed a class rule that had capped it to a tiny mark), sized so the screen fits with no scroll.
-- **Search cue**: during a web search the dock orb swaps to the classic true-color ICQ and spins (GPU-only transform, honors reduced-motion), echoing the original.
-- **Collapsible sidebar**: the left buddy sidebar collapses from the header to widen the workspace.
+- ICQ flower logo system; collapsible sidebar.
 
 ## [26.2R1-S29] - 2026-07-12
 
-### Hardening, Providers, and Polish
-
-- **Security hardening**: bind backend to loopback by default (`MIRABILIS_BIND_HOST`); Host-header guard (anti-DNS-rebinding); local bearer token on the `/mcp` system-tools endpoint; SSRF guard blocking cloud-metadata hosts across models/health/streaming; provider API keys moved out of URLs into an `x-provider-key` header.
-- **Data safety**: atomic store writes (temp + fsync + rename) with a rolling `.bak`, recover-from-backup, and fail-loud quarantine on corruption.
-- **Providers**: added **Cerebras** (free tier, OpenAI-compatible); refreshed auto-default models to current free options (Groq `llama-3.3-70b-versatile`, OpenRouter `meta-llama/llama-3.3-70b-instruct:free`, Gemini `gemini-2.5-flash`).
-- **IntelLedger**: "To Ledger" - commit a chat conversation into a tracked IntelLedger session with extracted signals/actions.
-- **UX/Aurora**: command palette folded into the dock pill (no more overlap); ICQ send/receive/error sound cues wired; `role="status"` live region for the status line; Send-button disabled affordance; Esc-to-close on the buddy list; scheme-aware tokenized surfaces (fixed dark-mode contrast); consistent copy-with-checkmark; canvas notes now reach the model.
-- **Streaming**: tokens coalesced per animation frame (removes O(n^2) markdown re-parse); crash-resilient SSE parse.
-- **Release**: CI test gate before builds; per-OS `SHA256SUMS`; pinned KoboldCpp download; real AppImage verification.
-- **Models**: refreshed the curated Ollama list (verified against the registry) with current free models (GPT-OSS 20B/120B, Qwen3-Coder, DeepSeek-R1 14B, Phi-4 Mini, Llama 3.2, Qwen3 32B) grouped by use case; removed dead entries.
-- **Fixes**: image model default set to `sd-legacy/stable-diffusion-v1-5`; image readiness inspects `/health` status; single-source version tooling; "IntelLedger" spelling corrected throughout.
+- Security: loopback bind, Host-header guard, `/mcp` token, SSRF guard, keys
+  in a header instead of the URL.
+- Atomic store writes with `.bak` recovery; Cerebras provider; "To Ledger".
+- CI test gate, per-OS `SHA256SUMS`, pinned KoboldCpp.
 
 ## [26.2R1-S28] - 2026-04-25
 
-### Security Hardening + Local Desktop Deployment
-
-- **Backend hardening**: Added Helmet, compression, production API rate limiting, stricter CORS handling, and disabled Express fingerprint headers.
-- **Runtime stability**: Added centralized API error handling plus graceful shutdown paths for SIGINT/SIGTERM and fatal runtime exceptions.
-- **Config controls**: Added explicit environment knobs for proxy trust, API rate limits, localhost CORS allowance, and reminder worker policy defaults.
-- **Desktop build reliability**: Hardened `desktop/build.sh` with strict shell mode and deterministic dependency install behavior (`npm ci` with install fallback).
-- **Release verification**: Backend tests and frontend production build passed after hardening changes.
-- **Deployment complete**: Packaged and validated `Mirabilis AI.app` and deployed to the user-local Applications folder.
+- Helmet, compression, rate limiting, stricter CORS, graceful shutdown.
+- `desktop/build.sh` uses strict mode and `npm ci`.
 
 ## [26.2R1-S27] - 2026-04-25
 
-### IntelLedger UX Completion + Stability Pass
-
-- **Removed technical version clutter from UI**: IntelLedger and Chat no longer show raw `v*`-style identifiers in user-facing chips or footer labels.
-- **Human-readable provenance labels**: Prompt/version badges are now easier to understand (for example, "Revision 2" instead of internal IDs).
-- **V3.1 polish completed**: Layout containment and footer-safe behavior were finalized so IntelLedger behaves consistently inside the Mirabilis shell.
-- **Safe efficiency improvements**: Added memoization for expensive derived collections in IntelLedger session rendering to reduce avoidable recomputation.
-- **Bug scrub passed**: Frontend production build and backend test suite passed after the changes.
-- **Docs refresh**: README now includes a concise, human-friendly IntelLedger section and capability summary.
+- IntelLedger: readable revision labels, layout fixes, memoized rendering.
 
 ## [26.2R1-S26] - 2026-04-24
 
-### Desktop App (Electron)
-
-- **Desktop build system**: New `desktop/` folder contains everything needed to package Mirabilis as a native desktop app.
-- **macOS**: Run `./build.sh` from `desktop/` to produce `Mirabilis AI.app` (arm64).
-- **Windows**: Run `build.bat` from `desktop/` to produce `Mirabilis AI Setup.exe` (NSIS installer, x64).
-- **Zero mess**: All build staging happens in a system temp directory and is cleaned up automatically on completion, failure, or Ctrl+C. Only `dist/` is written into `desktop/`.
-- **Self-contained app**: The packaged app bundles the backend, frontend standalone build, and all dependencies. No Node.js or separate install step required to run the app on another machine.
-- **App icon**: Custom Mirabilis flower icon with proper macOS squircle proportions.
+- Electron desktop app: `desktop/build.sh` (macOS), `build.bat` (Windows).
 
 ## [26.2R1-S25] - 2026-04-23
 
-### Chat Control, Provider Management + UI Polish
-
-- **Instruction profiles**: Built-in instruction profiles in the chat UI - Mirabilis Default, Network Engineer, Research Analyst, Guided Tutor, and Remote Operator.
-- **Saved custom profiles**: Current instructions can be saved as reusable custom profiles and deleted from the UI.
-- **Per-chat instruction persistence**: Selected profile and instruction text persist with each chat.
-- **Chat branching**: Any conversation can be cloned into a new branch to explore alternate paths without mutating the source.
-- **Snapshots**: Active chats can save restore points and roll back to a selected snapshot later.
-- **Sidebar metadata**: Chat list rows show branch and snapshot badges.
-- **In-app provider install**: Local providers (`llama-server`, `KoboldCpp`) are greyed out when their binary is missing. Install inline with live progress streaming. Supports macOS arm64/x64, Linux x64, and Windows (KoboldCpp only).
-- **In-app provider uninstall**: Installed local providers show an Uninstall button that removes the binary immediately.
-- **Image service log cleanup**: Verbose HuggingFace HTTP logs no longer printed to terminal - redirected to log file only.
-- **Sidebar button alignment**: New Chat / Delete / Clear All buttons stretch to full sidebar width.
-- **Security**: Upgraded `uuid` dependency to clear a moderate audit advisory.
+- Instruction profiles saved per chat; chat branches and snapshots.
+- Install and uninstall llama-server and KoboldCpp from the provider picker.
 
 ## [26.2R1-S24] - 2026-04-13
 
-### Multi-Provider Expansion: OpenRouter, Groq, GPUaaS + Build Reliability
-
-#### New AI Providers
-- **OpenRouter** (`openrouter`): Routes to 200+ models via a single API key. Default base URL `https://openrouter.ai/api/v1`, default model `openai/gpt-4o-mini`. Free tier available.
-- **Groq** (`groq`): Ultra-fast inference on Groq LPU chips. Default base URL `https://api.groq.com/openai/v1`, default model `llama-3.1-8b-instant`. Free tier available.
-- **GPUaaS Endpoint** (`gpuaas`): Generic OpenAI-compatible remote endpoint for any GPU-as-a-service provider (Together AI, Fireworks, RunPod, vLLM gateway, etc.). Configurable base URL and API key.
-
-#### Previously Added Providers (in this session)
-- **OpenAI** (`openai`): Direct OpenAI API, default model `gpt-4o-mini`.
-- **Grok** (`grok`): xAI API, default model `grok-3-mini`.
-- **Gemini** (`gemini`): Google AI via OpenAI-compatible endpoint, default model `gemini-2.0-flash`.
-- **Claude** (`claude`): Native Anthropic adapter (`/v1/messages`), default model `claude-3-5-sonnet-latest`.
-
-#### Provider UX Improvements
-- Provider dropdown shows Local/Remote scope labels under each option.
-- Renamed `Custom Endpoint` -> `Local/Custom Endpoint` for clarity.
-- Per-provider info banners in Configure endpoint panel (base URL, key format, link context).
-- API key placeholders show expected key prefix (`sk-...`, `gsk_...`, `sk-or-...`, `AIza...`, `sk-ant-...`).
-- Key required/optional label adapts per provider.
-- Estimated monthly budget bar shown for all remote providers (configure in endpoint panel).
-- Cost rate cards added for all new providers (Groq, OpenRouter, GPUaaS).
-- Provider-aware auto-model resolution: `auto` mode resolves to a sensible per-provider default instead of sending `auto` to the API.
-- Stream stall watchdog (120 s) protects against infinite hangs on local slow models.
-- No forced fallback from remote provider to Ollama on transient errors.
-
-#### Backend / Health API
-- Provider health endpoint whitelist extended with all new provider IDs.
-- Correct default base URLs resolved server-side so health probes work with key-only config.
-- Auth headers sent during health probe (Bearer for most, `X-Api-Key` for Anthropic).
-- Per-provider actionable hint messages (401/403 vs unreachable vs missing key).
-- Graceful startup error handling: `EADDRINUSE` and `EACCES` now exit with a readable message instead of crashing with an unhandled error event.
-
-#### Build Fix
-- Removed `next/font/google` network fetch from layout (`JetBrains Mono`, `Plus Jakarta Sans`). These fetches failed at build time in TLS-restricted environments. Replaced with local CSS variable fallbacks; fonts still applied via stack-based `--font-ui` / `--font-mono` variables in `globals.css`.
-
----
+- Providers: OpenRouter, Groq, GPUaaS, OpenAI, Grok, Gemini, Claude.
+- Per-provider hints, budget bar and `auto` model; stall watchdog.
+- No automatic fallback from a remote provider to Ollama.
 
 ## [26.2R1-S23] - 2026-04-13
 
-### Provider Config Truthfulness & Platform Context
-
-- **Honest system prompt**: Assistant no longer claims "running entirely on-device" when a remote provider is selected. System context dynamically reflects local vs remote provider selection.
-- **Provider-aware default prompt**: `buildDefaultSystemPrompt(providerId)` switches wording based on whether the active provider is local (Ollama/KoboldCpp) or remote.
-
----
+- System prompt reflects whether the active provider is local or remote.
 
 ## [26.2R1-S22] - 2026-04-13
 
-### Hydration, CORS & Nested-Button Fixes
-
-- **Suppressed browser-extension hydration warnings**: Added `suppressHydrationWarning` to `<body>` in `layout.js`; prevents false-positive React hydration mismatches injected by tools like Grammarly.
-- **CORS loopback fix**: Backend now accepts both `localhost` and `127.0.0.1` origins at any port, fixing `Load failed` / `Failed to fetch` errors when browser and server use different loopback representations.
-- **Nested button fix**: Replaced inner `<button>` inside cancel-install control with `<span role="button">` to fix invalid HTML and React hydration error.
-- **Startup URL display**: Launcher now always shows `http://localhost:5173` instead of `127.0.0.1` for consistency with browser CORS expectations.
-
----
+- Fixed hydration warnings, loopback CORS and a nested button.
 
 ## [26.2R1-S21] - 2026-04-12
 
-### Auto-Install on Startup
-
-- **Zero-touch install**: `node run.js` now auto-installs dependencies if missing, instead of failing with an error.
-- **Seamless UX**: Fresh clone -> `node run.js` -> instant startup, no intermediate `node run.js install` needed.
-- **Pre-flight check**: Detects missing backend/frontend node_modules or Python venv before startup begins.
-- **Impact**: Reduces friction for new users; fresh clones now "just work."
-
----
+- `node run.js` installs missing dependencies before starting.
 
 ## [26.2R1-S20] - 2026-04-12
 
-### Auto-Create Missing Backend Provider Adapters
-
-- **Created provider adapters**: Added `backend/src/providers/ollama.js` and `openaiCompatible.js` (were missing from repo).
-- **Seamless install**: `node run.js install` now auto-creates these files if they don't exist during the validation phase.
-- **Dir creation**: Also ensures `providers/` directory exists before downloading binaries.
-- **Impact**: Fixes "Cannot find module" error when cloning fresh repo. Install is now fully self-healing.
-
----
+- Ollama and OpenAI-compatible provider adapters added.
 
 ## [26.2R1-S19] - 2026-04-12
 
-### Cutover Complete: Pure JavaScript Autonomy
-
-- **Removed shell script wrappers**: Deleted `install.sh`, `run.sh`, `uninstall.sh` from repository.
-- **Pure JS cutover**: All operations now exclusively via `node run.js`. No shell dependencies, works cross-platform.
-- **Updated README**: New architecture section documenting 100% pure JavaScript design.
-- **User-facing changes**:
-  - `./install.sh` -> `node run.js install`
-  - `./run.sh [provider]` -> `node run.js [provider]`
-  - `./run.sh uninstall` -> `node run.js uninstall`
-  - All commands (`stop`, `restart`, `doctor`, `logs`) via `node run.js`
-- **Significance**: Completes pre-cutover strategy. No more shell wrapper fallbacks. Production-ready pure JS launcher.
-
----
+- Shell scripts removed; everything runs through `node run.js`.
 
 ## [26.2R1-S18] - 2026-04-12
 
-
-### Logs Command for Real-Time Diagnostics
-
-- **Added `node run.js logs`** - Real-time tail of backend, frontend, and image-service logs with unified output.
-- Each log line prefixed with source: `[BACKEND]`, `[FRONTEND]`, `[IMAGE]` for easy correlation.
-- Solves immediate debugging pain: no more hunting in `/tmp/` for errors.
-- Graceful shutdown on Ctrl+C.
-- Useful alongside startup failures: run `node run.js logs` in one terminal while `node run.js ui` runs in another.
-
----
+- `node run.js logs` tails backend, frontend and image-service logs.
 
 ## [26.2R1-S17] - 2026-04-12
 
-
-### JS Launcher Full Autonomy (Install/Uninstall Migrated)
-
-- **Migrated install logic into run.js**: `node run.js install` now runs pure JavaScript instead of delegating to `install.sh`.
-  - Validates Node.js and Ollama prerequisites
-  - Installs backend/frontend npm dependencies with error handling
-  - Sets up Python venv for image service
-  - Downloads llama-server and koboldcpp binaries (macOS only)
-  - Final validation to confirm all deps actually installed
-- **Migrated uninstall logic into run.js**: `node run.js uninstall` is now pure JavaScript, removing node_modules, venv, chat data, and optional Ollama models.
-- **Removed shell script dependency**: Shell wrappers (`install.sh` / `uninstall.sh`) are no longer required. `run.js` is completely self-contained.
-- **Updated error messages**: All references to `./install.sh` changed to `node run.js install`.
-- **Significance**: Achieves full JavaScript autonomy pre-cutover. No shell scripts needed for any operation.
-
----
+- Install and uninstall implemented in `run.js`.
 
 ## [26.2R1-S16] - 2026-04-12
 
-
-### Backend Error Visibility & Installer Hardening
-
-- **run.js backend diagnostics**: When backend fails to become ready, captured and logged the last 20 lines of `backend.log` to terminal instead of generic timeout message. Users now see the actual error (missing dependency, crash, port binding failure, etc.).
-- **install.sh npm error handling**: Added explicit error exit codes if `npm install` fails in backend or frontend directories, instead of silently continuing.
-- **install.sh validation**: Added final validation step to confirm `node_modules` and Python venv are actually present before declaring success. Prevents false-positive "installation complete" when dependencies failed to install.
-- **waitForEndpoint improvement**: Extended function to accept optional process object and log file, enabling crash detection and error output retrieval during startup.
-
----
+- Backend start failures print the last log lines; installer validates.
 
 ## [26.2R1-S15] - 2026-04-12
 
-
-### Installer Prerequisite Guard
-
-- Added fail-fast Ollama prerequisite check to `install.sh`.
-- Installer now exits with a clear actionable message if Ollama is missing, instead of printing "installation complete" and failing later at `./run.sh ui`.
-- Added platform-specific guidance (`brew install ollama` on macOS, download link otherwise).
-
----
+- Installer checks for Ollama first.
 
 ## [26.2R1-S14] - 2026-04-12
 
-
-### Chat Performance Optimization
-
-- Reduced server-injected platform system prompt size to cut prefill overhead.
-- Added bounded conversation history window for inference context:
-  - `MIRABILIS_MAX_HISTORY_MESSAGES` (default: 24)
-  - `MIRABILIS_MAX_HISTORY_TOKENS` (default: 1800)
-- Result: tiny-message baseline prompt estimate dropped significantly (observed ~725 -> ~217 tokens), reducing CPU spikes and response startup latency.
-
----
+- Smaller platform prompt; bounded history window.
 
 ## [26.2R1-S13] - 2026-04-12
 
-### JS Command Surface Expansion (Pre-Cutover)
-
-- Added `install` and `uninstall` subcommands to `run.js`.
-- These commands delegate to existing `install.sh` / `uninstall.sh` scripts to keep pre-cutover compatibility and rollback safety.
-- Updated launcher help and unknown-mode guidance to include lifecycle commands.
-- No cutover performed: shell scripts remain canonical compatibility entrypoints.
-
----
+- `install` and `uninstall` subcommands in `run.js`.
 
 ## [26.2R1-S12] - 2026-04-12
 
-### Pre-Cutover Governance (Docs)
-
-- Added explicit JS launcher pre-cutover requirements to README (functional parity, reliability, install/cancel/retry, fallback behavior).
-- Added a concise pre-cutover verification command set.
-- Added cutover rollback playbook with fork/tag/branch strategy and wrapper retention guidance.
-- No runtime code changes in this revision.
-
----
+- Launcher cutover requirements documented.
 
 ## [26.2R1-S11] - 2026-04-12
 
-### Model Install Job System
-
-- Added persistent server-side model install jobs with APIs:
-  - `POST /api/models/install-jobs` (start)
-  - `GET /api/models/install-jobs/:jobId` (status)
-  - `POST /api/models/install-jobs/:jobId/cancel` (cancel)
-  - `GET /api/models/install-jobs` (recent jobs)
-- Frontend model install flow now uses job polling instead of a single fragile streaming request.
-- Cancel in UI now triggers backend cancel request and attempts to terminate active install work.
-- Install progress/status now survives frontend refresh/reload because job state is kept server-side.
-
----
+- Server-side model install jobs with status and cancel.
 
 ## [26.2R1-S10] - 2026-04-12
 
-### MCQ GUI Install Fixes
-
-- Fixed GUI model install flow for MCQ models (`mcq-pro-12b`, `mcq-ultra-31b`, `mcq-raw-8b`).
-- `POST /api/models/pull` now detects `mcq-*` IDs and builds from local Modelfiles instead of trying registry-only pull behavior.
-- Added automatic base-model pull for MCQ installs when missing.
-- Added clearer streamed progress/status messages for MCQ build steps.
-- Improved frontend install error handling so failures are shown in status text instead of silently disappearing.
-
----
+- MCQ models install from the UI by building from local Modelfiles.
 
 ## [26.2R1-S9] - 2026-04-12
 
-### MCQ Model Setup Reliability
-
-- Hardened `training/mcq/setup.sh` for easier recovery when MCQ models fail to install.
-- Added preflight checks for Ollama CLI presence and daemon availability.
-- Added automatic base-model pull before each `ollama create` step.
-- Added lighter install mode: `--skip-ultra` / `--lite` (or `MCQ_SKIP_ULTRA=1`) to skip the large Ultra model.
-- Improved error messages with actionable guidance for pull/create failures.
-
----
+- `training/mcq/setup.sh` preflight checks, base-model pulls and `--lite`.
 
 ## [26.2R1-S8] - 2026-04-12
 
-### JS Launcher Enhancements
-
-- Added `doctor` command to `run.js` / `run.sh` wrapper for quick environment and endpoint validation.
-- Added `restart [provider]` command for one-shot stop/start cycles.
-- Added deterministic stop behavior using PID state file (`mirabilis-run-state.json`) instead of relying only on broad process pattern matching.
-- Kept fallback behavior: if no PID state is found, launcher still uses legacy pattern-based stop.
-- Added startup readiness supervision for backend (`/health`), frontend (`/`), and image service (`/health`) with explicit timeouts and clear errors.
-- Maintained safe-mode architecture: `run.js` is source of truth; `run.sh` remains a thin compatibility wrapper.
-
----
+- `doctor` and `restart` commands; PID state file for stop; readiness checks.
 
 ## [26.2R1-S7] - 2026-04-12
 
-### Launcher Bug Fixes
-
-- Fixed `run.js` model download path: converted Fetch WebStream to Node stream (`Readable.fromWeb`) before writing to file.
-- Removed hard 120-second fetch timeout for GGUF download to avoid false failures on slower links.
-- Fixed provider fallback reliability: model preparation failures now return cleanly so `openai-compatible` and `koboldcpp` can fall back to Ollama instead of crashing launcher startup.
-- Improved command detection on Unix by using `sh -c "command -v ..."` for more reliable executable checks.
-- Added cross-platform npm invocation helper (`npm` vs `npm.cmd`) to avoid Windows spawn issues.
-
----
+- Launcher fixes: GGUF download, command detection, `npm.cmd` on Windows.
 
 ## [26.2R1-S6] - 2026-04-12
 
-### Launcher Architecture
-
-- Added `run.js` as a new Node.js launcher with the same modes as `run.sh` (`ui`, `ollama`, `openai-compatible`, `koboldcpp`, `stop`, `--log`).
-- Kept `run.sh` as safe fallback mode: it now delegates to `run.js` and preserves existing command habits.
-- Added cross-platform launcher behavior in `run.js` for process orchestration, logs, provider startup, and stop flow.
-- Kept existing UX intact (`./run.sh` still works) while enabling direct testing via `node run.js`.
-
----
+- `run.js` launcher added alongside `run.sh`.
 
 ## [26.2R1-S5] - 2026-04-12
 
-### System Control Tools (MCP)
-
-- Added five new MCP tools to control the machine where Mirabilis is installed:
-  - `system_info` - returns OS, platform, arch, hostname, home dir, cwd, Node version. No confirmation needed.
-  - `list_dir` - lists files/directories at any path. No confirmation needed.
-  - `read_file` - reads text file contents up to 512 KB. No confirmation needed.
-  - `write_file` - writes or overwrites a file. Requires `confirmed: true` in arguments.
-  - `run_command` - executes a shell command (macOS, Linux, Windows). Requires `confirmed: true` in arguments.
-- Read-only tools never prompt for approval. Write/exec tools require the AI to explicitly pass `confirmed: true`, which VS Code surfaces to the user before calling.
-- Command safety blocklist rejects catastrophic patterns: `rm -rf /`, `mkfs`, `dd if=`, `format C:`, fork bombs, `shutdown`/`reboot`.
-- `run_command` returns stdout + stderr + exit code even on non-zero exit, so errors are readable.
-- Cross-platform path resolution using `node:path.resolve` - works on macOS, Linux, and Windows.
-- Bumped server version to `26.2R1-S5`.
-
----
+- MCP system tools; `write_file` and `run_command` need `confirmed: true`.
 
 ## [26.2R1-S4] - 2026-04-12
 
-### MCP Server
-
-- Mirabilis now exposes itself as an MCP server at `POST http://127.0.0.1:4000/mcp` (streamable-http transport).
-- Three tools available to any MCP client (VS Code, GitHub Copilot, Claude Desktop, etc.):
-  - `mirabilis_chat` - send a prompt, get an AI response; provider and model are selectable per call.
-  - `mirabilis_list_models` - list available models for a given provider.
-  - `mirabilis_health` - check readiness of all configured providers.
-- Session management with UUID session IDs per client connection.
-- Implementation: `backend/src/mcp/mcpServer.js`; mounted in `server.js` at start.
-
-### Provider Adapter Modules
-
-- Added missing `backend/src/providers/ollama.js` - Ollama model discovery and streaming chat.
-- Added missing `backend/src/providers/openaiCompatible.js` - OpenAI-compatible API streaming and model listing (`listOpenAICompatibleModels` + `streamOpenAICompatibleChat`).
-- Both modules were previously absent, causing backend startup failure.
-
-### Logging Flag
-
-- All logging is **off by default** - no files written, no console noise.
-- New `--log` flag for `run.sh` enables:
-  - Live `[MCP-SERVER]` output in terminal for every session and tool call.
-  - `backend/data/mcp-server-audit.jsonl` audit file (JSONL, one event per line).
-- Flag works in any position: `./run.sh --log`, `./run.sh ollama --log`.
-- `MIRABILIS_LOG` env var drives the same behavior for direct node invocations.
-
-### run.sh - Backend Output
-
-- Backend output is silent by default (`> /tmp/backend.log 2>&1`).
-- With `--log`: backend pipes through `tee` so output appears in terminal and is saved to log simultaneously.
-
----
+- MCP server at `POST /mcp`; `--log` enables MCP output and audit log.
 
 ## [26.2R1-S3] - 2026-04-10
 
-### MCQ Model Family
-
-- **MCQ-Pro-12B** - deep-reasoning workhorse tuned on `gemma3:12b` (12B, 8.1 GB), 32 768-token context.
-- **MCQ-Ultra-31B** - flagship model tuned on `gemma4:31b` (~20 GB), 65 536-token context; most capable model in the family.
-- **MCQ-Raw-8B** - fully unrestricted variant tuned on `dolphin3` / Llama 3.1 (8B, 4.9 GB), 8 192-token context; `uncensored: true` flag enables bypass of all safety system prompts.
-- Removed MCQ-Lite-4B from the lineup; MCQ-Pro-12B is the new entry point.
-- `training/mcq/` directory - contains `Modelfile.mcq-pro-12b`, `Modelfile.mcq-ultra-31b`, `Modelfile.mcq-raw-8b`, and `setup.sh` (`bash training/mcq/setup.sh` creates all three models via `ollama create`).
-- MCQ group registered at the top of `CURATED_OLLAMA_MODELS` in `modelService.js` so models appear first in the model selector.
-
-### Uncensored Mode Hardening
-
-- `UNCENSORED_DIRECTIVE` is now `unshift`-ed to array position 0 in the system-prompt chain, overriding any earlier instructions.
-- Platform-context confidentiality rules 3-5 are excluded when `chatUncensoredMode` is `true`, preventing them from silently suppressing the uncensored directive.
-- `isUncensoredModelRecord` pattern in `server.js` extended to match the `mcq-raw` model ID.
-
-### Web Search (www Chip)
-
-- Replaced the dead DuckDuckGo instant-answer endpoint with a direct RSS-feed parser.  Sources: Fox News, BBC, CNN, Reuters, AP, New York Times, The Guardian, TechCrunch, The Verge.
-- Web search capability description added to platform context so the model can reference fetched results in its response.
-- `webSearchStatus` now has an `'error'` state (red chip shown for 4 s on failure) in addition to `'idle'` and `'searching'`.
-- `classifyWebSearch` default changed from `'skip'` to `'search'`; skip is now reserved for pure write/code-only verbs.
-
-### Inline Code Rendering Fix
-
-- `react-markdown` v10 dropped the `inline` boolean prop from the `code` component. Detection now uses absence of a `language-*` class and no newlines in the string instead.
-- `canRun` guard in `ChatApp.jsx` updated to use `isInline` (was the now-undefined `inline` prop, which caused all backtick spans to render as full block elements).
-- Inline code spans now use `var(--accent-soft)` background, `var(--accent)` border, and `var(--accent)` text colour so they follow the active palette.
-
-### Bug Fix - Clear-All Chat Resurrection
-
-- `getEpoch()` added to `chatStore.js` and imported in `server.js`.
-- `server.js` title-generation (`titleGenPromise`) now snapshots `requestEpoch` at request time and aborts the deferred `saveChat` write if `clearChats` ran in the interim, preventing cleared chats from being recreated.
-
-### Chip / Toolbar Polish
-
-- All left-side toolbar chips (`compute`, `npu`, `www`, `Instructions`) now use identical structure: text label only, no decorative dot.
-
-### UI Polish & Styling Session
-
-- **4-scheme palette system** - Mirabilis (green), Dusk (indigo/violet), Ember (warm amber), Summit (Apple blue). Replaces hardcoded accent values with CSS custom properties; Tailwind `accent`/`accentSoft` tokens now resolve from CSS vars, so all components update automatically on scheme switch.
-- **Palette picker** - 4-button pill grid in the Appearance panel; no-flash restore via inline script in `layout.js`.
-- **Syntax highlighting** - `react-syntax-highlighter` (Prism) with a per-scheme 13-var token theme covering comment, keyword, tag, attr, string, number, fn, and lang tokens. Line numbers included.
-- **Streaming phase labels** - typing indicator cycles through Processing -> Thinking -> Generating -> Loading model -> Still working... phases during long inference.
-- **Role labels** - "user" -> "You", "assistant" -> "AI".
-- **Auto-scroll overhaul** - programmatic vs. user scroll guard via `isProgrammaticScrollRef`; ref checked inside `requestAnimationFrame` (not just at effect entry) to close the RAF-queue race. `lastScrollTopRef` synced after every programmatic scroll so direction detection stays accurate.
-- **"New messages down" pill** - centered at bottom of chat, themed to current palette accent color.
-- **Dusk replaces Flower** - Flower (teal) was too close in hue to Mirabilis (green). Dusk uses deep indigo (`#5046e4`) with a deep-space code block. LocalStorage validation updated; old `flower` value gracefully falls back to Mirabilis.
-- **Bug fix** - duplicate stray `</button>` JSX in palette picker (caused by a prior edit) removed.
-- **Bug fix** - `layout.js` pre-hydration scheme script now validates against whitelist before setting attribute, preventing flash if an obsolete scheme name is in localStorage.
+- MCQ model family: Pro-12B, Ultra-31B, Raw-8B (unrestricted).
+- Uncensored directive placed first in the system prompt; web search chip.
+- Color schemes, syntax highlighting; fixed inline code and cleared chats.
 
 ## [26.2R1] - 2026-04-08
 
-### Chat Sidebar Enhancements
-
-- **Chat search** - live filter input above the chat list; always visible, scrolls with header not with list.
-- **Chat rename** - inline rename input in each chat item's three-dot menu.
-- **Chat export** - download any conversation as a Markdown `.md` file from the three-dot menu.
-- **Pin / unpin chats** - star icon in the three-dot menu pins chats to the top of the list; persisted in `localStorage`.
-- **Sorted chat list** - pinned chats always appear above unpinned ones.
-- Keyboard shortcut **Ctrl+K / Cmd+K** creates a new chat from anywhere.
-- Creating a new chat clears any active search query so the new chat is immediately visible.
-- Chat three-dot menus now close on outside click or Escape.
-
-### Generation Parameters Panel
-
-- **Temperature slider** (0-2.0) and **Max tokens** number input added to the model dropdown.
-- Settings persist across sessions via `localStorage`.
-- Both parameters are sent end-to-end through the stream request to all providers:
-  - Ollama: `options.temperature` + `options.num_predict`
-  - OpenAI-compatible / KoboldCpp: `temperature` + `max_tokens`
-- Resetting temperature to default (null) removes the field from the request, letting the provider use its own default.
-
-### Backend Reliability
-
-- **Write-lock serialisation** in `chatStore.js` - all write operations are queued through a promise mutex, eliminating concurrent read-modify-write data loss under fast streaming.
-- **Read cache** in `chatStore.js` - invalidated on every write; eliminates redundant filesystem reads within the same request cycle.
-- **Epoch guard** - `saveChat` snapshots the store epoch before entering the queue; if `clearChats` ran while the save was waiting, the write is silently dropped, preventing cleared chats from being resurrected.
-- **Message rollback** - if an assistant stream produces no output (provider not running), the user message is removed from the chat and `updatedAt` is restored, keeping the store clean.
-- **Chat rename API** - `PATCH /api/chats/:chatId` now accepts `{ title }` to rename a chat (truncated to 80 chars).
-
-### Toolbar Chip Re-order & OpenClaw Redesign
-
-- Toolbar chip order now ends with **Control -> MCP -> OpenClaw** for logical grouping.
-- Removed the standalone "i" info button next to OpenClaw.
-- OpenClaw chip now shows a **CSS hover tooltip** describing the profile - no click, no state, no extra button.
-
-### Send Button
-
-- Send button height reduced so it no longer touches the Voice chip; both elements remain aligned with the textarea height.
-
-### Removed
-
-- Deleted the ICQ theme (`ICQApp.jsx` and the `/icq` route) - no longer part of the product.
-
----
+- Chat search, rename, export, pin; temperature and max tokens.
+- Serialized chat store writes with an epoch guard.
 
 ## [26.2R1] - 2026-04-06
 
-### Launcher and Naming Cleanup
-
-- Replaced fragmented startup scripts with a unified launcher:
-  - `install.sh`
-  - `run.sh`
-- Added canonical provider names across launcher, backend, and UI:
-  - `ollama`
-  - `openai-compatible`
-  - `koboldcpp`
-- Removed legacy alias behavior from `run.sh` so provider naming is consistent.
-
-### Provider Runtime Reliability
-
-- `install.sh` now installs and validates local runtime binaries:
-  - `llama-server`
-  - `koboldcpp`
-- KoboldCpp installer now fetches the latest release asset from GitHub and validates binary format.
-- `run.sh` now supports explicit provider modes:
-  - `./run.sh ollama`
-  - `./run.sh openai-compatible`
-  - `./run.sh koboldcpp`
-- `./run.sh` (UI mode) starts all available local providers so switching in UI does not require relaunching.
-
-### CPU Core Utilization
-
-- Added automatic thread detection using all logical CPU cores by default for:
-  - `llama-server`
-  - `koboldcpp`
-- Added override env var:
-  - `MIRABILIS_THREADS=<n>`
-- Applied thread flags:
-  - `llama-server`: `--threads`, `--threads-batch`, `--threads-http`
-  - `koboldcpp`: `--threads`, `--blasthreads`
-
-### Session Management
-
-- Added `./run.sh stop` to cleanly terminate all Mirabilis/provider processes.
-
-### Uncensored Mode Hardening
-
-- Backend uncensored directive tightened to reduce refusals/moralizing on profanity-heavy prompts.
-- Added guard to avoid policy/instruction leakage in uncensored responses.
-
-### Config and Provider Defaults
-
-- OpenAI-compatible default base URL updated to `http://127.0.0.1:8000/v1`.
-- Provider-health fallback behavior improved so unreachable external providers can fall back to Ollama when available.
-
-### Docs Refresh
-
-- README rewritten to match current scripts and canonical provider modes.
-- Removed stale references to deleted scripts (`run-local.sh`, `mirabilis-start.sh`, etc.).
-
-
+- Unified launcher; canonical names `ollama`, `openai-compatible`, `koboldcpp`.
+- All CPU cores by default (`MIRABILIS_THREADS`); `stop` command.

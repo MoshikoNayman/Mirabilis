@@ -1,15 +1,4 @@
-// Go Dark (local-only lockdown) tests.
-//
-// Go Dark is a promise: with it on, nothing leaves the machine. That promise was
-// enforced by a single unguarded line testing the provider ID against a set,
-// which is wrong in both directions. openai-compatible, vllm and llamacpp all
-// take an arbitrary base URL, so they were waved through even when pointed at a
-// cloud endpoint.
-//
-// These import the real classification from providerScope.js, the same module
-// the send path uses, so drift in the server is caught here. The completeness
-// test has teeth: adding a provider without classifying it fails the build
-// rather than silently defaulting to "allowed under Go Dark".
+// Go Dark (local-only lockdown) against the same providerScope.js the send path uses.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -39,15 +28,13 @@ test('the three classifications do not overlap', () => {
 });
 
 test('the providers with a user-supplied base URL are exactly the ones needing a host check', () => {
-  // Regression guard for the original bug: REMOTE_PROVIDERS omitted these three,
-  // which is precisely why Go Dark let them through.
   for (const p of ['openai-compatible', 'vllm', 'llamacpp']) {
     assert.ok(BASE_URL_PROVIDERS.has(p), `${p} takes an arbitrary base URL and must be host-checked`);
     assert.ok(!REMOTE_PROVIDERS.has(p), `${p} is not unconditionally remote`);
   }
 });
 
-// isLocalHostUrl: the primitive the lockdown now depends on
+// isLocalHostUrl
 
 test('isLocalHostUrl accepts loopback and private LAN hosts', () => {
   const local = [
@@ -82,8 +69,7 @@ test('isLocalHostUrl rejects public hosts', () => {
 });
 
 test('isLocalHostUrl fails closed on empty or unparseable input', () => {
-  // The safe answer must win: an unknown destination is treated as remote, so
-  // Go Dark blocks rather than allows.
+  // An unknown destination counts as remote, so Go Dark blocks it.
   for (const bad of ['', '   ', 'not a url', 'ollama.com', null, undefined]) {
     assert.equal(isLocalHostUrl(/** @type {any} */ (bad)), false, `${JSON.stringify(bad)} must fail closed`);
   }
@@ -99,7 +85,7 @@ test('isLocalHostUrl is not fooled by a hostname that merely contains localhost'
   assert.equal(isLocalHostUrl('https://notlocalhost/v1'), false);
 });
 
-// classifyProviderScope: what the send path actually calls
+// classifyProviderScope
 
 test('cloud providers are blocked under Go Dark regardless of base URL', () => {
   for (const p of REMOTE_PROVIDERS) {
@@ -129,8 +115,7 @@ test('base-URL providers are allowed on localhost and blocked on a cloud host', 
 });
 
 test('base-URL providers with a blank URL fall back to their local default', () => {
-  // Leaving the field empty means "the local server on the usual port", which
-  // is on-device and must stay usable under Go Dark.
+  // A blank URL means the local server on its usual port.
   assert.equal(classifyProviderScope('vllm', '').offDevice, false);
   assert.equal(classifyProviderScope('llamacpp', '   ').offDevice, false);
   assert.ok(isLocalHostUrl(defaultBaseUrlForProvider('vllm')));

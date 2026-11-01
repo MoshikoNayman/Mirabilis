@@ -1,4 +1,4 @@
-// Reusable inline help trigger with contextual popover copy.
+// Guide button that opens an inline help popover.
 
 'use client';
 

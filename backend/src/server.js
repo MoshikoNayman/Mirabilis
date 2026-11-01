@@ -1,7 +1,6 @@
 import express from 'express';
-// Patches Express 4 so a rejected promise from an `async` route handler is
-// forwarded to the error middleware below instead of hanging the request with
-// no response (e.g. a corrupt chat store or a disk-full write).
+// Forwards rejected promises from async handlers to the error middleware, so a
+// failing route responds instead of hanging.
 import 'express-async-errors';
 import cors from 'cors';
 import compression from 'compression';
@@ -108,14 +107,9 @@ app.use(helmet({
 
 app.use(compression({
   filter: (req, res) => {
-    // Never compress an SSE response: gzip buffers until it has enough bytes to
-    // emit a block, which stalls token-by-token delivery.
-    //
-    // Test the RESPONSE content type, not the request Accept header. The chat
-    // stream is a fetch() POST that sends only Content-Type: application/json,
-    // so its Accept is */* and an Accept-based guard never fired, meaning every
-    // token stream was being buffered. The filter runs from on-headers, so the
-    // route's Content-Type is already set by this point.
+    // Never gzip SSE: it buffers until a block fills and stalls token delivery.
+    // Check the response Content-Type, not Accept: the chat stream is a fetch()
+    // POST with Accept */*. This runs from on-headers, so Content-Type is set.
     const responseType = String(res.getHeader('Content-Type') || '');
     if (responseType.includes('text/event-stream')) return false;
     if (String(req.headers.accept || '').includes('text/event-stream')) return false;
@@ -135,9 +129,8 @@ app.use(cors({
   maxAge: 600
 }));
 
-// The rate limiter is a multi-tenant/cloud defense. On a single-user loopback app
-// it can only 429 the user against their own machine, so only enforce it when the
-// backend is deliberately bound to a non-loopback host (LAN-exposed behind a proxy).
+// Rate limit only when bound to a non-loopback host. On loopback it can only
+// throttle the user against their own machine.
 const bindHost = String(process.env.MIRABILIS_BIND_HOST || '127.0.0.1').trim();
 const isLoopbackBind = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(bindHost);
 if (isProduction && !isLoopbackBind) {
@@ -152,11 +145,8 @@ if (isProduction && !isLoopbackBind) {
   app.use('/api', apiLimiter);
 }
 
-// Body parsing. The image-messages route carries base64 image payloads and
-// mounts its own 24mb parser, but a route-level parser is a no-op once the body
-// has already been read: body-parser skips when req._body is set. So that route
-// has to be excluded here, or its larger limit never applies and a legitimate
-// image upload fails at 1mb.
+// The image-messages route mounts its own 24mb parser. body-parser skips once
+// req._body is set, so that route is excluded here or its limit never applies.
 const IMAGE_MESSAGE_PATH_RE = /^\/api\/chats\/[^/]+\/image-messages\/?$/;
 const jsonParser = express.json({ limit: '1mb' });
 app.use((req, res, next) => {
@@ -164,9 +154,8 @@ app.use((req, res, next) => {
   return jsonParser(req, res, next);
 });
 
-// Local session token. Created here (rather than next to the /mcp mount further
-// down) because the privileged app routes defined below need it at definition
-// time: SSH connect/exec, the workspace file routes and the vault indexer.
+// Local session token. Created this early because privileged routes below (SSH,
+// workspace files, vault indexer) need it at definition time.
 const mcpToken = loadOrCreateMcpToken(config.mcpTokenPath, config.mcpToken);
 
 // Provider API keys live here, not in the browser. See providerKeys.js.
@@ -176,11 +165,9 @@ const guardRemote = makePrivilegedGuard(mcpToken, 'remote control');
 const guardWorkspace = makePrivilegedGuard(mcpToken, 'workspace access');
 const guardVault = makePrivilegedGuard(mcpToken, 'config vault');
 
-// Token bootstrap for the app's own UI. Answers only loopback callers presenting
-// an allowed Origin, so a page on another origin cannot read the token and a
-// non-local caller cannot either. This does not defend against another process
-// running as the same user, which can read the token file directly; it closes
-// the remote and cross-origin paths, which is what the guard needs.
+// Token bootstrap for the app's own UI: loopback callers with an allowed Origin
+// only. Closes the remote and cross-origin paths; a process running as the same
+// user can read the token file anyway.
 app.get('/api/session/token', (req, res) => {
   if (!isLoopbackRequest(req)) {
     res.status(403).json({ error: 'The session token is only available to local callers.' });
@@ -316,9 +303,8 @@ async function pickMostUncensoredOllamaModel(cfg) {
   return installed.find((item) => isUncensoredModelRecord(item))?.id || null;
 }
 
-// Write one SSE frame. Returns false when the socket is already gone, so a
-// caller streaming tokens can stop rather than writing into a dead connection
-// (which throws EPIPE and turns a normal user navigation into a logged crash).
+// Write one SSE frame. Returns false once the socket is gone, so a streaming
+// caller stops instead of hitting EPIPE.
 function sendSSE(res, event, payload) {
   if (res.writableEnded || res.destroyed || !res.writable) return false;
   res.write(`event: ${event}\n`);
@@ -333,9 +319,8 @@ function estimateTokens(text) {
   return Math.max(1, Math.ceil(normalized.length / 4));
 }
 
-// Ollama inference options that the Inference Cockpit is allowed to set. Anything
-// outside this allow-list is dropped so a stray/hostile field can never reach the
-// model runtime. Values are coerced to safe numeric ranges.
+// Ollama options the Inference Cockpit may set. Anything else is dropped, and
+// values are clamped to safe numeric ranges.
 const OLLAMA_OPTION_SPEC = {
   temperature: { min: 0, max: 2 },
   top_p: { min: 0, max: 1 },
@@ -362,10 +347,8 @@ function sanitizeOllamaOptions(raw) {
   return Object.keys(out).length ? out : undefined;
 }
 
-// Build the Performance Receipt attached to each assistant message. Ollama's
-// final chunk gives exact eval metrics; every other provider falls back to
-// wall-clock timing over the token estimate. Kept small and serializable so it
-// persists straight into chats.json.
+// Performance Receipt for an assistant message. Ollama gives exact eval metrics;
+// other providers fall back to wall-clock timing over the token estimate.
 function buildPerformanceReceipt({ streamStartedAt, firstTokenAt, endedAt, completionTokenEstimate, ollamaStats }) {
   const receipt = { source: 'timing' };
   if (firstTokenAt && streamStartedAt) {
@@ -399,9 +382,8 @@ function buildPerformanceReceipt({ streamStartedAt, firstTokenAt, endedAt, compl
 
 const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL || 'http://127.0.0.1:7860';
 const trainingModeOptions = new Set(['off', 'fine-tuning', 'full-training']);
-// Message-count cap is a coarse backstop; the token budget (derived per-request
-// from the resolved num_ctx) is the real governor. Raised from 24 so a capable
-// local model is not throttled to a dozen turns. Both stay env-overridable.
+// Coarse message-count backstop; the token budget derived from num_ctx is the
+// real governor. Both are env-overridable.
 const MAX_HISTORY_MESSAGES = Math.max(6, Number(process.env.MIRABILIS_MAX_HISTORY_MESSAGES || 100));
 // Floor used only when the model's context window is unknown; normally history is
 // budgeted as a fraction of the resolved num_ctx (see resolveHistoryTokenBudget).
@@ -410,19 +392,16 @@ const MAX_HISTORY_TOKENS = Math.max(400, Number(process.env.MIRABILIS_MAX_HISTOR
 // headroom for the system prompt, RAG context, and the reply.
 const HISTORY_CTX_FRACTION = Math.min(0.9, Math.max(0.1, Number(process.env.MIRABILIS_HISTORY_CTX_FRACTION || 0.65)));
 
-// Resolve the Ollama runtime options for a request: start from hardware+model
-// auto-tuned defaults (num_ctx sized to memory, threads, low_vram) and let the
-// user's Inference Cockpit values override them. Returns the merged options plus
-// the resolved num_ctx so history can be budgeted against the real window. Non-Ollama
-// providers just get the sanitized user options and a null context.
+// Merges auto-tuned Ollama defaults with the user's Cockpit values and returns
+// the resolved num_ctx for history budgeting. Other providers get the sanitized
+// user options and a null context.
 async function resolveOllamaTuning({ provider, model, userOllamaOptions, baseUrl }) {
   const userOpts = sanitizeOllamaOptions(userOllamaOptions) || {};
   if (provider !== 'ollama') {
     return { options: userOpts, numCtx: null, meta: null };
   }
-  // Auto-tune fetches the model info + tags from baseUrl; apply the same
-  // metadata-endpoint SSRF guard the /api/models and stream paths use, and skip
-  // tuning (rather than crash) if a caller passes an unsafe override URL.
+  // Auto-tune fetches model metadata from baseUrl, so apply the same SSRF guard
+  // as /api/models and skip tuning for an unsafe override URL.
   try { if (baseUrl) assertSafeProviderUrl(baseUrl); }
   catch { return { options: userOpts, numCtx: null, meta: null }; }
   let autoOptions = {};
@@ -471,9 +450,8 @@ function detectThreadCount() {
   return Number.isFinite(n) && n > 0 ? n : 4;
 }
 
-// Default raised from 30s: loading a large GGUF into RAM/VRAM (or a model that
-// spills to disk) routinely needs 1-3 min on modest local hardware, and killing a
-// server that was about to come up penalizes exactly the capability-first user.
+// Loading a large GGUF (or one that spills to disk) can take 1-3 min on modest
+// hardware, hence the long default.
 async function waitForEndpoint(url, timeoutMs = 180000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -576,9 +554,8 @@ async function transcribeDictationAudio({ sourcePath }) {
   const stem = String(sourcePath).replace(/\.[^.]+$/, '');
   const isWav = /\.wav$/i.test(sourcePath);
 
-  // whisper.cpp / OpenAI want a 16kHz mono WAV. The voice-chat client encodes
-  // WAV in-browser (so no ffmpeg is needed there). Dictation may still send
-  // webm/mp4/ogg; convert with ffmpeg when it is present.
+  // whisper.cpp and OpenAI want 16kHz mono WAV. Voice chat sends WAV; dictation
+  // may send webm/mp4/ogg, converted with ffmpeg when present.
   let wavPath = sourcePath;
   let madeWav = false;
   if (!isWav) {
@@ -598,7 +575,7 @@ async function transcribeDictationAudio({ sourcePath }) {
       });
     }
 
-    // 2. Local whisper.cpp - offline, works in Electron. The default local path.
+    // 2. Local whisper.cpp: offline, works in Electron. The default local path.
     if (providerPref !== 'whisper-py') {
       const wcBin = await resolveWhisperCppBinary();
       const wcModel = resolveWhisperCppModel();
@@ -692,11 +669,8 @@ async function downloadPiperVoiceModel(modelId) {
   ]);
 }
 
-// Whisper.cpp speech-to-text
-// Local, offline STT that works INSIDE Electron. The browser Web Speech API
-// (webkitSpeechRecognition) streams to Google's cloud endpoint and is dead in a
-// packaged Electron build, so the voice loop records audio and posts it here.
-// Mirrors the Piper pattern: a small model catalog, a models dir, and helpers.
+// Whisper.cpp speech-to-text. Local and offline, since the Web Speech API does not
+// work in a packaged Electron build. The voice loop records audio and posts it here.
 async function downloadWhisperModel(modelId) {
   const model = WHISPER_MODEL_CATALOG.find((m) => m.id === modelId);
   if (!model) throw new Error(`Unknown Whisper model: ${modelId}`);
@@ -826,14 +800,8 @@ async function probeProviderTargets(targets, options = {}) {
   return { reachable: false, target: targets[0] || '', status: lastStatus || undefined, error: lastError || 'fetch failed' };
 }
 
-// Providers that send data off-device. "Go Dark" (local-only lockdown) blocks
-// these so a session can be guaranteed to never leave the machine.
-// Provider locality now lives in providerScope.js so the server and its tests
-// share one definition. See the import at the top of this file.
-
-// Model Warmth as Presence: report which Ollama models are currently loaded in
-// memory (warm in VRAM), so local model "buddies" can show a truthful green dot
-// only when the model is actually ready to answer without a cold load.
+// Reports which Ollama models are loaded in memory, so a local model buddy shows
+// a green dot only when it can answer without a cold load.
 app.get('/api/providers/ollama/ps', async (_req, res) => {
   const normalizedBase = String(config.ollamaBaseUrl || '').replace(/\/$/, '');
   if (!normalizedBase) {
@@ -909,11 +877,8 @@ app.get('/api/providers/health', async (req, res) => {
     ? ''
     : config.openAIBaseUrl;
   const normalizedBase = String(overrideBaseUrl || configuredBaseUrl || '').replace(/\/$/, '');
-  // Fall back to the key the backend holds. The app no longer sends one, so
-  // without this a health check for a cloud provider would always report
-  // unreachable even with a key configured.
-  // The env OpenAI key is only a fallback for OpenAI-style endpoints. It used to
-  // be sent to every cloud provider, so xAI or Groq received your OpenAI key.
+  // Fall back to the backend-held key; the app does not send one. The env OpenAI
+  // key applies only to OpenAI-style endpoints, never to other cloud providers.
   const apiKey = String(
     req.get('x-provider-key')
     || req.query?.apiKey
@@ -1032,9 +997,8 @@ app.get('/api/system/specs', async (_req, res) => {
   });
 });
 
-// Inference runtimes (Ollama / llama.cpp / vLLM / custom)
-// Declarative registry + a managed llama.cpp process (launch/health/stop) so the
-// power-user runtime is first-class, not just "point at a URL".
+// Inference runtimes (Ollama / llama.cpp / vLLM / custom): a declarative registry
+// plus a managed llama.cpp process (launch/health/stop).
 app.get('/api/runtimes', (_req, res) => {
   res.json({ runtimes: listRuntimes(), llamacpp: llamacpp.status(), vllm: vllm.status() });
 });
@@ -1191,14 +1155,14 @@ app.post('/api/voice/setup', async (_req, res) => {
   }
 });
 
-// GET /api/voice/piper-models - catalog with installed status
+// GET /api/voice/piper-models: catalog with installed status
 app.get('/api/voice/piper-models', (_req, res) => {
   const installed = new Set(getInstalledPiperModelIds());
   const catalog = PIPER_VOICE_CATALOG.map((v) => ({ ...v, installed: installed.has(v.id) }));
   res.json({ catalog, voicesDir: getPiperVoicesDir() });
 });
 
-// POST /api/voice/download-model - download a specific piper voice model
+// POST /api/voice/download-model: download a specific piper voice model
 app.post('/api/voice/download-model', async (req, res) => {
   const { modelId } = req.body || {};
   if (!modelId || !PIPER_VOICE_CATALOG.find((v) => v.id === modelId)) {
@@ -1212,7 +1176,7 @@ app.post('/api/voice/download-model', async (req, res) => {
   }
 });
 
-// GET /api/voice/stt-status - which speech-to-text engines are usable now
+// GET /api/voice/stt-status: which speech-to-text engines are usable
 app.get('/api/voice/stt-status', async (_req, res) => {
   try {
     const stt = await getSttStatus();
@@ -1224,8 +1188,8 @@ app.get('/api/voice/stt-status', async (_req, res) => {
   }
 });
 
-// POST /api/voice/stt-setup - one-click local speech-to-text: install the
-// whisper.cpp binary (brew/apt) and download a default English model.
+// POST /api/voice/stt-setup: installs the whisper.cpp binary (brew/apt) and a
+// default English model.
 app.post('/api/voice/stt-setup', async (req, res) => {
   const modelId = String(req.body?.modelId || 'base.en');
   try {
@@ -1255,7 +1219,7 @@ app.post('/api/voice/stt-setup', async (req, res) => {
   }
 });
 
-// POST /api/voice/stt-download-model - fetch a specific whisper.cpp model
+// POST /api/voice/stt-download-model: fetch a specific whisper.cpp model
 app.post('/api/voice/stt-download-model', async (req, res) => {
   const modelId = String(req.body?.modelId || '');
   if (!WHISPER_MODEL_CATALOG.find((m) => m.id === modelId)) {
@@ -1269,7 +1233,7 @@ app.post('/api/voice/stt-download-model', async (req, res) => {
   }
 });
 
-// POST /api/voice/tts - generate speech via piper, returns audio/wav
+// POST /api/voice/tts: generate speech via piper, returns audio/wav
 app.post('/api/voice/tts', async (req, res) => {
   const { text, modelId } = req.body || {};
   if (!text || typeof text !== 'string') {
@@ -1365,10 +1329,8 @@ app.post('/api/go-dark', async (req, res) => {
 
 app.get('/api/models', async (req, res) => {
   const provider = req.query.provider || config.aiProvider;
-  // Kick the suggested-model catalog refresh here rather than on a timer: this
-  // is the moment someone is about to look at the list. It is fire and forget,
-  // rate limited internally, and skipped entirely under Go Dark, so it never
-  // delays the response and never leaks under lockdown.
+  // Refresh the suggested-model catalog when someone is about to view it. Fire and
+  // forget, rate limited internally, and skipped under Go Dark.
   void refreshCatalog({ localOnly: isGoDark() || req.query.localOnly === '1' || req.query.localOnly === 'true' });
   const overrideBaseUrl = typeof req.query.baseUrl === 'string' ? req.query.baseUrl.trim() : '';
   // Prefer the key from a header (kept out of URLs/logs); fall back to query for
@@ -1378,9 +1340,7 @@ app.get('/api/models', async (req, res) => {
     ? headerKey
     : (typeof req.query.apiKey === 'string' && req.query.apiKey)
       ? req.query.apiKey
-      // The app stopped sending keys from the page, so fall back to the one the
-      // backend holds; otherwise listing a cloud provider's models would fail
-      // for a user who has a key configured.
+      // The page does not send keys; fall back to the backend-held one.
       : (providerKeys.get(String(provider)) || undefined);
   if (overrideBaseUrl) {
     try { assertSafeProviderUrl(overrideBaseUrl); }
@@ -1466,7 +1426,7 @@ app.post('/api/providers/switch-model', async (req, res) => {
 
 // Model pull (install from Ollama registry)
 
-// Ollama model IDs are alphanumeric + hyphens/dots/colons - validate before forwarding
+// Ollama model IDs are alphanumeric plus hyphens, dots and colons; validate before forwarding.
 const SAFE_MODEL_RE = /^[a-z0-9][a-z0-9._:/-]{0,99}$/i;
 const MCQ_MODEL_SPECS = {
   'mcq-pro-12b': { base: 'gemma3:12b', modelfile: 'Modelfile.mcq-pro-12b' },
@@ -1787,14 +1747,12 @@ app.post('/api/models/install-jobs/:jobId/cancel', async (req, res) => {
   return res.json({ job: cloneJob(job), cancelRequested: true });
 });
 
-// Does this model exist upstream, and how big is it? Asked before a pull so a
-// typo is caught in the field instead of becoming a failed multi-gigabyte
-// download reported by whatever the daemon happened to say.
+// Checks a model exists upstream, and its size, before a pull, so a typo fails in
+// the field instead of as a failed multi-gigabyte download.
 app.get('/api/models/registry-lookup', async (req, res) => {
   const id = typeof req.query.id === 'string' ? req.query.id : '';
   if (!id.trim()) return res.status(400).json({ error: 'id is required' });
-  // A registry lookup is egress. Under Go Dark it does not happen, and the
-  // field simply stops offering the hint.
+  // A registry lookup is egress, so Go Dark skips it and the field shows no hint.
   if (isGoDark() || req.query.localOnly === '1' || req.query.localOnly === 'true') {
     return res.json({ status: 'unknown', reason: 'Go Dark is on, so the registry was not contacted.' });
   }
@@ -1918,12 +1876,11 @@ app.delete('/api/models/:modelId', async (req, res) => {
 
 // Remote Control (localhost exec + SSH)
 
-// In-memory connection state - only one active connection at a time
+// One active connection at a time, held in memory.
 let remoteState = null; // { type: 'local'|'ssh', host?, port?, user?, sshClient? }
 
-// Whitelist of allowed command prefixes / patterns (defence-in-depth)
-// The user controls these from their own machine so the threat model is self-harm,
-// not external attack. Still: reject obvious shell-escape attempts.
+// Defence in depth. Commands come from the user on their own machine, so this
+// only rejects obvious shell-escape attempts.
 function validateCommand(cmd) {
   if (!cmd || typeof cmd !== 'string') return false;
   const trimmed = cmd.trim();
@@ -1983,7 +1940,7 @@ app.post('/api/remote/connect', guardRemote, async (req, res) => {
     if (!host || typeof host !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(host.trim())) {
       return res.status(400).json({ error: 'Invalid hostname' });
     }
-    // LAN devices (the SRX, the Pi) stay reachable under Go Dark; public hosts do not.
+    // LAN devices stay reachable under Go Dark; public hosts do not.
     if (!egressAllowed(`ssh://${host.trim()}`)) {
       return res.status(403).json({ error: `Go Dark is on: ${host.trim()} is not on this machine or the local network.` });
     }
@@ -2081,11 +2038,8 @@ app.delete('/api/remote/disconnect', guardRemote, (_req, res) => {
   res.status(204).end();
 });
 
-// Watched Workspace (live local folder as chat context)
-// Point Mirabilis at a local folder; it lists the folder's text files and reads
-// any file's FRESH bytes on demand. All reads are jailed to the watched root by
-// workspace.js (relative paths that escape the root are rejected). Only one root
-// is watched at a time, held in memory like remoteState above.
+// Watched Workspace: lists a local folder's text files and reads them fresh on
+// demand. workspace.js jails reads to the root; one root at a time, in memory.
 
 app.post('/api/workspace/watch', guardWorkspace, async (req, res) => {
   const { path: dir } = req.body || {};
@@ -2131,11 +2085,8 @@ app.delete('/api/workspace/watch', (_req, res) => {
   res.status(204).end();
 });
 
-// Homelab Roster (saved machines + live reachability)
-// The user's own routers, NAS, servers, and Raspberry Pi saved as ICQ-style
-// buddy contacts. Hosts persist to dataDir/homelab-hosts.json (passwords are
-// never stored). Reachability is a quick TCP probe. Connecting reuses the
-// existing /api/remote/connect SSH path.
+// Homelab Roster: saved hosts (no passwords) with a TCP reachability probe.
+// Connecting reuses the /api/remote/connect SSH path.
 
 const homelabStorePath = join(dirname(config.chatStorePath), 'homelab-hosts.json');
 
@@ -2494,9 +2445,8 @@ async function listMemoryItems() {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed.items) ? parsed.items : [];
   } catch (parseError) {
-    // Returning [] here used to combine with saveMemoryItems below to erase the
-    // file: a corrupt read reported "no memories", and the next save wrote that
-    // empty list over the user's real data. Recover, else fail loud.
+    // Never return [] on a corrupt read, or the next save overwrites real data.
+    // Recover from .bak, else quarantine and throw.
     try {
       const parsed = JSON.parse(await readFile(`${memoryStorePath}.bak`, 'utf8'));
       console.warn(`[memory] ${memoryStorePath} was corrupt; recovered from .bak`);
@@ -2511,7 +2461,7 @@ async function listMemoryItems() {
   }
 }
 
-// Atomic write with a rolling backup, matching the discipline in storage/*.js.
+// Atomic write with a rolling .bak, like storage/*.js.
 async function saveMemoryItems(items) {
   await ensureMemoryStoreFile();
   const serialized = JSON.stringify({ items }, null, 2);
@@ -2604,10 +2554,8 @@ app.post('/api/web-search', async (req, res) => {
   }
 
   const { query, maxResults, localOnly } = req.body || {};
-  // Go Dark means no egress, and a search query is the most sensitive thing the
-  // app could leak: it is the user's raw message text, sent to a third party.
-  // The client-side check only covered remote MODEL providers, so searching with
-  // a local model selected still reached out. Enforce it here as well.
+  // Go Dark blocks search: the query is the user's raw message text. Enforced
+  // here because the client check covers only remote model providers.
   if (localOnly === true || isGoDark()) {
     res.status(403).json({ error: 'Go Dark is on: web search is disabled because it would send your query to a third-party service.' });
     return;
@@ -2789,10 +2737,7 @@ app.post('/api/chats', async (req, res) => {
   try {
     await saveChat(config.chatStorePath, chat);
   } catch (error) {
-    // A permission failure here used to reach the user as
-    // "EACCES: permission denied, open '.../chats.json'", which names the
-    // errno and the path and explains neither. Say what is wrong and give the
-    // command that fixes it.
+    // Report storage errors in words, with the command that fixes them.
     console.error('[chats] could not save:', error?.message || error);
     res.status(500).json({ error: describeStorageError(error, config.chatStorePath) });
     return;
@@ -2918,8 +2863,8 @@ app.post('/api/chats/:chatId/snapshots/:snapshotId/restore', async (req, res) =>
 });
 
 app.delete('/api/chats', async (_req, res) => {
-  // Collect every chat's backing files BEFORE clearing, then remove them so a
-  // privacy-motivated "clear all" does not leave images/attachments on disk.
+  // Collect backing files before clearing so "clear all" leaves no images or
+  // attachments on disk.
   const summaries = await listChats(config.chatStorePath).catch(() => []);
   const fulls = await Promise.all(
     (Array.isArray(summaries) ? summaries : []).map((c) => getChat(config.chatStorePath, c.id).catch(() => null))
@@ -2943,14 +2888,12 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     return;
   }
 
-  // Go Dark (local-only lockdown): hard-block any remote provider before a single
-  // byte leaves the machine. The frontend also greys these out, but this is the
-  // real guarantee - the promise is enforced here, in the send path.
+  // Go Dark: block remote providers before any byte leaves the machine. The
+  // frontend greys them out, but this is the enforcement point.
   if (localOnly === true || isGoDark()) {
     const activeProvider = provider || config.aiProvider;
-    // Judged by resolved host, not by provider ID: openai-compatible, vllm and
-    // llamacpp accept an arbitrary base URL, so any of them can point at a cloud
-    // endpoint while looking local in the picker. Fails closed on anything unknown.
+    // Judged by resolved host: openai-compatible, vllm and llamacpp accept any base
+    // URL and can point at a cloud endpoint. Fails closed on anything unknown.
     const scope = classifyProviderScope(activeProvider, providerBaseUrl);
     if (scope.offDevice) {
       res.status(403).json({
@@ -2988,9 +2931,8 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   if (chatWasNew) {
     chat.title = makeTitle(content);
   }
-  // Snapshot the store epoch at request start. If clearChats runs while the AI
-  // title is being generated (after the done event), the epoch will differ and
-  // the title saveChat will be skipped - preventing the resurrected-chat bug.
+  // If clearChats runs before the deferred title save, the epoch differs and the
+  // save is skipped, so a cleared chat is not written back.
   const requestEpoch = getEpoch();
   await saveChat(config.chatStorePath, chat);
 
@@ -3000,18 +2942,9 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   res.flushHeaders();
 
   const abortController = new AbortController();
-  // Stop generating when the client goes away, and remember that it happened.
-  //
-  // This listens on the RESPONSE, not the request. `req` here is a fully-read
-  // POST body, so its 'close' fires once the body has been consumed rather than
-  // when the socket drops: wiring the abort to it meant a user who navigated
-  // away mid-reply left the engine generating the entire remaining answer into a
-  // dead socket. res 'close' is the documented signal for a connection that
-  // ended before the response completed.
-  //
-  // The flag matters separately: the provider adapters swallow AbortError and
-  // return normally, so without it the route cannot tell a finished reply from
-  // an abandoned one, and would save half an answer as though it were whole.
+  // Abort on res 'close': req is a fully-read POST body whose 'close' fires once
+  // the body is consumed, not when the socket drops. Adapters swallow AbortError,
+  // so the flag is how the route tells an abandoned reply from a finished one.
   let clientGone = false;
   res.on('close', () => {
     if (!res.writableEnded) {
@@ -3022,8 +2955,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
 
   const effectiveProvider = provider || config.aiProvider;
   let effectiveModel = await getEffectiveModel({ provider: effectiveProvider, model, config });
-  // Capability routing: when the model is left on Auto, pick the best installed model
-  // for the task lane (coding/reasoning/general) from the prompt, not just the first one.
+  // On Auto, pick the best installed model for the prompt's task lane.
   if ((model === 'auto' || !model) && effectiveProvider === 'ollama' && !chatUncensoredMode) {
     try {
       const routed = routeModel({
@@ -3045,12 +2977,12 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     }
   }
 
-  // Title generation is deferred to AFTER the main stream (see the done handler) so
-  // it does not contend for the model during the user's time-to-first-token.
+  // Title generation runs after the main stream (see the done handler) so it does
+  // not contend for the model during time-to-first-token.
 
   const outgoingMessages = [];
 
-  // Always inject core facts - cannot be overridden by browser cache or stale prompts.
+  // Always inject core facts so browser cache or stale prompts cannot override them.
   outgoingMessages.push({
     role: 'system',
     content: 'CORE FACT: Mirabilis AI was created by Moshiko Nayman. Only mention this if the user explicitly asks who created, built, or developed Mirabilis AI. Do not volunteer this information unprompted. Do not prepend it to unrelated answers.'
@@ -3078,9 +3010,8 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     ].join('\n')
   });
 
-  // Uncensored mode: inject the directive as the VERY FIRST message so it outranks
-  // all subsequent system context. Then skip the confidentiality rules block so the
-  // model never sees instructions telling it to refuse override attempts.
+  // Uncensored mode: the directive goes first so it outranks later system context,
+  // and the confidentiality rules are skipped so nothing tells the model to refuse.
   if (chatUncensoredMode) {
     outgoingMessages.unshift({ role: 'system', content: UNCENSORED_DIRECTIVE });
   }
@@ -3097,10 +3028,8 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   if (systemPrompt && typeof systemPrompt === 'string' && systemPrompt.trim()) {
     outgoingMessages.push({ role: 'system', content: systemPrompt.trim() });
   }
-  // Auto-tune Ollama runtime options (num_ctx sized to hardware+model, etc.) so a
-  // capable box uses its real context window instead of Ollama's stock ~4K. User
-  // Cockpit values override. The resolved num_ctx also governs how much history we
-  // send, so this runs before the sliding window.
+  // Auto-tune so a capable box uses its real context window, not the stock ~4K.
+  // Runs before the sliding window because num_ctx sets the history budget.
   const ollamaBaseUrl = (typeof providerBaseUrl === 'string' && providerBaseUrl.trim()) ? providerBaseUrl.trim() : config.ollamaBaseUrl;
   const tuning = await resolveOllamaTuning({
     provider: effectiveProvider,
@@ -3108,26 +3037,15 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     userOllamaOptions: ollamaOptions,
     baseUrl: ollamaBaseUrl
   });
-  // History token budget = a fraction of the resolved context window (headroom left
-  // for system prompt + RAG + reply), capped by the static ceiling.
-  //
-  // This was Math.max, which made MAX_HISTORY_TOKENS a FLOOR: with a 2048-token
-  // window the budget became 8000, so the sliding window below happily packed a
-  // prompt four times larger than the context the engine was configured for,
-  // and the engine silently truncated the front (losing the system prompt) or
-  // failed outright. Math.min makes the constant do what its name says.
+  // History budget: a fraction of num_ctx, capped by MAX_HISTORY_TOKENS. A prompt
+  // larger than num_ctx makes the engine drop the system prompt.
   const historyBudget = tuning.numCtx
     ? Math.min(MAX_HISTORY_TOKENS, Math.floor(tuning.numCtx * HISTORY_CTX_FRACTION))
     : MAX_HISTORY_TOKENS;
 
-  // Anchored history window. The start index is remembered on the chat and held
-  // still while the prompt fits, so the prompt PREFIX stays byte-identical
-  // across turns and the engine's KV cache keeps hitting. Recomputing the window
-  // from the newest message every turn (the previous behaviour) shifted the
-  // front constantly and forced a full re-prefill of the whole history on every
-  // single message.
-  // Text attachments are expanded into the prompt below, so the window has to
-  // count them, or a pasted config would push the system prompt out of context.
+  // Anchored window: the start index is stored on the chat and held while the
+  // prompt fits, so the prefix stays byte-identical and the KV cache keeps hitting.
+  // Text attachments are expanded below, so the window counts them too.
   const attachmentCharBudget = Math.min(48000, Math.floor(historyBudget * 4 * 0.5));
   const windowed = selectHistoryWindow(chat.messages, {
     budgetTokens: historyBudget,
@@ -3157,9 +3075,6 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     outgoingMessages.push({ role: msg.role, content, ...(images.length ? { images } : {}) });
   }
 
-  // Vision gate: only forward attached images to a model that can actually see
-  // them. Ollama reports the capability precisely; for OpenAI-compatible / cloud
-  // we assume the user picked a vision model (the server errors if not).
   let visionNotice = null;
   if (outgoingHasImages && !(await providerSupportsVision(effectiveProvider, effectiveModel, ollamaBaseUrl))) {
     for (const m of outgoingMessages) { if (m.images) delete m.images; }
@@ -3169,9 +3084,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   const promptTokenEstimate = outgoingMessages.reduce((total, message) => total + estimateTokens(message.content), 0);
 
   let assistantText = '';
-  // Performance Receipt timing: wall-clock start, time-to-first-token, and (for
-  // Ollama) the exact eval metrics from the final chunk. Cloud providers have no
-  // eval counts, so they fall back to wall-clock over the completion estimate.
+  // Performance Receipt timing: start, time-to-first-token, Ollama eval metrics.
   const streamStartedAt = Date.now();
   let firstTokenAt = null;
   let ollamaStats = null;
@@ -3196,9 +3109,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       config,
       signal: abortController.signal,
       overrideBaseUrl: typeof providerBaseUrl === 'string' && providerBaseUrl.trim() ? providerBaseUrl.trim() : undefined,
-      // Prefer the key the backend holds. A client may still pass one (an
-      // external caller with its own credentials), but the app no longer does:
-      // its keys never leave this process.
+      // Prefer the backend-held key. External callers may pass their own.
       overrideApiKey: (typeof providerApiKey === 'string' && providerApiKey.trim())
         ? providerApiKey.trim()
         : (providerKeys.get(effectiveProvider) || undefined),
@@ -3216,14 +3127,9 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       onNotice: (message) => { tunedNotice = message; sendSSE(res, 'notice', { message }); }
     });
 
-    // A stream that produced no text is a failure, not an empty answer. Engines
-    // can close a 200 response without emitting content (runner died, prompt
-    // rejected, model unloaded); persisting that as an assistant turn leaves a
-    // blank bubble in the transcript and poisons the next request's history.
-    // The `notice` path is exempt: it explains a deliberate no-output case.
-    // A stream the user walked away from is not a failure: keep whatever was
-    // generated so it is still in the transcript when they come back, but mark
-    // it so the UI (and the next turn's history) knows it was cut short.
+    // An empty stream is a failure: saving it leaves a blank bubble and poisons
+    // the next request's history. `notice` covers a deliberate no-output case.
+    // An abandoned reply keeps its text but is marked as cut short.
     if (!assistantText.trim() && clientGone) {
       // Nothing was produced before they left; drop the empty turn entirely.
       chat.messages = chat.messages.filter((m) => m.id !== userMessage.id);
@@ -3285,16 +3191,14 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
 
     sendSSE(res, 'done', { message: assistantMessage });
 
-    // Generate the AI title now (new chats only), after the reply has streamed, so
-    // it never competes for the model during first-token. Reuses the same tuning +
-    // keep_alive so the model stays warm rather than reloading for the title call.
+    // AI title for new chats, after the reply has streamed. Same tuning and
+    // keep_alive so the model stays warm instead of reloading.
     if (chatWasNew) {
       const aiTitle = await generateChatTitle({
         content, provider: effectiveProvider, model: effectiveModel, config,
         ollamaOptions: tuning.options, keepAlive: pinModel === true ? -1 : '30m'
       }).catch(() => null);
-      // Skip the title save if clearChats ran after this request started -
-      // the epoch will have changed and we must not write the cleared chat back.
+      // Skip if clearChats ran since this request started.
       if (aiTitle && aiTitle !== chat.title && getEpoch() === requestEpoch) {
         chat.title = aiTitle;
         await saveChat(config.chatStorePath, chat);
@@ -3312,8 +3216,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
         await saveChat(config.chatStorePath, chat).catch(() => {});
       }
     }
-    // Translate transport failures into something actionable. A new user whose
-    // engine is not running used to see only "Error: fetch failed".
+    // Turn transport failures (e.g. engine not running) into an actionable message.
     sendSSE(res, 'error', {
       error: describeEngineError(error, {
         provider: effectiveProvider,
@@ -3344,18 +3247,14 @@ async function collectMessageImages(msg) {
     try {
       const buf = await readFile(join(uploadDir, stored));
       if (buf.length && buf.length <= 20 * 1024 * 1024) out.push({ mime: a.mimeType, data: buf.toString('base64') });
-    } catch { /* unreadable - skip */ }
+    } catch { /* unreadable: skip */ }
   }
   return out;
 }
 
-// Best-effort removal of a chat's on-disk backing files (uploaded attachments +
-// generated images) when the chat is deleted or all chats are cleared.
-// Every file a chat references, across BOTH its live messages and its snapshots.
-// Snapshots clone whole messages into state.messages (see buildSnapshotRecord),
-// so a restore point keeps images and attachments alive that the live thread no
-// longer mentions. Walking only chat.messages both leaked files on delete and
-// would delete still-referenced ones during a sweep.
+// Every file a chat references, in live messages and snapshots. Snapshots clone
+// whole messages (see buildSnapshotRecord), so they can hold files the live thread
+// does not reference.
 function collectChatFileRefs(chat, images = new Set(), uploads = new Set()) {
   const scanMessages = (list) => {
     for (const m of (Array.isArray(list) ? list : [])) {
@@ -3382,14 +3281,9 @@ async function purgeChatBackingFiles(chat) {
   for (const name of images) await unlink(join(imageDir, name)).catch(() => {});
 }
 
-// Mark-and-sweep over the image and upload directories.
-//
-// Targeted purging on delete cannot catch every path: the PATCH handler replaces
-// a chat's messages wholesale, snapshot restore drops references, and
-// Off-the-Record chats write files while never being persisted, so nothing knows
-// to clean up after them. Rather than patch each site and hope the list is
-// complete, sweep once at boot, when no request is in flight and no ephemeral
-// chat exists yet. Anything on disk that no stored chat references is garbage.
+// Mark-and-sweep over the image and upload dirs. Delete-time purging misses PATCH
+// replacements, snapshot restores and Off-the-Record chats, so this runs at boot,
+// when nothing is in flight and no ephemeral chat exists.
 async function sweepOrphanedChatFiles() {
   try {
     const summaries = await listChats(config.chatStorePath).catch(() => []);
@@ -3423,9 +3317,8 @@ async function sweepOrphanedChatFiles() {
   }
 }
 
-// Can the selected model actually see images? Ollama reports this precisely via
-// /api/show capabilities; for OpenAI-compatible / cloud we assume the user chose
-// a vision model (the server errors if not) rather than block a valid request.
+// Ollama reports vision via /api/show. Other providers are assumed capable; their
+// server errors if not, which beats blocking a valid request.
 async function providerSupportsVision(provider, model, ollamaBaseUrl) {
   if (provider === 'ollama') {
     try { const info = await getOllamaModelInfo(ollamaBaseUrl, model); return !!info.vision; }
@@ -3459,8 +3352,7 @@ app.post('/api/generate-image', async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, steps, width, height, negative_prompt, guidance_scale, seed }),
-      // Raised from 180s: a high-step / high-resolution (SDXL-class) render on CPU or
-      // a modest GPU can exceed 3 min; do not discard a nearly-finished image.
+      // High-step or SDXL-class renders on CPU or a modest GPU can exceed 3 min.
       signal: AbortSignal.timeout(Number(process.env.MIRABILIS_IMAGE_TIMEOUT_MS || 600000))
     });
     if (!imgRes.ok) {
@@ -3547,7 +3439,7 @@ app.post('/api/chats/:chatId/attachments', upload.array('files', 10), async (req
 
   const attachments = [];
   for (const file of files) {
-    // safeBase already contains the original extension - do not append again
+    // safeBase already has the original extension.
     const safeBase = (file.originalname || 'file')
       .replace(/[^a-zA-Z0-9._-]/g, '_')
       .slice(0, 96);
@@ -3601,9 +3493,8 @@ app.get('/api/uploads/:filename', async (req, res) => {
 });
 
 
-// Mirabilis MCP Server endpoint
-// VS Code / Copilot / any MCP client can connect to POST /mcp and use
-// Mirabilis AI as MCP tools (mirabilis_chat, mirabilis_list_models, mirabilis_health).
+// MCP server on POST /mcp, so any MCP client (VS Code, Copilot) can use Mirabilis
+// as tools.
 const mcpServerAuditLogPath = join(dirname(config.chatStorePath), 'mcp-server-audit.jsonl');
 const mcpServerHandler = createMcpServerHandler({
   config,
@@ -3612,12 +3503,7 @@ const mcpServerHandler = createMcpServerHandler({
   listModels,
   auditLogPath: mcpServerAuditLogPath
 });
-// Gate the machine-facing /mcp surface (run_command/write_file/read_file) with a
-// local bearer token so it is never callable by an unauthenticated caller.
-// (The token itself is created near the top of this file, because the privileged
-// app routes defined above also need it.)
-// Provider keys. The UI may set one and see a masked hint; it can never read a
-// value back, which is the entire point of moving them off the renderer.
+// Provider keys: the UI can set one and see a masked hint, never read it back.
 app.get('/api/provider-keys', makePrivilegedGuard(mcpToken, 'provider keys'), async (_req, res) => {
   await providerKeysReady;
   res.json({ keys: providerKeys.listMasked() });
@@ -3640,9 +3526,6 @@ app.delete('/api/provider-keys/:provider', makePrivilegedGuard(mcpToken, 'provid
 
 app.post('/mcp', makeMcpAuthGuard(mcpToken), mcpServerHandler);
 
-// Autonomous agent runs. Behind the same privileged guard as remote control:
-// a run can execute shell commands unattended for hours, so it is emphatically
-// not something an unauthenticated local caller should be able to start.
 app.use((err, _req, res, next) => {
   if (err instanceof EgressBlockedError && !res.headersSent) {
     res.status(403).json({ error: err.message, goDark: true });
@@ -3651,6 +3534,7 @@ app.use((err, _req, res, next) => {
   next(err);
 });
 
+// Agent runs are privileged: a run can execute shell commands unattended for hours.
 app.use('/api/agent', createAgentRouter({
   config,
   streamWithProvider,
@@ -3802,8 +3686,8 @@ const recall = createRecall({
   intelLedgerStorePath: config.intelLedgerStorePath
 });
 
-// Config Vault: cited RAG over a local folder of config files. Shares the recall
-// embedding path so there is one vector stack, not two.
+// Config Vault: cited RAG over a local folder of config files, on the recall
+// embedding path.
 const configVault = createConfigVault({ recall, vaultStorePath: config.configVaultStorePath });
 
 app.get('/api/vault/status', async (req, res) => {
@@ -3874,11 +3758,9 @@ app.post('/api/recall', async (req, res) => {
   }
 });
 
-// "Your Past Self Disagrees": detect decisions/commitments in the current
-// conversation that contradict or supersede something the user decided before.
-// Accepts either an explicit list of statements or a raw transcript, from which
-// decision/commitment statements are pulled with the shared heuristic. Always
-// returns 200 with a conflicts array; when Ollama is down the array is empty.
+// "Your Past Self Disagrees": finds decisions here that contradict earlier ones.
+// Takes statements or a raw transcript. Always 200; conflicts is empty when
+// Ollama is down.
 app.post('/api/recall/contradictions', async (req, res) => {
   try {
     const text = String(req.body?.text || '').trim();
@@ -4237,11 +4119,8 @@ app.use((error, _req, res, _next) => {
     return res.status(403).json({ error: 'Origin not allowed' });
   }
 
-  // Honor a status carried on the error. Flattening everything to 500 reported
-  // client mistakes as server faults: an oversized body (413 from body-parser)
-  // and malformed JSON (400) both showed up as "Internal server error", which
-  // sends the user hunting for a backend problem that does not exist. It also
-  // means a 4xx is not masked in production, where the message is withheld.
+  // Honor the error's status so body-parser 413s and malformed-JSON 400s are not
+  // reported as 500s, and 4xx messages survive production masking.
   const status = Number(error?.status || error?.statusCode) || 500;
   const isClientError = status >= 400 && status < 500;
 
@@ -4273,18 +4152,14 @@ if (INTELLEDGER_REMINDER_WORKER_ENABLED) {
 const server = app.listen(config.port, config.bindHost, () => {
   console.log(`Backend listening on http://${config.bindHost}:${config.port} (host=${config.bindHost})`);
   console.log(`MCP server endpoint: http://${config.bindHost}:${config.port}/mcp`);
-  // Print only a fingerprint and the path. The desktop app pipes backend stdout
-  // into a mode-0644 backend.log, so logging the value put a working bearer
-  // token in world-readable cleartext on every start.
+  // Log only a fingerprint and the path: the desktop app writes stdout to a
+  // world-readable backend.log.
   console.log(`MCP token (for external MCP clients): ${String(mcpToken).slice(0, 4)}... [read the full token from ${config.mcpTokenPath}]`);
   if (config.bindHost === '0.0.0.0' || config.bindHost === '::') {
     console.warn('[security] Backend is bound to a non-loopback interface. Privileged endpoints (/mcp, /api/remote/*) are reachable from the network. Put an authenticating proxy in front, or unset MIRABILIS_BIND_HOST to bind loopback only.');
   }
-  // Bring the data directory up to standard. Stores were created with the
-  // process umask (normally 022) and landed world-readable, so every existing
-  // install has its chat history, ledger, indexed config vault and agent logs
-  // readable by any other account on the machine. New writes are 0600; this
-  // fixes what is already there.
+  // Tighten modes on existing data files. New writes are 0600, but files created
+  // under the default umask are world-readable.
   ensureSecureDir(dirname(config.chatStorePath))
     .then(() => hardenExistingData(dirname(config.chatStorePath)))
     .then(({ changed }) => {
@@ -4292,14 +4167,8 @@ const server = app.listen(config.port, config.bindHost, () => {
     })
     .catch(() => {});
 
-  // Say NOW if a data file cannot be written, rather than letting the first
-  // click fail with a raw errno.
-  //
-  // A user launched the app with sudo once, which left chats.json owned by
-  // root. Every attempt to start a chat then failed with
-  // "EACCES: permission denied, open '.../chats.json'" and nothing anywhere
-  // explained that a file in their own home directory belonged to another
-  // account, or how to take it back. Reporting at boot costs one stat per file.
+  // Report unwritable data files (e.g. root-owned after a sudo launch) at boot,
+  // with the fixing command, instead of a raw errno on first use.
   checkDataAccess(dirname(config.chatStorePath))
     .then(({ ok, problems }) => {
       if (ok) return;
@@ -4307,9 +4176,8 @@ const server = app.listen(config.port, config.bindHost, () => {
     })
     .catch(() => {});
 
-  // Reclaim images and uploads left behind by wholesale message edits, snapshot
-  // restores and Off-the-Record chats. Deliberately at boot: nothing is in
-  // flight and no ephemeral chat exists yet, so "unreferenced" is unambiguous.
+  // Reclaim orphaned images and uploads. At boot nothing is in flight and no
+  // ephemeral chat exists, so "unreferenced" is unambiguous.
   sweepOrphanedChatFiles();
 });
 
@@ -4356,7 +4224,7 @@ process.on('unhandledRejection', (error) => {
 });
 process.on('uncaughtException', (error) => {
   console.error('[backend] uncaughtException:', error);
-  // Exit non-zero so the desktop shell treats it as a crash (restart / notify)
-  // instead of a clean exit that silently leaves a dead window.
+  // Exit non-zero so the desktop shell treats it as a crash, not a clean exit
+  // that leaves a dead window.
   shutdown('uncaughtException', 1);
 });

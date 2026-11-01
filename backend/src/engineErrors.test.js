@@ -1,9 +1,3 @@
-// Tests for the message a user sees when the engine is not there.
-//
-// This is the first-run path: install the app, type hello, and see what comes
-// back. It used to be "Error: fetch failed", which names nothing and suggests
-// nothing.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -49,7 +43,6 @@ test('a timeout is distinguished from an unreachable engine', () => {
 });
 
 test('a real error from the engine is passed through untouched', () => {
-  // The engine explaining itself is better than anything this module can add.
   const raw = 'model "nope" not found, try pulling it first';
   assert.equal(describeEngineError(new Error(raw), { provider: 'ollama' }), raw);
 });

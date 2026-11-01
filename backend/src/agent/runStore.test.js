@@ -22,8 +22,7 @@ test('a run survives a restart instead of vanishing', async () => {
 });
 
 test('a run that was live when the process died is marked interrupted, not left running', async () => {
-  // This is the whole point. A stale "running" row means a panel that waits
-  // forever for a run that no longer exists.
+  // A stale "running" row leaves the panel waiting on a run that no longer exists.
   const dir = await tmp();
   const a = createRunStore(dir);
   await a.init();
@@ -115,9 +114,7 @@ test('the index is bounded so it cannot grow without limit', async () => {
 });
 
 test('an unwritable directory does not throw', async () => {
-  // Same shape as the audit-log case: a directory under a FILE is portably
-  // unwritable. /proc is absent on macOS but real on Linux, so using it made
-  // this test hang the suite in CI while passing locally.
+  // Parent is a file, so ENOTDIR on every OS; do not use /proc (hangs on Linux).
   const base = await tmp();
   const asFile = path.join(base, 'not-a-directory');
   await fs.writeFile(asFile, 'x', 'utf8');

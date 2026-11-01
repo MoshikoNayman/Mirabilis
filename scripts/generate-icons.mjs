@@ -1,6 +1,4 @@
-// Regenerate desktop app icons from desktop/icons/icon-source.svg.
-// Run from the frontend directory so the bundled `sharp` resolves:
-//   cd frontend && node ../scripts/generate-icons.mjs
+// Regenerates the desktop app icons from desktop/icons/icon-source.svg.
 import { execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -36,7 +34,7 @@ for (const [sz, name] of specs) writeFileSync(join(iset, `icon_${name}.png`), aw
 execSync(`iconutil -c icns -o "${join(iconsDir, 'icon.icns')}" "${iset}"`);
 rmSync(iset, { recursive: true, force: true });
 
-// 3) Mirabilis.ico - a 256x256 PNG wrapped in a minimal ICO container
+// 3) Mirabilis.ico: a 256x256 PNG wrapped in a minimal ICO container
 const ico = await png(256);
 const header = Buffer.alloc(6);
 header.writeUInt16LE(0, 0);       // reserved

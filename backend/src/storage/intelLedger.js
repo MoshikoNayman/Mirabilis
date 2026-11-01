@@ -1,5 +1,4 @@
-// backend/src/storage/intelLedger.js
-// IntelLedger persistence layer - JSON file-based (no database required)
+// IntelLedger persistence in a JSON file store.
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -364,9 +363,8 @@ async function readStore(filePath) {
     return _cache;
   }
   catch (parseError) {
-    // Corrupt primary file: recover from the last-known-good backup rather than
-    // returning empty (which the next write would persist, destroying every
-    // session permanently).
+    // Corrupt primary: recover from .bak. Returning empty would let the next
+    // write persist an empty store.
     try {
       const backupRaw = await fs.readFile(`${filePath}.bak`, 'utf8');
       _cache = normalizeStoreShape(JSON.parse(backupRaw));
@@ -377,7 +375,7 @@ async function readStore(filePath) {
         const healTmp = `${filePath}.heal-${process.pid}`;
         await fs.writeFile(healTmp, backupRaw, 'utf8');
         await fs.rename(healTmp, filePath);
-      } catch { /* best effort - cache already holds good data */ }
+      } catch { /* best effort; cache already holds good data */ }
       console.warn(`[intelLedger] ${filePath} was corrupt; recovered from ${filePath}.bak and healed the primary`);
       return _cache;
     } catch {
@@ -391,11 +389,9 @@ async function readStore(filePath) {
   }
 }
 
-// Atomic write (temp file + fsync + rename) with a rolling .bak of the prior
-// good copy, so a crash mid-write can never truncate the store.
-// Pass { shred: true } on writes that REMOVE data by intent (delete, PII purge,
-// retention sweep). A rolled .bak would keep the full pre-purge store on disk
-// forever, since nothing ever removes one.
+// Atomic write (temp file + fsync + rename) with a rolling .bak of the prior copy.
+// Pass { shred: true } on writes that remove data by intent (delete, PII purge,
+// retention sweep) so no .bak keeps the pre-purge store.
 async function writeStore(filePath, data, { shred = false } = {}) {
   invalidateCache();
   const serialized = JSON.stringify(data, null, 2);
@@ -815,8 +811,7 @@ export function createIntelLedgerStorage(filePath) {
         });
 
         session.updated_at = new Date().toISOString();
-        // Retention exists to remove data past its cutoff; a rolled .bak would
-        // keep every purged record on disk indefinitely.
+        // Shred so no .bak keeps the purged records.
         await set(store, { shred: true });
 
         const after = {
@@ -1928,7 +1923,6 @@ export function createIntelLedgerStorage(filePath) {
       });
     },
 
-    // Helper to check if action is blocked by unmet dependencies
     async isActionBlockedByDependencies(sessionId, actionId) {
       return withLock(async () => {
         const store = await get();
@@ -1941,7 +1935,6 @@ export function createIntelLedgerStorage(filePath) {
       });
     },
 
-    // Helper to check for circular dependencies
     detectCircularDependencies(allActions, actionId, newDependencies) {
       const visited = new Set();
       const recursionStack = new Set();
@@ -1997,15 +1990,12 @@ export function createIntelLedgerStorage(filePath) {
           if (title) action.title = title;
         }
 
-        // Handle tags
         if (Array.isArray(patch.tags)) {
           action.tags = patch.tags.map(t => String(t).trim().toLowerCase()).filter(Boolean);
         }
 
-        // Handle dependencies - check for circular dependencies
         if (Array.isArray(patch.depends_on)) {
           const newDeps = patch.depends_on.filter(Boolean);
-          // Check for self-reference
           if (newDeps.includes(actionId)) {
             throw new Error('Action cannot depend on itself');
           }
@@ -2023,7 +2013,6 @@ export function createIntelLedgerStorage(filePath) {
           action.depends_on = validDeps;
         }
 
-        // Update blocked_by_dependencies flag
         if (action.depends_on && action.depends_on.length > 0) {
           const dependencies = store.actions.filter((item) => 
             item.session_id === sessionId && action.depends_on.includes(item.id)

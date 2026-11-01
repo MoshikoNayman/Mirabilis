@@ -1,13 +1,3 @@
-// autoTune tests.
-//
-// deriveInferenceDefaults is a pure function that decides how much context to
-// hand the engine. Getting it wrong costs either quality (a needlessly tiny
-// window) or a failed load (a window too large for the memory available), and
-// it had no coverage at all despite being the headline of the tuning feature.
-//
-// The load-bearing test here is monotonicity: as a model gets bigger on fixed
-// hardware, the context it is granted must never go UP.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -47,11 +37,7 @@ test('num_ctx never exceeds the model\'s real context window', () => {
 });
 
 test('num_ctx is monotonically non-increasing as the model grows', () => {
-  // The real bug this catches: when the KV budget lands just above zero, the
-  // computed context truncates to 0 and an `|| DEFAULT_CTX` fallback promoted it
-  // to 8192, so a model that barely fits was granted FOUR TIMES the context of a
-  // smaller one. That is exactly backwards, and it happens at the point where
-  // memory is tightest, which is where a too-large window fails the load.
+  // A KV budget just above zero must not fall back to a large default context.
   for (const ramGb of [4, 8, 16, 32]) {
     let previous = Infinity;
     for (let bytes = 0.2e9; bytes <= ramGb * 1e9; bytes += 0.01e9) {
@@ -67,10 +53,7 @@ test('num_ctx is monotonically non-increasing as the model grows', () => {
 });
 
 test('num_ctx is monotonic across the budget boundary specifically', () => {
-  // A coarse sweep steps straight over the failure. The window where the KV
-  // allowance is positive but rounds down to zero tokens is only about 525KB
-  // wide (one token's worth of KV cache for a 7B model), so 1MB steps can miss
-  // it entirely. Walk it in 50KB steps. On 8GB RAM the budget is 5.2GB.
+  // The band that rounds to zero tokens is about 525KB wide, so walk it in 50KB steps.
   for (const ramGb of [4, 8, 16, 32]) {
     const budgetBytes = ramGb * 0.65 * 1e9;
     let previous = Infinity;

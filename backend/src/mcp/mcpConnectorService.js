@@ -209,8 +209,7 @@ export class McpConnectorService {
     this.state = {
       servers: []
     };
-    // Cache initialized session IDs per server to avoid redundant handshakes and
-    // ensure stateful MCP servers receive tool calls on the same session.
+    // Reuse session IDs so stateful MCP servers see tool calls on one session.
     this._sessionCache = new Map(); // serverId -> { sessionId, expiresAt }
   }
 
@@ -220,7 +219,7 @@ export class McpConnectorService {
     try {
       raw = await readFile(this.filePath, 'utf8');
     } catch {
-      // No file yet: a genuinely fresh install. Start empty and write it.
+      // No file yet: fresh install.
       this.state.servers = [];
       await this.persist();
       return;
@@ -234,10 +233,8 @@ export class McpConnectorService {
           }))
         : [];
     } catch (parseError) {
-      // The file exists but is corrupt. Previously this reset to an empty list
-      // and immediately persisted it, destroying every configured MCP server
-      // (and its tool policy) on a single bad read. Recover from the backup,
-      // else quarantine and fail loud rather than silently wiping the config.
+      // Corrupt file: recover from .bak, else quarantine and throw. Never reset
+      // to empty here, or the next persist wipes every configured server.
       try {
         const parsed = JSON.parse(await readFile(`${this.filePath}.bak`, 'utf8'));
         this.state.servers = Array.isArray(parsed.servers)
@@ -255,9 +252,7 @@ export class McpConnectorService {
     }
   }
 
-  // Atomic write: temp file, fsync, rename, keeping the prior good copy as .bak.
-  // A bare writeFile could be interrupted mid-write and leave truncated JSON,
-  // which init() would then treat as corrupt.
+  // Temp file, fsync, rename, keeping the prior copy as .bak.
   async persist() {
     const serialized = JSON.stringify(this.state, null, 2);
     const tmpPath = `${this.filePath}.tmp-${process.pid}`;

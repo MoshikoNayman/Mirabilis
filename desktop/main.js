@@ -4,8 +4,7 @@
 const { app, BrowserWindow, shell, Tray, Menu, nativeImage, dialog } = require('electron');
 app.name = 'Mirabilis AI';
 
-// Single-instance lock
-// Prevents a second launch fighting over ports 3000/4000
+// A second instance would fight over ports 3000/4000.
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -132,12 +131,8 @@ function buildStartupDiagnostics(err) {
   return lines.join('\n');
 }
 
-// Port cleanup
-// Reclaim a port ONLY from a stale Mirabilis server - never from a foreign app.
-// The previous version blindly `kill -9`'d whatever held ports 3000/4000, which
-// would silently kill an unrelated dev server the user had running. We now look
-// up the owning PID, inspect its command line, and stop it only if it is clearly
-// one of our own processes (server.js or the Next standalone server we ship).
+// Port cleanup: reclaim a port only from a stale Mirabilis server, checked by the
+// owning PID's command line, so an unrelated app on 3000/4000 is never killed.
 const { execFile } = require('node:child_process');
 
 function execFileP(cmd, args) {
@@ -173,9 +168,7 @@ async function pidCommandLine(pid) {
 
 function looksLikeMirabilis(cmdline) {
   const c = cmdline.toLowerCase();
-  // Our backend runs `server.js`; our packaged frontend runs the Next standalone
-  // `server.js` from inside a Mirabilis resources path. Require a Mirabilis marker
-  // so a generic `node server.js` in some other project is never matched.
+  // Require a Mirabilis marker so a generic `node server.js` elsewhere never matches.
   const isOurs = c.includes('mirabilis') || c.includes(app.getPath('userData').toLowerCase());
   return isOurs && (c.includes('server.js') || c.includes('next'));
 }
@@ -205,8 +198,6 @@ function startBackend() {
   return new Promise((resolve, reject) => {
     const out = makeLog('backend');
     const runner = resolveNodeRunner();
-    // Use the resolved Electron runner (or helper on macOS) in Node mode to execute server.js.
-    // When packaged, backend is copied under process.resourcesPath (extraResources)
     backendProc = spawn(runner, ['src/server.js'], {
       cwd: BACKEND_DIR,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -362,19 +353,15 @@ function createWindow() {
 
   mainWindow.loadURL(APP_ORIGIN);
 
-  // Open external links in the system browser, but only ones the OS should be
-  // asked to open. shell.openExternal hands a URL straight to the operating
-  // system, so an unchecked call lets page content trigger file:// or a
-  // registered custom scheme. Restrict it to real web links.
+  // shell.openExternal hands the URL to the OS, so unchecked page content could
+  // open file:// or a custom scheme. Only real web links go out.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isSafeExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  // Keep the window itself on the app. setWindowOpenHandler only covers NEW
-  // windows: without this, anything that navigates the existing window (a link,
-  // a redirect, injected content) could replace the app with a remote page that
-  // then sits inside the Electron shell wearing the app's identity.
+  // setWindowOpenHandler covers only new windows; this stops the existing window
+  // from navigating to a remote page that would run inside the app shell.
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (isAppUrl(url)) return;
     event.preventDefault();
@@ -461,8 +448,7 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
   }
 
-  // Updates. This only registers the IPC handlers: no network call happens
-  // until the renderer reports that Go Dark is off.
+  // Registers IPC only; no network call until the renderer reports Go Dark is off.
   initUpdater();
 
   // Tray on all platforms - lets the app run in the background

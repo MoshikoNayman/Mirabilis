@@ -1,7 +1,5 @@
-// frontend/src/components/shell/TabSwitch.jsx
-// The Chat / Ledger view switch, sitting beside the wordmark in each view's
-// header. It dispatches a shell event so MirabilisApp (which owns the active
-// tab) flips the view - keeping the top-right dock uncluttered.
+// Chat / Ledger view switch beside the header wordmark. It dispatches a shell
+// event; MirabilisApp owns the active tab.
 'use client';
 
 import { SegmentedControl } from '../ui/primitives';

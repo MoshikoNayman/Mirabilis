@@ -1,15 +1,4 @@
-// Route-level tests for the chat SSE stream and the guards around it.
-//
-// server.js registers 88 routes and had zero tests. The chat stream is the one
-// that matters most: it is the app's core path, it emits five different SSE
-// event types, and three separate defects lived in it (a mid-stream error saved
-// as an empty successful reply, a compression filter that gzipped the stream,
-// and a Go Dark check that trusted the provider ID).
-//
-// These boot the REAL backend as a child process against a fake upstream engine,
-// rather than importing the express app. That keeps server.js free of a
-// test-only export path and exercises the actual middleware stack, including
-// compression, which is exactly where one of the bugs lived.
+// Boots the real backend as a child process against a fake engine to cover the full middleware stack.
 
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -73,7 +62,7 @@ async function startEngine() {
       }
       res.write(ndjson({ message: { content: 'Hello' } }));
       res.write(ndjson({ message: { content: ' there' } }));
-      // A long-ish reply so compression would have something to act on.
+      // Long enough that compression would kick in.
       res.write(ndjson({ message: { content: ' ' + 'x'.repeat(2000) } }));
       return res.end(ndjson({ done: true, eval_count: 3, eval_duration: 1e9 }));
     }
@@ -176,10 +165,7 @@ test('a successful stream emits meta, then tokens, then done, in that order', as
 });
 
 test('the SSE response is never gzipped', async () => {
-  // The compression filter tested the REQUEST Accept header, but the chat client
-  // is a fetch POST that sends Content-Type only, so Accept is */* and the guard
-  // never fired. text/event-stream is `compressible`, so the stream was being
-  // buffered by gzip and tokens stalled.
+  // The client sends Accept */*, so the compression guard must key on the response type.
   engineMode = 'ok';
   const chatId = await newChat();
   const res = await send(chatId);
@@ -204,7 +190,7 @@ test('a successful reply is persisted with its performance receipt', async () =>
   assert.equal(reply.performance?.source, 'ollama', 'exact engine metrics should be recorded');
 });
 
-// failure paths: the defects that shipped
+// failure paths
 
 test('a mid-stream engine error emits an error event and persists NOTHING', async () => {
   engineMode = 'mid-stream-error';
@@ -266,8 +252,7 @@ test('Go Dark blocks a cloud provider at the route', async () => {
 });
 
 test('Go Dark blocks a base-URL provider pointed off-device', async () => {
-  // The original hole: vllm/llamacpp/openai-compatible were not in the remote
-  // set, so Go Dark waved them through no matter where they pointed.
+  // Go Dark must judge base-URL providers by where they point, not by provider ID.
   const chatId = await newChat();
   const res = await send(chatId, {
     provider: 'vllm', providerBaseUrl: 'https://api.example-cloud.com/v1', localOnly: true
@@ -327,9 +312,7 @@ test('DELETE /api/chats clears every chat and leaves no backup behind', async ()
 // client disconnect
 
 test('a client that disconnects mid-stream keeps its partial reply, marked truncated', async () => {
-  // The provider adapters swallow AbortError and return normally, so without an
-  // explicit flag the route cannot tell a finished reply from an abandoned one
-  // and would save half an answer as though it were whole.
+  // Adapters swallow AbortError, so only an explicit flag marks the reply truncated.
   engineMode = 'slow';
   const chatId = await newChat();
 

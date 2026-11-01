@@ -1,10 +1,3 @@
-// Looking a model up before pulling it.
-//
-// The interesting cases are the failure ones. "I could not check" and "that
-// model does not exist" must stay distinct: the first must never stop someone
-// installing a model they know is real, and the second is the whole reason the
-// lookup exists.
-
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseModelRef, formatSize, lookupModel } from './ollamaRegistry.js';
@@ -53,8 +46,7 @@ test('a 404 is a definite "no such model"', async () => {
 });
 
 test('an unreachable registry is "unknown", never "missing"', async () => {
-  // This distinction is the point: being offline must not block an install of a
-  // model the user knows exists.
+  // Being offline must not block installing a model the user knows exists.
   const thrown = await lookupModel('qwen2.5:7b', { fetchImpl: async () => { throw new Error('offline'); } });
   assert.equal(thrown.status, 'unknown');
 

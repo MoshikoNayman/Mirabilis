@@ -1,7 +1,4 @@
-// frontend/src/lib/storage.js
-// Single source of truth for localStorage access. Replaces the duplicated
-// safeStorage*/readJson helpers that were copy-pasted across ChatApp,
-// MirabilisApp and IntelLedgerSession.
+// localStorage helpers that never throw; storage can be missing (SSR, private mode, quota).
 
 export function safeStorageGet(key, fallback = null) {
   try {
@@ -18,7 +15,7 @@ export function safeStorageSet(key, value) {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(key, value);
   } catch {
-    /* storage may be unavailable (private mode, quota) - fail silently */
+    /* ignore */
   }
 }
 

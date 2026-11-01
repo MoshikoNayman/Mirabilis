@@ -1,7 +1,5 @@
-// frontend/src/store/useAppStore.js
-// Tiny zero-dependency global store (useSyncExternalStore). Holds transient
-// shell UI state: which overlays are open + a toast queue. Theme and sound
-// preferences have their own modules (lib/theme, lib/sounds).
+// Zero-dependency store on useSyncExternalStore for transient shell UI state:
+// open overlays, workspace pins, Go Dark and the toast queue.
 
 import { useSyncExternalStore } from 'react';
 
@@ -47,15 +45,12 @@ let state = {
   homelabOpen: false,
   wywaOpen: false,
   workspaceOpen: false,
-  // Watched Workspace: the local folder being watched + the set of files the user
-  // has pinned as live chat context (relative paths). Persisted to localStorage
-  // so both survive a reload; ChatApp reads workspacePins to fold fresh file
-  // contents into each outbound message.
+  // Watched folder and pinned relative paths, persisted to localStorage. ChatApp
+  // folds the pinned files' current contents into each outbound message.
   workspaceRoot: readWorkspaceRoot(),
   workspacePins: readWorkspacePins(),
-  // Go Dark: local-only lockdown for the whole session. When on, remote/cloud
-  // providers are blocked in the UI and the send path flags every request as
-  // local-only so the backend refuses any egress.
+  // Go Dark: the UI blocks remote providers and every request is flagged
+  // local-only so the backend refuses egress.
   goDark: readGoDark(),
   toasts: []
 };

@@ -1,10 +1,5 @@
-// backend/src/storage/configVaultStore.js
-// Persistent index for the Config Vault: a folder of network/homelab config files
-// turned into embedded, citable chunks. Unlike the Recall Orb (which rebuilds its
-// corpus in memory every query), the Vault persists vectors to disk so a restart
-// can answer queries without re-embedding a large config corpus. Mirrors the
-// atomic-write discipline of homelabStore.js: single write lock + temp file +
-// fsync + rename, with a .bak kept as the last-known-good copy.
+// Persists the Config Vault's embedded config chunks so a restart needs no re-embed.
+// Writes are locked, atomic (temp + fsync + rename) and keep a .bak as last-known-good.
 
 import fs from 'fs/promises';
 import path from 'path';
@@ -29,16 +24,9 @@ function withLock(fn) {
   return prev.then(() => fn()).finally(() => release());
 }
 
-// Embedding vectors dominate this file: 896 float64s per chunk, and at the
-// 20,000-chunk ceiling the store measured 25.1 KB per chunk, which projects to
-// roughly 514 MB of JSON held in memory, re-serialized and copied to .bak on
-// every write.
-//
-// Two cheap changes cut that to about 180 MB with no format change, so existing
-// files still load: write compact JSON (no pretty-print), and round vector
-// components to 6 decimals. Measured worst-case cosine error from the rounding
-// is 1.8e-09, which cannot affect ranking. Full precision here was storing 17
-// significant digits of a number whose useful precision is far lower.
+// Vectors dominate file size (about 514 MB at the 20,000-chunk ceiling). Rounding to
+// 6 decimals plus compact JSON cuts that to about 180 MB with no format change;
+// worst-case cosine error is 1.8e-09, too small to affect ranking.
 const VECTOR_DECIMALS = 6;
 
 function compactVector(vector) {
@@ -77,10 +65,9 @@ export async function readVault(filePath) {
   await ensureStoreFile(filePath);
   // Lock-free fast path for a warm cache.
   if (_cache && _cachePath === filePath) return _cache;
-  // Cold read runs under the same lock as writeVault so a concurrent re-index can
-  // never interleave between our fs.readFile and the cache assignment (which would
-  // otherwise clobber the writer's fresh cache with stale data). Double-checked:
-  // if a write completed while we waited for the lock, return its cache instead.
+  // Cold read takes the write lock so a concurrent re-index cannot land between
+  // readFile and the cache assignment and get clobbered with stale data. If a
+  // write finished while we waited, return its cache instead.
   return withLock(async () => {
     if (_cache && _cachePath === filePath) return _cache;
     const raw = await fs.readFile(filePath, 'utf8');
@@ -112,8 +99,7 @@ export function writeVault(filePath, data, { shred = false } = {}) {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     invalidateCache();
     const next = coerce(data);
-    // Compact, not pretty: this file is machine-read only, and the indentation
-    // alone accounted for roughly a third of its size.
+    // Compact JSON: machine-read only, and indentation costs about a third of the size.
     const serialized = JSON.stringify(next);
     const tmpPath = `${filePath}.tmp-${process.pid}`;
     const handle = await fs.open(tmpPath, 'w', SECURE_FILE_MODE);
@@ -138,9 +124,7 @@ export function writeVault(filePath, data, { shred = false } = {}) {
 }
 
 export async function clearVault(filePath) {
-  // Build a fresh empty store rather than spreading the module-level template:
-  // `{ ...emptyStore }` aliases emptyStore.chunks, so a later push() would
-  // pollute the shared "empty" value for the rest of the process lifetime.
-  // Shred the .bak too, or the whole indexed corpus survives the clear.
+  // Fresh object: spreading emptyStore would alias its chunks array and let a
+  // later push() pollute it. Remove the .bak too, or the corpus survives the clear.
   return writeVault(filePath, { root: '', builtAt: null, embedModel: null, fileCount: 0, chunks: [] }, { shred: true });
 }

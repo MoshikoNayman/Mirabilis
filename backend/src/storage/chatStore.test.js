@@ -31,8 +31,7 @@ test('writeStore keeps a rolling .bak of the previous good copy', async () => {
 });
 
 test('readStore recovers from .bak when the primary file is corrupt', async () => {
-  // Seed files directly on disk - this models a fresh process after a torn write
-  // (the in-memory cache is empty because the crashed process never updated it).
+  // Seed disk directly to model a fresh process after a torn write.
   const p = await tmpStore();
   await fs.writeFile(`${p}.bak`, JSON.stringify({ chats: [{ id: 'v1', title: 'v1', messages: [] }] }), 'utf8');
   await fs.writeFile(p, '{ "chats": [ {"id":"v2"', 'utf8'); // torn primary
@@ -56,14 +55,11 @@ test('saveChat persists across an independent read (cache-invalidation sanity)',
   assert.equal(store.chats.find((c) => c.id === 'x')?.title, 'X');
 });
 
-// clearChats / deleteChat: the paths that shipped a data-loss and a privacy bug
+// clearChats / deleteChat
 
 test('clearChats empties the store, twice in a row, in one process', async () => {
   const p = await tmpStore();
-  // Run the whole cycle TWICE. The original bug only appeared on the second
-  // pass: clearChats wrote `{ ...emptyStore }`, which aliased the module-level
-  // emptyStore.chats array, so the saveChat below push()ed onto the shared
-  // template and every later "empty" write silently carried the old chat.
+  // Two rounds catch a clear that aliases the shared empty-store chats array.
   for (const round of ['first', 'second']) {
     await saveChat(p, { id: `c-${round}`, title: round, messages: [], updatedAt: new Date().toISOString() });
     assert.equal((await readStore(p)).chats.length, 1, `${round}: chat should be saved`);
@@ -76,7 +72,6 @@ test('clearChats shreds the .bak so deleted chats do not survive on disk', async
   const p = await tmpStore();
   await saveChat(p, { id: 'secret', title: 'private notes', messages: [], updatedAt: new Date().toISOString() });
   await saveChat(p, { id: 'secret2', title: 'more private notes', messages: [], updatedAt: new Date().toISOString() });
-  // A .bak exists at this point precisely because normal writes roll one.
   const bakBefore = await fs.readFile(`${p}.bak`, 'utf8');
   assert.ok(bakBefore.includes('private notes'), 'precondition: .bak holds the data');
 
@@ -114,9 +109,7 @@ test('getEpoch advances on clear, and a save enqueued before the clear is droppe
   await writeStore(p, { chats: [] });
   const before = getEpoch();
 
-  // Start a save and a clear without awaiting the save first, so the save is
-  // queued behind the clear on the shared write lock. Driven by the epoch, not
-  // by a sleep, so it cannot flake on a slow machine.
+  // Not awaited, so the save queues behind the clear on the shared write lock.
   const pendingSave = saveChat(p, { id: 'ghost', title: 'ghost', messages: [], updatedAt: new Date().toISOString() });
   const pendingClear = clearChats(p);
   await Promise.all([pendingSave, pendingClear]);
@@ -138,7 +131,6 @@ test('ephemeral chats stay in memory and never touch the store file', async () =
   const raw = await fs.readFile(p, 'utf8');
   assert.ok(!raw.includes('off the record'), 'ephemeral title must not appear in the file');
 
-  // It still behaves like a real chat while the process lives.
   assert.equal((await getChat(p, 'otr'))?.title, 'off the record');
   assert.ok((await listChats(p)).some((c) => c.id === 'otr' && c.ephemeral === true));
 

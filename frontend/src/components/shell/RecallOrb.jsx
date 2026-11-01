@@ -1,7 +1,5 @@
-// frontend/src/components/shell/RecallOrb.jsx
-// Recall Orb: ask a question and get cited answers pulled from your own history -
-// past chats and IntelLedger signals - ranked locally by Ollama embeddings. No
-// cloud. Clicking a chat result opens that conversation.
+// Searches past chats and IntelLedger signals, ranked by local Ollama embeddings.
+// Clicking a result opens its chat or ledger session.
 'use client';
 
 import { useEffect, useRef, useState } from 'react';

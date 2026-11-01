@@ -1,10 +1,5 @@
-// frontend/src/components/shell/VoiceChat.jsx
-// Voice chat: a hands-free spoken conversation with the AI. You talk, it talks
-// back, in a chosen male or female voice - all driven from ChatApp (which owns
-// speech recognition, the send/stream loop, and text-to-speech). This component
-// is purely presentational: it renders the pulsing flower orb, the current
-// state, the live transcript, and the male/female voice toggle, and hands taps
-// back up to ChatApp. Everything stays local-first.
+// Hands-free voice chat panel. Presentational only: ChatApp owns speech
+// recognition, the send/stream loop and text-to-speech.
 'use client';
 
 import { Modal, IconButton, SegmentedControl } from '../ui/primitives';
@@ -17,7 +12,7 @@ const PHASE_LABEL = {
   speaking: 'Speaking...'
 };
 
-// A monochrome X - matches the line-icon system (no emoji).
+// Monochrome X to match the line-icon set.
 function CloseGlyph({ size = 16 }) {
   return (
     <svg
@@ -54,7 +49,6 @@ export default function VoiceChat({
   return (
     <Modal open={open} onClose={onClose} align="center" className="max-w-[560px]" labelledBy="voice-chat-title">
       <div className="au-chrome au-hairline au-elev-3 relative overflow-hidden rounded-[var(--r-xl)]">
-        {/* Header: title + close */}
         <div
           className="flex items-center justify-between gap-2 border-b px-4 py-3"
           style={{ borderColor: 'var(--hairline)' }}
@@ -70,9 +64,7 @@ export default function VoiceChat({
           </IconButton>
         </div>
 
-        {/* Body: orb + state + transcript */}
         <div className="flex flex-col items-center gap-5 px-6 py-8">
-          {/* The pulsing talk orb */}
           <button
             type="button"
             onClick={onOrbTap}
@@ -82,7 +74,6 @@ export default function VoiceChat({
             className="au-focus relative inline-flex items-center justify-center rounded-full transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
             style={{ width: 180, height: 180 }}
           >
-            {/* Soft accent glow ring behind the flower */}
             <span
               className="absolute inset-0 rounded-full"
               aria-hidden="true"
@@ -96,7 +87,6 @@ export default function VoiceChat({
             </span>
           </button>
 
-          {/* Big state label */}
           <p
             role="status"
             aria-live="polite"
@@ -105,7 +95,6 @@ export default function VoiceChat({
             {srSupported ? label : 'Voice input unavailable'}
           </p>
 
-          {/* Live transcript of what you're saying */}
           <div className="flex min-h-[2.5rem] w-full flex-col items-center gap-2 text-center">
             {interimText ? (
               <p className="text-[length:var(--text-md)] text-[color:var(--text-main)]">
@@ -119,7 +108,7 @@ export default function VoiceChat({
               </p>
             )}
 
-            {/* The AI's latest reply, shown while/after speaking */}
+            {/* Latest reply, shown while and after speaking */}
             {replyText ? (
               <p className="au-scroll mt-1 max-h-[22vh] w-full overflow-y-auto whitespace-pre-wrap rounded-[var(--r-md)] bg-[color:var(--hairline)] px-3 py-2 text-left text-[length:var(--text-sm)] text-[color:var(--text-main)]">
                 {replyText}
@@ -132,7 +121,6 @@ export default function VoiceChat({
           ) : null}
         </div>
 
-        {/* Footer: male / female voice toggle + end */}
         <div
           className="flex items-center justify-between gap-3 border-t px-4 py-3"
           style={{ borderColor: 'var(--hairline)' }}

@@ -5,10 +5,7 @@ import {
 
 describe('hasUsableKey', () => {
   it('accepts a key the BACKEND holds, which is where keys live now', () => {
-    // The defect: after keys moved to the backend, the send path still asked
-    // the page for its copy, which nothing populated any more. Saving a key
-    // made the settings panel say "Stored in the app" while every send was
-    // refused, and re-saving could never help.
+    // A backend-held key counts even when the page holds none.
     for (const p of KEY_REQUIRED_PROVIDERS) {
       expect(hasUsableKey(p, { pageKey: '', hints: { [p]: { hasKey: true } } })).toBe(true);
     }

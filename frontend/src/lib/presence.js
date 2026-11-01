@@ -1,14 +1,13 @@
 // @ts-check
-// frontend/src/lib/presence.js
-// Provider catalog + presence mapping. Turns provider health/local-status into
-// the ICQ-style presence states the Buddy List and StatusOrb render.
+// Provider catalog, and the mapping from provider health to the presence states
+// the Buddy List and StatusOrb render.
 
 import { API_BASE } from './api';
 
 /** @typedef {import('../types.js').ProviderMeta} ProviderMeta */
 /** @typedef {import('../types.js').PresenceState} PresenceState */
 
-// Mirrors ChatApp's provider metadata (kept here so the shell is self-contained).
+// Keep in sync with ChatApp's provider metadata.
 /** @type {ProviderMeta[]} */
 export const PROVIDERS = [
   { id: 'ollama', label: 'Ollama', scope: 'local', needsKey: false, requiresBinary: false, baseUrl: 'http://127.0.0.1:11434' },
@@ -34,9 +33,7 @@ export const PRESENCE_LABELS = {
   unknown: 'Checking...'
 };
 
-// Model Warmth: which Ollama models are currently loaded in memory (warm in
-// VRAM) and can answer instantly. Returns the warm model names, empty when
-// Ollama is cold or unreachable.
+// Ollama models loaded in memory; empty when Ollama is cold or unreachable.
 /** @param {{ signal?: AbortSignal }} [opts] @returns {Promise<string[]>} */
 export async function probeOllamaWarmth({ signal } = {}) {
   try {
@@ -62,19 +59,15 @@ export function aggregatePresence(map, streaming = false) {
   return 'unknown';
 }
 
-// True when a hint/error string indicates a missing/invalid credential rather
-// than an unreachable service. The backend returns HTTP 400 with
-// { ok:false, hint:"OpenAI API key is required." } for keyless remotes.
+// The backend answers a keyless remote with 400 and a hint such as
+// "OpenAI API key is required.", which must read as needkey, not offline.
 function looksLikeMissingKey(text) {
   return /api[\s_-]*key|missing[\s_-]*key|unauthor|invalid[\s_-]*key|credential|token[\s_-]*required/i.test(
     String(text || '')
   );
 }
 
-// Probe a single provider's health. Returns one of the presence states.
-// Uses provider metadata so the result is semantically correct: a remote
-// provider with no key is "needkey" (blue), a local provider whose binary
-// isn't running is "offline" (gray), and a reachable engine is "online".
+// A remote with no key is needkey; a local engine that is not running is offline.
 /** @param {string} id @param {{ signal?: AbortSignal }} [opts] @returns {Promise<PresenceState>} */
 export async function probeProvider(id, { signal } = {}) {
   const meta = PROVIDERS.find((p) => p.id === id) || /** @type {Partial<ProviderMeta>} */ ({});
@@ -86,7 +79,7 @@ export async function probeProvider(id, { signal } = {}) {
     const data = await res.json().catch(() => ({}));
     const hint = data?.hint || data?.error || data?.reason || data?.message || '';
 
-    // Go Dark: the backend refused to contact it.
+    // Go Dark: the backend will not contact it.
     if (data?.dark === true) return 'dark';
 
     // Healthy in any of the shapes the backend uses.
@@ -113,7 +106,6 @@ export async function probeProvider(id, { signal } = {}) {
   }
 }
 
-// Probe every provider with bounded concurrency; returns { [id]: state }.
 /** @param {{ signal?: AbortSignal }} [opts] @returns {Promise<Record<string, PresenceState>>} */
 export async function probeAll({ signal } = {}) {
   const entries = await Promise.all(

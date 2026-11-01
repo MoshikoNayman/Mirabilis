@@ -1,18 +1,12 @@
 // @ts-check
-// backend/src/modelRouter.js
-// Capability-first model router: map a task LANE (general / reasoning / coding /
-// experimental) to the best INSTALLED model, honoring the hardware ceiling. Keeps
-// model management separate from inference-engine logic (the registry owns runtimes;
-// this owns "which model for which job"). A cheap keyword classifier picks the lane
-// when the caller does not specify one - no extra model call on the hot path.
+// Picks the best installed model for a task lane within the memory ceiling. A
+// keyword classifier picks the lane so the hot path needs no model call.
 
-// Lane -> ordered preference of model-name substrings (matched case-insensitively
-// against installed model ids). First installed match wins; falls back to a general
-// model, then the largest model that fits.
 /** @typedef {import('./types.js').Lane} Lane */
 /** @typedef {import('./types.js').RouteArgs} RouteArgs */
 /** @typedef {import('./types.js').RouteResult} RouteResult */
 
+// Case-insensitive substrings of model ids, in preference order.
 /** @type {Record<Lane, string[]>} */
 const LANE_PREFS = {
   coding:       ['coder', 'code', 'deepseek-coder', 'qwen2.5-coder', 'qwen3-coder'],
@@ -32,8 +26,6 @@ export function classifyLane(prompt) {
   return 'general';
 }
 
-// availableModels: [{ id, name, sizeBytes, paramSize, quant, uncensored }]
-// ramGb: device memory ceiling (weights should leave headroom for KV+OS)
 /** @param {RouteArgs} [args] @returns {RouteResult} */
 export function route({ prompt, lane, availableModels = [], ramGb = 16, uncensored = false } = {}) {
   const models = (availableModels || []).filter((m) => m && (m.id || m.name));

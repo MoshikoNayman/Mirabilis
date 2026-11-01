@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { selectHistoryWindow } from './historyWindow.js';
 
-// Deterministic and easy to reason about: 1 token per 4 characters.
+// 1 token per 4 characters.
 const estimateTokens = (text) => Math.ceil(String(text || '').length / 4);
 
 /** A message costing exactly `tokens` tokens. */
@@ -44,12 +44,8 @@ test('the most recent messages are always the ones kept', () => {
   );
 });
 
-// the point of the whole module: prefix stability
-
 test('the anchor holds still across turns, so the prompt prefix is reused', () => {
-  // Simulate a real conversation: after eviction, keep adding turns and feeding
-  // the previous anchor back in. A naive sliding window moves the front on EVERY
-  // turn; the anchored one should move only occasionally.
+  // Feed each anchor back in; it should move only on eviction, not every turn.
   let messages = convo(12, 10); // 120 tokens, already over the 100 budget
   let startIndex = 0;
   const anchors = [];
@@ -68,15 +64,13 @@ test('the anchor holds still across turns, so the prompt prefix is reused', () =
     `anchor moved ${moves} times in 20 turns; it should hold still between evictions, ` +
     'otherwise the KV cache prefix is invalidated every turn'
   );
-  // And it must never move backwards, which would also break the prefix.
+  // Never backwards.
   for (let i = 1; i < anchors.length; i += 1) {
     assert.ok(anchors[i] >= anchors[i - 1], 'the anchor must only ever move forward');
   }
 });
 
 test('eviction frees a chunk at once rather than trimming one message', () => {
-  // Trimming the minimum would put the window right back at the budget edge and
-  // guarantee another eviction on the very next turn.
   const messages = convo(12, 10); // 120 tokens vs a 100 budget
   const out = select(messages, { startIndex: 0 });
   assert.ok(out.evicted, 'should have evicted');
@@ -87,11 +81,8 @@ test('eviction frees a chunk at once rather than trimming one message', () => {
   );
 });
 
-// robustness against a rewritten history
-
 test('a stale anchor past the end of a truncated history is clamped', () => {
-  // Regenerate and branch both rewrite the array. A stale index must never
-  // select an empty or wrong slice.
+  // Regenerate and branch rewrite the array, leaving stale indexes.
   const messages = convo(3, 10);
   const out = select(messages, { startIndex: 99 });
   assert.ok(out.messages.length > 0, 'must still return the recent messages');
@@ -114,11 +105,7 @@ test('an empty history yields an empty window', () => {
   assert.equal(out.startIndex, 0);
 });
 
-// the guards that bound the window
-
 test('minMessages keeps recent turns even when a single message blows the budget', () => {
-  // One enormous message must not evict the conversation down to nothing, or the
-  // model loses the question it is meant to answer.
   const messages = [msg('huge', 5000), msg('a', 10), msg('b', 10)];
   const out = select(messages, { minMessages: 2 });
   assert.ok(out.messages.length >= 2, 'must retain the minimum recent turns');
@@ -133,8 +120,7 @@ test('maxMessages caps the count independently of tokens', () => {
 });
 
 test('the window is always a contiguous tail of the history', () => {
-  // Property check across many shapes: whatever we return must equal the slice
-  // from the reported startIndex, or the caller and the anchor disagree.
+  // Returned messages must equal the slice from the reported startIndex.
   for (const n of [1, 5, 20, 60]) {
     for (const each of [1, 10, 60]) {
       const messages = convo(n, each);

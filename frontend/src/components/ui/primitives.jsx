@@ -1,6 +1,4 @@
-// frontend/src/components/ui/primitives.jsx
-// Aurora primitive components - the shared design-system layer that replaces
-// ad-hoc inline Tailwind. Styled via the tokens in src/design/tokens.css.
+// Aurora design-system primitives, styled via the tokens in src/design/tokens.css.
 'use client';
 
 import { forwardRef, useEffect, useRef } from 'react';
@@ -128,9 +126,7 @@ export function Spinner({ size = 16 }) {
   );
 }
 
-/* Line icons
-   Monochrome, stroke = currentColor, so they follow the active theme accent /
-   text color instead of clashing full-colour emoji. */
+/* Line icons: stroke is currentColor so they follow the theme text color. */
 function Svg({ size = 16, className, children }) {
   return (
     <svg
@@ -233,7 +229,6 @@ export function BellIcon(props) {
     </Svg>
   );
 }
-// Horizontal sliders - reads as "settings / options".
 export function SlidersIcon(props) {
   return (
     <Svg {...props}>
@@ -246,8 +241,7 @@ export function SlidersIcon(props) {
     </Svg>
   );
 }
-// Soundwave bars: reads as "voice / spoken conversation". Used for the
-// hands-free Voice chat entry point in the composer.
+// Soundwave bars for the Voice chat entry point.
 export function WaveIcon(props) {
   return (
     <Svg {...props}>
@@ -259,7 +253,7 @@ export function WaveIcon(props) {
     </Svg>
   );
 }
-// Two opposed arrows: reads as "then vs now", a reversed or superseded decision.
+// Opposed arrows for a reversed or superseded decision.
 export function ContradictionIcon(props) {
   return (
     <Svg {...props}>
@@ -313,7 +307,6 @@ export function Modal({ open, onClose, children, align = 'center', className, la
       }
     }
     document.addEventListener('keydown', onKey, true);
-    // focus first focusable for accessibility
     const t = setTimeout(() => {
       const el = ref.current?.querySelector(
         'input, button, [tabindex]:not([tabindex="-1"]), textarea, a[href]'

@@ -1,11 +1,5 @@
-// backend/src/configVault.js
-// Config Vault: cited RAG over a local folder of network / homelab config files.
-// This is the local-first superpower a cloud assistant can never offer - it aims
-// semantic retrieval at the one corpus that must never leave the machine: your
-// own device configs. It REUSES the Recall Orb's embedding path (same Ollama
-// model pick, same in-process cache) and cosine similarity, so there is exactly
-// one vector stack, not two. Reads are jailed to the chosen root, chunking is
-// line-aware so every hit cites a real file:line range.
+// Cited RAG over a local folder of config files, reusing Recall's embedding model and cosine.
+// Reads stay inside the chosen root; chunks are line-aware so every hit cites file:line.
 
 import { stat, readdir, readFile } from 'node:fs/promises';
 import { resolve, normalize, sep, relative, join } from 'node:path';
@@ -15,8 +9,7 @@ import { expandHome } from './paths.js';
 
 const MAX_FILE_BYTES = 512 * 1024;   // skip any single file larger than this
 const MAX_FILES = 600;               // cap the corpus so indexing can never run away
-const MAX_CHUNKS = 20000;            // hard ceiling on total chunks (mirrors recall's MAX_DOCS) so a
-                                     // folder of large files can never trigger an unbounded embed storm
+const MAX_CHUNKS = 20000;            // mirrors recall's MAX_DOCS; bounds total embed calls
 const CHUNK_CHARS = 900;             // configs: keep stanzas (an interface {} block) together
 const EMBED_CONCURRENCY = 4;
 
@@ -25,8 +18,7 @@ const SKIP_DIRS = new Set([
   'coverage', '.cache', '.turbo', '.venv', '__pycache__', 'vendor'
 ]);
 
-// Obvious binary extensions never worth embedding. Extensionless files (very
-// common for configs) are allowed through and checked for null bytes instead.
+// Extensionless files (common for configs) pass through and are checked for NUL bytes instead.
 const BINARY_EXT = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'tiff', 'tif', 'heic',
   'mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus',
@@ -58,8 +50,7 @@ async function mapLimit(items, limit, mapper) {
   await Promise.all(workers);
 }
 
-// Line-aware chunking: group whole lines into ~CHUNK_CHARS windows and track the
-// 1-based start/end line of each chunk so a retrieval hit can cite file:line.
+// Groups whole lines into ~CHUNK_CHARS windows with 1-based start/end lines for citations.
 function chunkByLines(content, maxChars = CHUNK_CHARS) {
   const lines = String(content || '').split('\n');
   const chunks = [];
@@ -85,7 +76,6 @@ function chunkByLines(content, maxChars = CHUNK_CHARS) {
 }
 
 export function createConfigVault({ recall, vaultStorePath }) {
-  // Jail an absolute path to the chosen root; reject anything that escapes it.
   function jailRoot(inputRoot) {
     const cleaned = normalize(expandHome(String(inputRoot || '').replace(/\0/g, '')));
     const root = resolve(cleaned);
@@ -100,7 +90,7 @@ export function createConfigVault({ recall, vaultStorePath }) {
       try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
       for (const entry of entries) {
         if (out.length >= MAX_FILES) break;
-        if (entry.name.startsWith('.')) continue; // skip dotfiles/dotdirs
+        if (entry.name.startsWith('.')) continue;
         const abs = join(dir, entry.name);
         // Keep every walked path inside the root (defense in depth vs symlinks).
         if (abs !== root && !abs.startsWith(root + sep)) continue;
@@ -138,7 +128,7 @@ export function createConfigVault({ recall, vaultStorePath }) {
       } catch { continue; }
       let looksBinary = false;
       for (let k = 0; k < Math.min(content.length, 8192); k += 1) { if (content.charCodeAt(k) === 0) { looksBinary = true; break; } }
-      if (looksBinary) continue; // a NUL byte means binary - skip
+      if (looksBinary) continue;
       const relPath = relative(root, abs);
       const fileChunks = chunkByLines(content);
       if (fileChunks.length) indexedFiles += 1;
@@ -146,7 +136,7 @@ export function createConfigVault({ recall, vaultStorePath }) {
         if (chunks.length >= MAX_CHUNKS) break;
         chunks.push({ id: `${relPath}#${c.startLine}`, relPath, startLine: c.startLine, endLine: c.endLine, text: c.text });
       }
-      if (chunks.length >= MAX_CHUNKS) break; // chunk budget exhausted - stop walking further files
+      if (chunks.length >= MAX_CHUNKS) break;
     }
     const truncated = chunks.length >= MAX_CHUNKS;
 
@@ -176,10 +166,8 @@ export function createConfigVault({ recall, vaultStorePath }) {
     let qvec;
     try {
       await recall.ensureModel();
-      // The index is only comparable if it was built with the same embedding model.
-      // A different model yields different-dimensionality vectors, which cosine would
-      // silently score as 0, returning arbitrary chunks as if they were relevant. Refuse
-      // instead, so the user re-indexes rather than getting confidently-wrong citations.
+      // Vectors from another model score 0 under cosine and would return arbitrary
+      // chunks as citations, so refuse and ask for a re-index.
       const activeModel = recall.getEmbedModel ? recall.getEmbedModel() : null;
       if (store.embedModel && activeModel && activeModel !== store.embedModel) {
         return { ok: false, error: `Vault was indexed with "${store.embedModel}" but "${activeModel}" is active now. Re-index the Config Vault.`, results: [] };
@@ -190,7 +178,7 @@ export function createConfigVault({ recall, vaultStorePath }) {
     }
     const scored = [];
     for (const c of store.chunks) {
-      if (!Array.isArray(c.vector) || c.vector.length !== qvec.length) continue; // dimension mismatch - skip
+      if (!Array.isArray(c.vector) || c.vector.length !== qvec.length) continue; // dimension mismatch
       scored.push({ score: cosine(qvec, c.vector), relPath: c.relPath, startLine: c.startLine, endLine: c.endLine, text: c.text });
     }
     if (scored.length === 0) {

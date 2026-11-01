@@ -1,4 +1,3 @@
-// frontend/src/components/shell/usePresence.js
 // Polls provider health and exposes a { [providerId]: presenceState } map plus
 // the aggregate orb state. Plays a subtle cue when a provider comes online.
 'use client';

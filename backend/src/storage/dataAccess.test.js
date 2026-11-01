@@ -1,14 +1,4 @@
-// Permission failures, and whether the app says anything useful about them.
-//
-// The bug behind this file: launching the app once with sudo left chats.json
-// owned by root, and from then on every attempt to start a chat failed with
-// "EACCES: permission denied, open '/Users/.../chats.json'". Nothing explained
-// that a file in the user's own home directory belonged to another account, and
-// nothing suggested the one command that fixes it.
-//
-// Root-owned files cannot be created in a test, but the thing being tested is
-// the same either way: a file that exists and cannot be written. chmod 000
-// produces exactly that for a non-root process.
+// chmod 000 stands in for a root-owned data file: it exists and cannot be written.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -60,7 +50,7 @@ test('an unwritable chats.json is reported as blocking, with the fix', { skip: i
 });
 
 test('an unwritable optional file is reported but not blocking', { skip: isRoot ? 'root can write anything' : false }, async () => {
-  // Losing the ledger should not read as "the app is broken".
+  // The ledger is optional, so losing it must not block the app.
   const dir = await tmp();
   const file = path.join(dir, 'intelledger.json');
   await fs.writeFile(file, '{}', 'utf8');

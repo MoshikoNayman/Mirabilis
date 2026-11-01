@@ -1,9 +1,6 @@
 // @ts-check
-// Go Dark, enforced in the backend.
-//
-// The state lives in the data directory so every route, worker and MCP client
-// sees the same answer. While it is on, fetch() refuses any host that is not
-// this machine or the local network.
+// Go Dark: while on, the guarded fetch refuses any host outside this machine or LAN.
+// State lives in the data directory so every route, worker and MCP client agrees.
 
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import path from 'node:path';

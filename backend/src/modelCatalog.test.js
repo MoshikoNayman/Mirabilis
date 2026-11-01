@@ -1,12 +1,4 @@
-// The suggested-model catalog: where the list comes from and, more importantly,
-// what happens when the network lies to it.
-//
-// This list used to be a hardcoded array, so every new model upstream meant a
-// code change and an app update for every user. Now it is a JSON file that can
-// be refreshed from the repository, which is the right shape but introduces a
-// new failure mode: a remote source that is missing, malformed, hostile or
-// simply empty must never leave the user with a worse list than the one that
-// shipped with the app.
+// A bad remote catalog must never leave a worse list than the bundled one.
 
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -50,8 +42,7 @@ test('the bundled list works with no network at all', async () => {
 });
 
 test('Go Dark blocks the catalog refresh', async () => {
-  // A catalog refresh is egress like any other, and the promise is that nothing
-  // leaves the machine. The bundled list is complete, so this costs nothing.
+  // A catalog refresh is egress like any other.
   let hit = false;
   const server = http.createServer((_req, res) => { hit = true; res.end('{}'); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -66,7 +57,6 @@ test('Go Dark blocks the catalog refresh', async () => {
 });
 
 test('a newer remote list is picked up without touching the app', async () => {
-  // The whole point: adding a model upstream reaches every install.
   const srv = await serveCatalog({
     ollama: [{ id: 'brand-new-model:9b', label: 'Brand New 9B', group: 'Powerful', size: '5 GB' }]
   });
@@ -116,8 +106,7 @@ test('malformed JSON, a 500, and a hang all leave the bundled list intact', asyn
 });
 
 test('entries with unusable ids are dropped, not rendered', async () => {
-  // The id is handed to a pull. Anything that is not a plain model name is
-  // discarded rather than shown as a row that cannot possibly work.
+  // The id is handed to a pull, so only plain model names survive.
   const srv = await serveCatalog({
     ollama: [
       { id: 'good-model:7b', label: 'Good', group: 'Powerful' },

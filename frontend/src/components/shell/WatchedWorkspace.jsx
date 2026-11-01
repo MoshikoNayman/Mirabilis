@@ -1,11 +1,5 @@
-// frontend/src/components/shell/WatchedWorkspace.jsx
-// Watched Workspace - point Mirabilis at a local folder and pin specific files as
-// LIVE chat context. Pinned file contents are pulled FRESH from disk at send time
-// (see ChatApp.sendMessageWithContent), never a stale upload. Mirrors the Aurora
-// sheet look of HomelabRoster.jsx: a chrome-vibrancy Panel anchored top-right.
-// The watched root and the pinned set live in the app store and persist to
-// localStorage so both survive a reload. All file reads are jailed to the root
-// on the backend (workspace.js), so a pinned path can never escape the folder.
+// Pins files from a watched local folder as live chat context, read fresh from
+// disk at send time. The backend jails every read to the watched root.
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -23,8 +17,7 @@ function formatSize(bytes) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-// Small check-square used as the pin toggle - matches the monochrome line-icon
-// style (stroke = currentColor) instead of a full-colour emoji checkbox.
+// Line-icon checkbox to match the monochrome icon set.
 function PinBox({ pinned }) {
   return (
     <span
@@ -78,8 +71,7 @@ export default function WatchedWorkspace({ open }) {
   const [error, setError] = useState('');
   const didInit = useRef(false);
 
-  // On open: prefill the path and reconnect to a previously-watched root so pins
-  // keep working across reloads (and backend restarts).
+  // Reconnect to the stored root on open so pins survive reloads and backend restarts.
   useEffect(() => {
     if (!open) { didInit.current = false; return undefined; }
     if (!didInit.current) {
@@ -102,7 +94,7 @@ export default function WatchedWorkspace({ open }) {
         payload = await getJSON('/api/workspace/files');
         if (payload.root !== dir) throw new Error('stale');
       } catch {
-        // Backend forgot the root (e.g. it restarted) - re-establish the watch.
+        // Backend lost the root (e.g. after a restart): watch it again.
         payload = await postJSON('/api/workspace/watch', { path: dir });
       }
       setRoot(payload.root);
@@ -183,7 +175,6 @@ export default function WatchedWorkspace({ open }) {
           <IconButton label="Close" onClick={() => appStore.closeWorkspace()}><CloseIcon size={14} /></IconButton>
         </div>
 
-        {/* Path input + Watch */}
         <div className="flex flex-col gap-2 border-b px-4 py-3" style={{ borderColor: 'var(--hairline)' }}>
           <div className="flex items-center gap-1.5">
             <input
@@ -209,7 +200,6 @@ export default function WatchedWorkspace({ open }) {
           {error ? <div className="text-[length:var(--text-2xs)] text-rose-500">{error}</div> : null}
         </div>
 
-        {/* Filter */}
         {root && files.length > 0 ? (
           <div className="border-b px-4 py-2" style={{ borderColor: 'var(--hairline)' }}>
             <input
@@ -222,7 +212,6 @@ export default function WatchedWorkspace({ open }) {
           </div>
         ) : null}
 
-        {/* File list */}
         <div className="au-scroll flex-1 overflow-y-auto p-1.5">
           {loading ? (
             <div className="flex items-center justify-center gap-2 px-3 py-8 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
@@ -246,7 +235,6 @@ export default function WatchedWorkspace({ open }) {
           )}
         </div>
 
-        {/* Footer controls */}
         {root ? (
           <div className="flex items-center gap-2 border-t px-4 py-2.5" style={{ borderColor: 'var(--hairline)' }}>
             <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">

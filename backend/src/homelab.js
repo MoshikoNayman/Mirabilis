@@ -1,12 +1,9 @@
-// backend/src/homelab.js
-// Reachability probes for the Homelab Roster. Opens a plain TCP socket to a
-// host:port and closes it the instant the connection is established - this is a
-// lightweight "is it up" check (like a mini port knock), not an SSH handshake,
-// so it works for routers, NAS boxes, servers, and the Raspberry Pi alike.
+// Homelab Roster reachability: a plain TCP connect to host:port, closed at once.
+// No protocol handshake, so it works for any device with an open port.
 
 import net from 'node:net';
 
-// Probe a single host. Resolves { reachable, ms } - never rejects.
+// Resolves { reachable, ms }; never rejects.
 export function probeHost(host, port, timeoutMs = 2500) {
   const started = Date.now();
   return new Promise((resolve) => {
@@ -32,8 +29,7 @@ export function probeHost(host, port, timeoutMs = 2500) {
   });
 }
 
-// Probe every host in the list in parallel. Returns an array of
-// { id, reachable, ms } in the same order as the input.
+// Probes in parallel; results keep the input order.
 export function probeAllHosts(hosts, timeoutMs = 2500) {
   const list = Array.isArray(hosts) ? hosts : [];
   return Promise.all(

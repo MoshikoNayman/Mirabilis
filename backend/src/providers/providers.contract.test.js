@@ -1,10 +1,4 @@
-// Contract tests for the provider stream adapters.
-//
-// These run against a real HTTP server on an ephemeral port rather than a mocked
-// fetch, so they exercise the actual body reader, chunk boundaries and framing.
-// The cases here are the ones that shipped as live defects: a mid-stream error
-// frame that both parsers silently discarded, leaving the caller with an empty
-// reply that the route then persisted as a successful answer.
+// Provider stream adapters against a real local HTTP server, so chunking and framing are exercised.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,10 +8,7 @@ import { streamOllamaChat, getFittedOptions, clearFittedOptions } from './ollama
 import { streamOpenAICompatibleChat } from './openaiCompatible.js';
 import { streamAnthropicChat } from './anthropic.js';
 
-/**
- * Boot a one-off upstream. `handler(req, res)` writes whatever the test needs.
- * Returns { baseUrl, close } and always listens on 127.0.0.1:0.
- */
+/** One-off upstream on 127.0.0.1:0. Returns { baseUrl, close }. */
 async function upstream(handler) {
   const server = http.createServer(handler);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -51,9 +42,7 @@ test('ollama: streams tokens from NDJSON frames', async () => {
 });
 
 test('ollama: THROWS on a mid-stream error frame instead of ending empty', async () => {
-  // The defect: a 200 response whose body carries {"error":...} was parsed
-  // fine, matched neither the content nor the done branch, and was dropped. The
-  // stream then ended with no text and the route saved that as a real reply.
+  // An {"error":...} frame on a 200 response must not end as an empty reply.
   const up = await upstream((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     res.write(ndjson({ message: { content: 'partial' } }));
@@ -74,8 +63,7 @@ test('ollama: THROWS on a mid-stream error frame instead of ending empty', async
 });
 
 test('ollama: a split NDJSON frame across chunks is still parsed', async () => {
-  // Guards the parse-failure path: a partial line must be buffered, not treated
-  // as an error now that the error branch throws.
+  // A partial line must be buffered, not treated as an error frame.
   const up = await upstream((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
     const line = ndjson({ message: { content: 'chunked' } });
@@ -178,8 +166,7 @@ test('openai-compatible: streams tokens from SSE delta frames', async () => {
 });
 
 test('openai-compatible: THROWS on a mid-stream error frame', async () => {
-  // Same defect class as the Ollama case: `data: {"error":...}` on an
-  // already-200 response was skipped, leaving the reply silently empty.
+  // `data: {"error":...}` on a 200 response must surface as an error.
   const up = await upstream((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     res.write(sse({ choices: [{ delta: { content: 'partial' } }] }));
@@ -218,8 +205,7 @@ test('openai-compatible: ignores [DONE] and non-data lines without erroring', as
 });
 
 test('openai-compatible: an aborted stream resolves quietly rather than throwing', async () => {
-  // Aborts are user-initiated (the stop button); they must not be reported as
-  // failures, or the UI would show an error every time someone stops a reply.
+  // Aborts come from the stop button and must not be reported as failures.
   const up = await upstream((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     res.write(sse({ choices: [{ delta: { content: 'streaming' } }] }));
@@ -237,12 +223,10 @@ test('openai-compatible: an aborted stream resolves quietly rather than throwing
   } finally { await up.close(); }
 });
 
-// OOM detection and memory memory
+// OOM detection and remembered fits
 
 test('ollama: recognizes the OOM wordings Ollama actually emits', async () => {
-  // Each of these is a real failure mode. If the pattern misses one, the retry
-  // ladder never runs and the user gets a hard error where a smaller context
-  // would have worked.
+  // A missed wording skips the retry ladder and fails where a smaller context would work.
   const wordings = [
     'model requires more system memory (5.2 GiB) than is available (3.1 GiB)',
     'llama runner process has terminated: signal: killed',
@@ -338,8 +322,7 @@ test('ollama: options that fit are remembered so the next message skips the fail
 });
 
 test('a remembered fit caps a larger request but respects a smaller one', async () => {
-  // The contract: the learned value is empirical evidence about this machine, so
-  // it caps a bigger ask. It must NOT raise a request that is already smaller.
+  // The learned fit caps a bigger ask but never raises a smaller one.
   clearFittedOptions();
   const seen = [];
   const up = await upstream((req, res) => {
@@ -389,9 +372,7 @@ test('a remembered fit caps a larger request but respects a smaller one', async 
 const anthropicFrames = (frames) => frames.map((f) => `event: ${f.type}\ndata: ${JSON.stringify(f)}\n\n`).join('');
 
 test('anthropic: streams incrementally instead of one blob at the end', async () => {
-  // With stream:false the entire reply arrived in a single onToken call, so the
-  // user saw nothing until generation finished and the receipt's
-  // time-to-first-token was recorded at the moment the LAST token landed.
+  // Each delta must arrive separately so time-to-first-token is accurate.
   let body = null;
   const up = await upstream((req, res) => {
     let raw = '';
@@ -465,8 +446,7 @@ test('anthropic: clamps temperature into the accepted range', async () => {
 });
 
 test('anthropic: drops leading non-user turns so the conversation starts correctly', async () => {
-  // The sliding history window can leave an assistant turn first, which
-  // Anthropic rejects outright.
+  // The history window can start on an assistant turn, which Anthropic rejects.
   let body = null;
   const up = await upstream((req, res) => {
     let raw = '';

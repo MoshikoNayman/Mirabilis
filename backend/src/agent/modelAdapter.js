@@ -1,12 +1,6 @@
 // @ts-check
-// backend/src/agent/modelAdapter.js
-// Turns the streaming provider interface into the single-shot call the loop wants.
-//
-// The loop asks closed questions ("what is your next action?") and needs the
-// whole reply before it can act, so streaming buys nothing there. It does still
-// stream underneath, because that is the only interface every provider shares,
-// and because it keeps the abort signal wired all the way down to the engine:
-// stopping a five-hour run has to actually stop the model, not just stop reading it.
+// Wraps the streaming provider interface as the single-shot call the agent loop needs.
+// Streams underneath so the abort signal reaches the engine and stopping a run stops the model.
 
 import { describeEngineError } from '../engineErrors.js';
 
@@ -46,8 +40,7 @@ export function createModelAdapter({ streamWithProvider, config, request, signal
       onNotice: () => { /* tuning notices are not the agent's concern */ },
       overrideBaseUrl: request.baseUrl || undefined,
       overrideApiKey: request.apiKey || undefined,
-      // Deliberately low: the loop wants decisions, not essays. A model that
-      // rambles for 4000 tokens per step burns the budget without advancing.
+      // Low temperature and token cap keep each step a short decision.
       temperature: purpose === 'validate' ? 0 : (request.temperature ?? 0.2),
       maxTokens: maxTokens ?? 1_500,
       ollamaOptions: request.ollamaOptions,
@@ -55,11 +48,7 @@ export function createModelAdapter({ streamWithProvider, config, request, signal
       });
     } catch (error) {
       timers.forEach((t) => clearTimeout(t));
-      // A run that dies on its first call should say WHY. Bare "fetch failed"
-      // from undici is the most common failure here (the local engine is not
-      // running) and is the least useful thing to show someone.
-      // Shared translator, so the chat path and an agent run explain an
-      // unreachable engine the same way.
+      // Turn undici's bare "fetch failed" into the same message the chat path shows.
       const friendly = describeEngineError(error, {
         provider: request.provider, baseUrl: request.baseUrl, model: request.model
       });

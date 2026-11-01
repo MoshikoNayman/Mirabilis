@@ -1,16 +1,6 @@
 // @ts-check
-// backend/src/agent/runStore.js
-// Durable record of agent runs across restarts.
-//
-// Runs used to live only in a Map, so a backend restart made a five-hour job
-// vanish: no row, no status, nothing to tell the user their work had died. The
-// browser tab would sit on a stalled panel forever.
-//
-// Be clear about what this does and does not do. It does NOT resume a run: the
-// process that was talking to the model is gone and those in-flight calls cannot
-// be recovered. What it does is make the loss VISIBLE and the work RECOVERABLE:
-// a run interrupted by a restart is marked `interrupted` rather than silently
-// forgotten, and its audit log still holds every step it completed.
+// Persists agent run records across restarts. Runs are not resumed; a run alive
+// at shutdown is marked `interrupted` and its audit log keeps completed steps.
 
 import { readFile, writeFile, rename, mkdir, unlink, copyFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -41,8 +31,7 @@ export function createRunStore(dir) {
       .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)))
       .slice(0, MAX_RECORDS);
     records = new Map(list.map((r) => [r.id, r]));
-    // Same discipline as the other stores: temp file then rename, so a crash
-    // mid-write leaves the previous index intact rather than a truncated one.
+    // Temp file then rename, so a crash mid-write keeps the previous index.
     const tmp = `${file}.tmp-${process.pid}`;
     await mkdir(dirname(file), { recursive: true });
     await writeFile(tmp, JSON.stringify({ runs: list }), { encoding: 'utf8', mode: SECURE_FILE_MODE });
@@ -54,10 +43,7 @@ export function createRunStore(dir) {
   return {
     file,
 
-    /**
-     * Load the index and reconcile it with reality.
-     * Anything still marked live cannot be live: this process just started.
-     */
+    /** Load the index. Anything marked live is stale: this process just started. */
     async init() {
       if (loaded) return { interrupted: 0 };
       loaded = true;
@@ -92,7 +78,7 @@ export function createRunStore(dir) {
       return records.get(id) || null;
     },
 
-    /** Create or update a record. Persisted immediately: the point is durability. */
+    /** Create or update a record and persist immediately. */
     async upsert(record) {
       if (!record?.id) return null;
       const merged = { ...(records.get(record.id) || {}), ...record };

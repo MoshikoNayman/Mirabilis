@@ -1,28 +1,15 @@
 // @ts-check
-// backend/src/agent/sandbox.js
-// Safety primitives shared by the MCP server and the autonomous agent.
-//
-// Extracted so there is exactly ONE destructive-command blocklist and ONE path
-// jail. These are the rules that decide whether an unattended process can wipe a
-// disk, so a second divergent copy is the last thing this code should grow. The
-// agent needs them far more than the MCP server does: an MCP call is driven by a
-// human on the other end, whereas an agent on the five-hour tier can issue
-// thousands of commands with nobody watching.
+// The one destructive-command blocklist and path jail, shared by the MCP server
+// and the autonomous agent. Do not fork a second copy.
 
 import { resolve, normalize, sep, dirname } from 'node:path';
 import { realpathSync } from 'node:fs';
 
-// Patterns that are never run, at any effort level, with any confirmation.
-//
-// Read this as a seatbelt, not a sandbox. It pattern-matches a shell string,
-// and a shell string has unlimited ways to say the same thing: the earlier
-// version anchored the rm target on a leading / or ~, so `cd / && rm -rf .`,
-// `rm -rf $HOME` and `rm -rf --no-preserve-root /` all walked straight through.
-// The patterns below close the ones worth closing, but granting the 'full'
-// policy is still granting a shell. The real containment is not granting it.
+// Never run, at any effort level or confirmation. This matches shell strings, so
+// it cannot catch every spelling (`cd / && rm -rf .`); granting the 'full' policy
+// still grants a shell.
 export const BLOCKED_COMMAND_PATTERNS = [
-  // Recursive force-delete of any obviously catastrophic target, with flags in
-  // any order and any number of intervening options.
+  // Recursive rm, flags in any order with any options between.
   /\brm\b[^\n;|&]*\s-[a-z-]*r/i,
   /\brm\b[^\n;|&]*--no-preserve-root/i,
   // Whole-filesystem walks that delete or truncate.
@@ -55,8 +42,7 @@ export function getFsRoot() {
 
 /**
  * Resolve a caller-supplied path, refusing anything that escapes the jail.
- * Read at call time rather than captured at import, so a test (or a run with a
- * tighter root) can set the jail without re-importing the module.
+ * The root is read per call so tests and stricter runs can change it.
  * @param {string} inputPath
  * @param {string} [rootOverride] a stricter root for this particular run
  */
@@ -71,11 +57,8 @@ export function safeResolvePath(inputPath, rootOverride) {
     throw new Error(`Path escapes the permitted filesystem root (${jail})`);
   }
 
-  // Lexical containment is not containment. A single symlink inside the root
-  // (a convenience link to an external volume, say) made the whole filesystem
-  // reachable while every path still looked confined. Compare REAL paths.
-  // For a file that does not exist yet, resolve the nearest existing ancestor,
-  // since that is what the write will actually land under.
+  // Compare real paths: a symlink inside the root can point anywhere. For a file
+  // that does not exist yet, check the nearest existing ancestor, where the write lands.
   try {
     const realJail = realpathSync(jail);
     let probe = resolved;

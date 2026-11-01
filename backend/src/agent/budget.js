@@ -1,15 +1,6 @@
 // @ts-check
-// backend/src/agent/budget.js
-// Hard enforcement of an execution-effort budget.
-//
-// Every limit is checked in code before the work happens, not described to the
-// model in a prompt. That distinction is the whole feature: an agent that has
-// lost the thread is precisely the one that will insist it needs one more
-// iteration, and a "budget" it can talk its way past is not a budget. The model
-// is TOLD what remains (so it can prioritise), but only this module decides.
-//
-// The clock is injectable so the hour-long and five-hour tiers can be tested
-// without waiting for them.
+// Enforces effort budgets in code before each step. The model is told what
+// remains so it can prioritise, but only this module decides when to stop.
 
 /** Why a run stopped. `completed` is the only non-budget outcome. */
 export const STOP_REASONS = /** @type {const} */ ({
@@ -79,7 +70,6 @@ export function createBudget(profile, { signal, now = () => Date.now() } = {}) {
   });
 
   /**
-   * The single question the loop asks before doing anything: may I continue?
    * Returns a stop reason, or null when there is still room.
    * @returns {string|null}
    */
@@ -113,7 +103,7 @@ export function createBudget(profile, { signal, now = () => Date.now() } = {}) {
     },
 
     /**
-     * Claim one tool invocation. Checked BEFORE the call so a run cannot exceed
+     * Claim one tool invocation. Checked before the call so a run cannot exceed
      * its ceiling by one expensive command.
      */
     chargeToolCall() {
@@ -155,9 +145,8 @@ export function createBudget(profile, { signal, now = () => Date.now() } = {}) {
     },
 
     /**
-     * A short, honest budget line for the model's context. Deliberately concrete:
-     * "you have 3 iterations and 4 minutes left" produces better triage than
-     * "you are running low".
+     * Budget line for the model's context. Concrete numbers get better triage
+     * than "you are running low".
      */
     describeRemaining() {
       const r = remaining();

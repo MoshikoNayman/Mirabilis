@@ -1,6 +1,4 @@
-// frontend/src/components/shell/BuddyList.jsx
-// The ICQ-style contact list, reimagined as an Apple vibrancy sheet. Providers
-// are "buddies" grouped by Local / Remote with live presence.
+// ICQ-style provider list on a vibrancy sheet, grouped Local/Remote with live presence.
 'use client';
 
 import { useEffect, useMemo } from 'react';

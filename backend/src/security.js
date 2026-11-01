@@ -1,16 +1,11 @@
-// Network attack-surface guards. These are defense-in-depth ON TOP of the
-// loopback bind (config.bindHost). None of them touch model behaviour or add any
-// content restriction - they govern who can reach the API and where the server
-// is willing to make outbound requests.
+// Network guards layered on the loopback bind: who can reach the API and where
+// the server may make outbound requests. They never restrict model content.
 
 import { randomBytes } from 'node:crypto';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 
-// Host-header guard (anti-DNS-rebinding)
-// A malicious web page can point its own hostname at 127.0.0.1 (DNS rebinding)
-// and make the victim's browser hit this server. Every such request carries the
-// attacker's hostname in the Host header; a real local client sends localhost /
-// 127.0.0.1. Rejecting foreign Host values closes that path for all routes.
+// Host-header guard against DNS rebinding: a rebound page sends its own hostname
+// in Host, while a real local client sends localhost or 127.0.0.1.
 export function makeHostGuard(allowedHostnames) {
   const allow = new Set(allowedHostnames.map((h) => h.toLowerCase()));
   return function hostGuard(req, res, next) {
@@ -27,10 +22,8 @@ export function makeHostGuard(allowedHostnames) {
   };
 }
 
-// Local token for the machine-facing /mcp surface
-// /mcp exposes run_command/write_file/read_file to external MCP clients
-// (VS Code, Claude Desktop). It must not be callable by just any local process.
-// We mint a per-install token, persist it 0600, and require it as a bearer.
+// /mcp exposes run_command/write_file/read_file to external MCP clients, so it
+// requires a per-install bearer token persisted 0600.
 export function loadOrCreateMcpToken(tokenPath, envToken) {
   if (envToken && envToken.trim()) return envToken.trim();
   try {
@@ -61,13 +54,10 @@ export function makeMcpAuthGuard(expectedToken) {
   };
 }
 
-// Same token check, applied to the app's OWN privileged routes rather than /mcp.
-// These endpoints run shell commands over SSH, read and write arbitrary
-// workspace paths, and index folders from disk. Before this guard they were
-// reachable by anything that knew the port: the host guard blocks a foreign Host
-// header and CORS blocks a browser on another origin, but neither stops a plain
-// local HTTP client. The app's own UI gets the token from GET /api/session/token,
-// which answers only loopback requests carrying an allowed Origin.
+// Same token check for the app's own privileged routes (SSH commands, workspace
+// reads/writes, folder indexing). Host guard and CORS do not stop a plain local
+// HTTP client. The UI gets the token from GET /api/session/token, which answers
+// only loopback requests with an allowed Origin.
 /** @param {string} expectedToken @param {string} label */
 export function makePrivilegedGuard(expectedToken, label) {
   return function privilegedGuard(req, res, next) {
@@ -84,14 +74,9 @@ export function makePrivilegedGuard(expectedToken, label) {
   };
 }
 
-// Is this URL served by a host on the user's own machine or LAN?
-//
-// Go Dark and the Privacy Receipt both need to answer "does this leave the
-// device", and the provider ID cannot answer it: openai-compatible, vllm and
-// llamacpp all take an arbitrary base URL, so the same provider ID can point at
-// localhost or at a cloud endpoint. Decide from the resolved host instead.
-// Loopback and RFC1918 private ranges count as local; anything else does not.
-// An unparseable or empty URL is treated as NOT local, so the safe answer wins.
+// Whether a URL is served from this machine or the LAN (loopback or RFC1918).
+// Decided from the host, since providers like vllm accept any base URL.
+// Empty or unparseable URLs count as not local.
 /** @param {string} url @returns {boolean} */
 export function isLocalHostUrl(url) {
   const raw = String(url || '').trim();
@@ -115,9 +100,8 @@ export function isLocalHostUrl(url) {
   return false;
 }
 
-// True only for requests that arrived over loopback. Used to gate the token
-// bootstrap route, so the token is never handed to a non-local caller even if
-// the server has been bound more widely.
+// Gates the token bootstrap route, so the token never reaches a non-local
+// caller even when the server is bound more widely.
 /** @param {import('express').Request} req */
 export function isLoopbackRequest(req) {
   const raw = String(req.socket?.remoteAddress || '');
@@ -126,11 +110,8 @@ export function isLoopbackRequest(req) {
   return addr === '127.0.0.1' || addr === '::1' || addr.startsWith('127.');
 }
 
-// Outbound SSRF guard (cloud metadata only)
-// Local AI legitimately targets loopback (Ollama, llama-server) and the user's
-// own LAN hosts, so we deliberately do NOT block private ranges. We block only
-// the cloud metadata endpoints, which are never a legitimate provider and are
-// the classic SSRF target.
+// Outbound SSRF guard. Local AI targets loopback and LAN hosts, so private
+// ranges stay allowed; only cloud metadata endpoints are blocked.
 const METADATA_HOSTS = new Set([
   '169.254.169.254',       // AWS/GCP/Azure IMDS
   'metadata.google.internal',

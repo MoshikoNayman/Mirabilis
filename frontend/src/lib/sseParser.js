@@ -1,20 +1,6 @@
 // @ts-check
-// frontend/src/lib/sseParser.js
-// An incremental Server-Sent Events parser.
-//
-// Extracted from ChatApp, where it was written inline and made three assumptions
-// the spec does not allow:
-//
-//   1. that a field is always "data: " with exactly one space (the space is
-//      optional, and "data:x" is valid),
-//   2. that lines end with \n (a server may send \r\n, and the \r then became
-//      part of the parsed JSON, breaking it),
-//   3. that an event carries exactly one data line (data lines accumulate, and
-//      are joined with newlines, which is how any multi-line payload arrives).
-//
-// It is separate from the component so it can be tested against those cases
-// directly, which is the point: every recent bug in this feature lived in glue
-// like this, and none of it had a single test.
+// Incremental Server-Sent Events parser. Handles an optional space after the
+// colon, CRLF line endings and multi-line data, per the spec.
 
 /**
  * Create a parser that turns arbitrary chunks into whole events.

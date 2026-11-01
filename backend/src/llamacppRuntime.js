@@ -1,13 +1,6 @@
 // @ts-check
-// backend/src/llamacppRuntime.js
-// Managed llama.cpp runtime: launch / health-check / stop a llama-server process with
-// hardware-tuned flags, and talk to it over the OpenAI-compatible transport (which now
-// forwards the full param set). This is the "first-class" part Ollama-by-URL can't do:
-// Mirabilis supervises the process and exposes the knobs Ollama hides - KV-cache
-// quantization (q8_0 halves KV memory), flash attention, and server slots.
-//
-// One managed server at a time (memory-safe on unified-memory Macs). It can run a GGUF
-// path directly, or resolve one of the user's existing Ollama models to its GGUF blob.
+// Launches, health-checks and stops one llama-server with tuned flags (KV quant,
+// flash attention, slots). Runs a GGUF path or an installed Ollama model's blob.
 
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -15,8 +8,8 @@ import { join, resolve, sep } from 'node:path';
 import os from 'node:os';
 import { getRuntime } from './runtimeRegistry.js';
 
-// Ollama model refs: [namespace/]name[:tag] over a safe charset. Used to reject any
-// value that could traverse the filesystem before it is ever joined into a path.
+// Ollama model refs, [namespace/]name[:tag] over a safe charset, so no value that
+// could traverse the filesystem is joined into a path.
 const SAFE_MODEL_REF = /^[a-zA-Z0-9][a-zA-Z0-9._-]*(\/[a-zA-Z0-9][a-zA-Z0-9._-]*)*(:[a-zA-Z0-9][a-zA-Z0-9._-]*)?$/;
 // Ollama blob digests are sha256 hex; validate before using one as a path segment.
 const SAFE_DIGEST = /^sha256[:-][0-9a-f]{64}$/;
@@ -24,15 +17,12 @@ const SAFE_DIGEST = /^sha256[:-][0-9a-f]{64}$/;
 const KV_TYPES = new Set(['f16', 'f32', 'q8_0', 'q4_0', 'q4_1', 'q5_0', 'q5_1', 'iq4_nl', 'bf16']);
 
 /** @type {import('node:child_process').ChildProcess | null} */
-let _proc = null;      // the running llama-server child, or null
+let _proc = null;
 /** @type {{ pid?: number, port: number, baseUrl: string, model: string, startedAt: number, flags: string[] } | null} */
-let _state = null;     // { pid, port, baseUrl, model, startedAt, flags }
+let _state = null;
 
-// Bounded tail of the child's stdout+stderr. Two jobs: it keeps the pipes
-// DRAINED (a spawn with stdio 'pipe' and no reader deadlocks the child once the
-// OS pipe buffer fills, which for a chatty llama-server is well inside model
-// load), and it gives startServer real launch-failure text instead of a generic
-// timeout message.
+// The pipes must be drained: a full pipe deadlocks llama-server during model
+// load. The tail gives startServer the real launch error on timeout.
 const LOG_TAIL_MAX = 200;
 /** @type {string[]} */
 let _log = [];
@@ -90,10 +80,8 @@ export function resolveOllamaGguf(model) {
   ];
   let manifestPath = manifestDirs.find((p) => existsSync(p));
   if (!manifestPath) {
-    // Fallback: scan for a manifest file under manifests. Match an exact name/tag;
-    // and when the caller gave no explicit tag (e.g. "qwen2.5"), accept whatever
-    // tag is actually installed for that name (prefer "latest") so a base name
-    // still resolves to the one downloaded version (e.g. qwen2.5:0.5b).
+    // Scan for an exact name/tag. Without an explicit tag, take the installed
+    // tag for that name, preferring latest.
     try {
       const base = join(root, 'manifests', 'registry.ollama.ai');
       const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -139,9 +127,8 @@ function pollHealth(port, timeoutMs, signalStop) {
   });
 }
 
-// Build the tuned flag list from the resolved context + hardware. On Apple unified
-// memory we offload all layers (-ngl 999) and quantize the KV cache to q8_0 to stretch
-// the memory budget; flash attention on; jinja chat template for /v1/chat/completions.
+// -ngl 999 offloads every layer; q8_0 KV quant stretches unified memory. --jinja
+// enables the chat template for /v1/chat/completions.
 function buildFlags({ modelPath, port, numCtx, ngl, kvQuant, flashAttn, parallel }) {
   const ctx = Math.max(256, Math.min(1048576, Number(numCtx) || 8192));
   const gpuLayers = ngl == null ? 999 : Math.max(0, Math.min(1000, Number(ngl) || 0));
@@ -156,7 +143,6 @@ function buildFlags({ modelPath, port, numCtx, ngl, kvQuant, flashAttn, parallel
     '--no-webui',
     '-np', String(Math.max(1, Math.min(64, Number(parallel) || 1)))
   ];
-  // Only pass a KV-cache type llama.cpp actually accepts; ignore anything else.
   if (kvQuant && KV_TYPES.has(String(kvQuant))) { flags.push('-ctk', String(kvQuant), '-ctv', String(kvQuant)); }
   return flags;
 }
@@ -171,9 +157,8 @@ export async function startServer({ modelPath, model, numCtx = 8192, port, ngl, 
   const bin = findBinary();
   if (!bin) return { ok: false, error: 'llama.cpp (llama-server) is not installed. Install with: brew install llama.cpp' };
 
-  // Resolve the model path. An explicit modelPath must be an existing REGULAR .gguf
-  // file (never a directory, device, or arbitrary file); an Ollama model name goes
-  // through the validated resolver above.
+  // An explicit modelPath must be an existing regular .gguf file; a model name
+  // goes through the validated resolver.
   /** @type {string | null} */
   let resolvedPath = null;
   if (modelPath) {

@@ -8,29 +8,16 @@ import { listAnthropicModels, streamAnthropicChat } from './providers/anthropic.
 import { assertSafeProviderUrl } from './security.js';
 import { getModels as getCatalogModels, refreshCatalog, getProviderDefault } from './modelCatalog.js';
 
-// The suggested-model catalog now lives in backend/models.json, not here.
-//
-// It was a hardcoded array, which made every new model upstream a code change
-// and an app update for every user. That is the wrong shape for a list whose
-// entire job is to track something that moves weekly. modelCatalog.js merges
-// the bundled file with a copy refreshed from the repository and an optional
-// user file, so adding a model is now editing one JSON file and pushing it.
-//
-// getModels() is synchronous and always returns a usable list; the refresh
-// happens in the background and lands on the next call.
+// The suggested-model catalog is backend/models.json, loaded by modelCatalog.js.
+// getModels() is synchronous; a background refresh lands on the next call.
 
-// All valid pull targets - used by the pull endpoint to whitelist requests
-// Was exported and never used anywhere: dead since the pull route started
-// validating ids by format instead of against a whitelist. Kept as a function
-// so anything that wants it gets the CURRENT catalog rather than a snapshot
-// taken at import time.
+// Built per call so callers see the refreshed catalog.
 export function curatedOllamaIds() {
   return new Set(getCatalogModels().map((m) => m.ollamaId || m.id));
 }
 
 function normalizeModelId(modelId) {
-  // Ollama often reports installed models as "name:tag" (e.g. llama3:latest).
-  // We normalize to base name so curated entries can match installed tagged variants.
+  // Installed models come back as name:tag; curated entries match on the base name.
   return String(modelId || '').split(':')[0];
 }
 
@@ -90,9 +77,7 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
     /** @type {any} */
     let matchedLocal = null;
 
-    // If this entry targets a specific version tag (e.g. gemma3:1b, gemma4:e2b),
-    // require the remote id to contain the full versioned tag - not just the base name.
-    // This prevents gemma3:latest (4B) from being mistaken as gemma3:1b (1B).
+    // A specific tag must match in full, so gemma3:latest (4B) is not taken for gemma3:1b.
     const ollamaId = entry.ollamaId || '';
     const ollamaHasSpecificTag = ollamaId.includes(':') && !ollamaId.endsWith(':latest');
     const specificTagNeedle = ollamaHasSpecificTag ? normalizeCatalogNeedle(ollamaId) : null;
@@ -156,11 +141,8 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
       };
     }
 
-    // Not loaded by the endpoint and no matching local GGUF. This catalog is only
-    // built for endpoints that CANNOT pull a model on demand (koboldcpp,
-    // openai-compatible) - unlike Ollama, they load a single GGUF at launch. So
-    // drop the entry instead of emitting a dead "install" row that, when clicked,
-    // only produced a "not available in this endpoint" dead-end.
+    // These endpoints load one GGUF at launch and cannot pull, so an install row
+    // would be a dead end.
     return null;
   }).filter(Boolean);
 
@@ -208,8 +190,7 @@ function buildEndpointCatalog({ remoteModels, selectedModelId, localModels }) {
 /** @param {{ provider?: string, model?: string, config: any }} args @returns {Promise<string>} */
 export async function getEffectiveModel({ provider, model, config }) {
   if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') {
-    // vLLM is a remote OpenAI-compatible server: like the cloud providers it
-    // never mixes in local GGUF, but (like openai-compatible) its key is optional.
+    // vLLM is remote: no local GGUF, and its key is optional.
     const isCloudOnly = provider !== 'openai-compatible';
     let preferred = model && model !== 'auto' ? model : (isCloudOnly ? null : config.openAIModel);
     // Guard: reject local GGUF filenames being sent to cloud APIs
@@ -234,14 +215,13 @@ export async function getEffectiveModel({ provider, model, config }) {
     return 'koboldcpp';
   }
   if (provider === 'llamacpp') {
-    // The managed llama.cpp server serves whatever model was launched; the
-    // effective model is just whatever the caller selected.
+    // llama-server serves the launched model, so the caller's choice stands.
     const preferred = model && model !== 'auto' ? model : config.openAIModel;
     if (preferred && preferred !== 'auto') return preferred;
     return 'llama.cpp';
   }
 
-  // For ollama: verify requested/configured model is installed; fall back to first installed model
+  // Ollama: the requested model if installed, else the first installed one.
   const preferred = model || config.ollamaModel;
   try {
     const res = await fetch(`${config.ollamaBaseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
@@ -258,7 +238,7 @@ export async function getEffectiveModel({ provider, model, config }) {
       }
     }
   } catch {
-    // Ollama not reachable - return preferred and let the stream fail with a clear error
+    // Unreachable: return preferred and let the stream report the error.
   }
   return preferred;
 }
@@ -286,9 +266,9 @@ export async function listModels(config, provider = config.aiProvider, options =
       ? 'http://127.0.0.1:8000/v1'
       : config.openAIBaseUrl;
 
-    // Cloud-only providers - never mix in local GGUF files; they can't be loaded via a remote API.
+    // A remote API cannot load local GGUF files, so cloud providers never list them.
     const isCloudOnly = provider !== 'openai-compatible';
-    // Per-provider sensible fallback model name (used when remote listing fails/unavailable).
+    // Used when the remote listing fails.
     const providerFallbackModel = (provider === 'gpuaas' || provider === 'vllm')
       // No meaningful default: the user points these at their own server, which
       // lists its own models.
@@ -300,15 +280,14 @@ export async function listModels(config, provider = config.aiProvider, options =
     const remote = await listOpenAICompatibleModels({ baseUrl, apiKey }).catch(() => []);
     const locals = isCloudOnly ? [] : await listLocalGgufModels();
     if (remote.length > 0) {
-      // For cloud providers, don't try to pre-select using the generic config model name
-      // (which may be a local GGUF path). Let UI auto-select the first available model.
+      // The config model may be a local GGUF path, so cloud providers let the UI pick.
       const selectedId = isCloudOnly ? '' : config.openAIModel;
       return buildEndpointCatalog({ remoteModels: remote, selectedModelId: selectedId, localModels: locals });
     }
     if (locals.length > 0) {
       return buildEndpointCatalog({ remoteModels: [], selectedModelId: config.openAIModel, localModels: locals });
     }
-    if (!providerFallbackModel) return []; // gpuaas with no config yet - return empty
+    if (!providerFallbackModel) return []; // gpuaas with no config yet
     return [{
       id: providerFallbackModel,
       label: prettifyEndpointModelLabel(providerFallbackModel),
@@ -366,10 +345,8 @@ export async function listModels(config, provider = config.aiProvider, options =
   }
 
   if (provider === 'llamacpp') {
-    // First-class local llama.cpp engine (managed by /api/runtimes/llamacpp).
-    // Its model list is whatever the managed server currently serves, plus any
-    // local GGUF files. When nothing is running, return empty so the UI shows
-    // the launch control (pick a model + Start) instead of a phantom entry.
+    // Served model plus local GGUF files. Empty when nothing runs, so the UI shows
+    // the launch control instead of a phantom entry.
     const baseUrl = overrideBaseUrl || 'http://127.0.0.1:8080/v1';
     const remote = await listOpenAICompatibleModels({ baseUrl, apiKey: '' }).catch(() => []);
     const locals = await listLocalGgufModels();
@@ -412,9 +389,7 @@ export async function listModels(config, provider = config.aiProvider, options =
   );
   const curated = getCatalogModels().map((model) => {
     const pullId = model.ollamaId || model.id;
-    // If the ollamaId has a specific non-default tag (e.g. gemma3:1b, gemma3:12b, gemma4:e2b),
-    // ONLY match if that exact tag is present in the discovered set.
-    // This prevents gemma3:latest from satisfying gemma3:1b just because both share base name 'gemma3'.
+    // A specific tag must be installed exactly; a shared base name is not enough.
     const hasSpecificTag = pullId.includes(':') && !pullId.endsWith(':latest');
     let isAvailable;
     let paramSize;
@@ -469,15 +444,12 @@ export async function listModels(config, provider = config.aiProvider, options =
 }
 
 export async function streamWithProvider({ provider, model, messages, config, signal, onToken, onStats, onNotice, overrideBaseUrl, overrideApiKey, temperature, maxTokens, ollamaOptions, openaiParams, keepAlive }) {
-  // Central SSRF guard for the streaming path too (not just /api/models and
-  // /api/providers/health): this is the one outbound call that echoes the
-  // provider response body back to the caller, so a metadata-endpoint baseUrl
-  // must be refused here as well. Only blocks cloud-metadata hosts; loopback/LAN
-  // (local models) stay allowed.
+  // SSRF guard: this call echoes the provider body back, so cloud-metadata hosts
+  // are refused here too. Loopback and LAN stay allowed for local models.
   if (overrideBaseUrl) assertSafeProviderUrl(overrideBaseUrl);
   if (provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') {
-    // gpuaas has no default base URL; refuse rather than silently fall back to a
-    // local server (which would ship the user's API key to 127.0.0.1:8000).
+    // gpuaas has no default base URL; a local fallback would send the user's API
+    // key to 127.0.0.1:8000.
     if (provider === 'gpuaas' && !String(overrideBaseUrl || '').trim()) {
       throw new Error('Set your GPUaaS endpoint URL in the provider config before sending.');
     }

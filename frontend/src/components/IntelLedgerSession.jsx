@@ -1,6 +1,3 @@
-// frontend/src/components/IntelLedgerSession.jsx
-// IntelLedger session management UI
-
 'use client';
 
 import { ChevronRightIcon } from './ui/primitives';
@@ -329,7 +326,6 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
       const { session } = await readJsonOrThrow(res, 'Failed to load IntelLedger session details.');
       setSession(session);
 
-      // Load interactions and signals
       const [intRes, sigRes] = await Promise.all([
         fetch(`${API_BASE}/api/intelledger/sessions/${sessionId}/interactions`),
         fetch(`${API_BASE}/api/intelledger/sessions/${sessionId}/signals`)

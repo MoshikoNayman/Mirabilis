@@ -1,14 +1,11 @@
-// frontend/src/components/ui/ContactRow.jsx
-// A single "buddy" row in the Buddy List - provider name, presence, meta.
+// One provider row in the Buddy List: name, presence, model count.
 'use client';
 
 import { PresenceDot, Badge } from './primitives';
 import { PRESENCE_LABELS } from '../../lib/presence';
 
 export default function ContactRow({ provider, presence = 'unknown', modelCount, warmLabel, onClick }) {
-  // The buddy list is a status board (presence at a glance). When no onClick is
-  // given the row is purely presentational - no button, no hover - so it never
-  // looks like a dead control. Model/provider selection lives in the composer bar.
+  // Without onClick the row renders as a plain div so it never looks like a dead control.
   const interactive = typeof onClick === 'function';
   const Tag = interactive ? 'button' : 'div';
   return (

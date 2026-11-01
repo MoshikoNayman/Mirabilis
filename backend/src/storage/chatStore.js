@@ -4,19 +4,14 @@ import { hardenFile, SECURE_FILE_MODE } from './securePaths.js';
 
 const emptyStore = { chats: [] };
 
-// Module-level read cache - invalidated on every write so reads within the same
-// request cycle never hit the filesystem more than once.
+// Read cache, replaced on every write.
 let _cache = null;
 let _cachePath = null;
 
-// Monotonically-incrementing epoch. Incremented on every clearChats so that any
-// saveChat enqueued BEFORE the clear (or finishing AFTER it) recognises the store
-// was wiped and bails out, preventing cleared chats from being resurrected.
+// Bumped by clearChats so a saveChat queued before the clear cannot resurrect chats.
 let _epoch = 0;
 
-// Off-the-Record: ephemeral chats live only in this in-memory map and are never
-// written to disk. They work normally within a running session (send, stream,
-// rename) but are gone the moment the backend process exits - no chats.json trace.
+// Off-the-Record chats live only here and never touch disk.
 const _ephemeral = new Map();
 
 export function isEphemeralChat(chatId) {
@@ -28,7 +23,7 @@ function invalidateCache() {
   _cachePath = null;
 }
 
-// Serializes all write operations to prevent concurrent read-modify-write data loss
+// Serializes read-modify-write cycles so concurrent writes cannot lose data.
 let _lock = Promise.resolve();
 function withLock(fn) {
   let release;
@@ -56,25 +51,21 @@ export async function readStore(filePath) {
     _cachePath = filePath;
     return _cache;
   } catch (parseError) {
-    // The primary file is corrupt (truncated write, disk-full, etc.). Try the
-    // last-known-good backup before giving up - silently returning empty here
-    // would let the next write overwrite the corrupt file and destroy chats.
+    // Corrupt primary: fall back to .bak. Returning empty would let the next write destroy chats.
     try {
       const backupRaw = await fs.readFile(`${filePath}.bak`, 'utf8');
       _cache = JSON.parse(backupRaw);
       _cachePath = filePath;
-      // Heal the corrupt primary immediately (temp + rename, leaving the good
-      // .bak untouched) so a later write doesn't roll the corrupt file into .bak.
+      // Heal the primary now so a later write cannot roll the corrupt file into .bak.
       try {
         const healTmp = `${filePath}.heal-${process.pid}`;
         await fs.writeFile(healTmp, backupRaw, 'utf8');
         await fs.rename(healTmp, filePath);
-      } catch { /* best effort - cache already holds good data */ }
+      } catch { /* best effort: cache already holds good data */ }
       console.warn(`[chatStore] ${filePath} was corrupt; recovered from ${filePath}.bak and healed the primary`);
       return _cache;
     } catch {
-      // Quarantine the corrupt file instead of clobbering it, then fail loud so
-      // the user notices rather than losing everything silently.
+      // Quarantine the corrupt file and throw rather than overwrite it.
       const quarantine = `${filePath}.corrupt-${Date.now()}`;
       try { await fs.rename(filePath, quarantine); } catch { /* best effort */ }
       throw new Error(
@@ -85,15 +76,8 @@ export async function readStore(filePath) {
   }
 }
 
-// Atomic write: serialize to a temp file, fsync, then rename over the target
-// (atomic on POSIX). A crash mid-write leaves either the old file or the new
-// file intact - never a truncated one. The previous good copy is kept as .bak.
-//
-// Pass { shred: true } when the write REMOVES data the user asked to be gone
-// (delete, clear, retention purge). Rolling a .bak there would defeat the
-// deletion: the full pre-delete store would survive in a sibling file forever,
-// since nothing else ever removes a .bak. Shredding writes no backup and drops
-// any existing one, so "delete" actually deletes.
+// Atomic write (temp, fsync, rename); the previous good copy is kept as .bak.
+// Pass { shred: true } for deletes and purges: it drops .bak so removed data does not survive there.
 export async function writeStore(filePath, data, { shred = false } = {}) {
   invalidateCache();
   const serialized = JSON.stringify(data);
@@ -109,7 +93,6 @@ export async function writeStore(filePath, data, { shred = false } = {}) {
     await fs.rename(tmpPath, filePath);
     await fs.unlink(`${filePath}.bak`).catch(() => { /* no prior backup */ });
   } else {
-    // Roll the current good file to .bak before replacing it.
     try { await fs.copyFile(filePath, `${filePath}.bak`); } catch { /* first write: no prior file */ }
     await fs.rename(tmpPath, filePath);
   }
@@ -147,16 +130,14 @@ export async function getChat(filePath, chatId) {
 }
 
 export function saveChat(filePath, nextChat) {
-  // Off-the-Record: keep ephemeral chats in memory only, never touch disk.
   if (nextChat?.ephemeral) {
     _ephemeral.set(nextChat.id, nextChat);
     return Promise.resolve(nextChat);
   }
-  // Snapshot epoch before entering the queue. If clearChats runs while this
-  // saveChat is waiting, the epoch will have incremented and we skip the write.
+  // Capture the epoch before queueing; a clear in between skips this write.
   const savedEpoch = _epoch;
   return withLock(async () => {
-    if (_epoch !== savedEpoch) return; // store was cleared after this save was enqueued
+    if (_epoch !== savedEpoch) return;
     const store = await readStore(filePath);
     const index = store.chats.findIndex((chat) => chat.id === nextChat.id);
     if (index >= 0) {
@@ -181,17 +162,13 @@ export function deleteChat(filePath, chatId) {
 
 export function clearChats(filePath) {
   return withLock(async () => {
-    _epoch++; // invalidate all in-flight saveChat calls
-    // Write a FRESH empty array, never a shallow copy of the module-level
-    // emptyStore: `{ ...emptyStore }` aliases emptyStore.chats, and a later
-    // saveChat push()es onto that shared array, permanently polluting the
-    // "empty" template so subsequent clears silently keep old chats on disk.
+    _epoch++;
+    // Fresh array: `{ ...emptyStore }` would alias emptyStore.chats and later saves would push onto it.
     await writeStore(filePath, { chats: [] }, { shred: true });
   });
 }
 
-// Returns the current epoch so callers can detect if clearChats ran since they
-// last checked.
+// Lets callers detect a clearChats since they last checked.
 export function getEpoch() {
   return _epoch;
 }

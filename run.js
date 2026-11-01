@@ -317,27 +317,18 @@ function npmArgs(args) {
   return args;
 }
 
-// Choose the install command for a package directory.
-//
-// This used to be an unconditional `npm install --legacy-peer-deps`, which is
-// the reason the committed lockfiles kept drifting: `npm install` REWRITES
-// package-lock.json, and --legacy-peer-deps skips peer resolution entirely, so
-// peer-only packages get pruned from the tree it writes. A later `npm ci` in CI
-// then rejects the truncated lockfile and the release fails. `npm ci` installs
-// exactly what the lockfile says and never edits it, which is what a local run
-// of an already-locked project wants.
+// Use `npm ci` when a lockfile exists: it installs exactly what is locked and
+// never rewrites package-lock.json, which `npm install` would.
 function installArgs(dir) {
   if (fs.existsSync(path.join(dir, 'package-lock.json'))) {
     return ['ci', '--no-audit', '--no-fund'];
   }
-  // No lockfile yet (fresh clone of an unlocked project): fall back to install,
-  // which will create one.
+  // No lockfile yet; `npm install` creates one.
   return ['install', '--no-audit', '--no-fund'];
 }
 
-// `validate` lets a caller require more than HTTP 200 - e.g. the image service
-// returns 200 from /health even while the model failed to load, so its readiness
-// check must inspect the JSON `status` field.
+// `validate` checks more than HTTP 200: the image service answers 200 on /health
+// even when its model failed to load, so its check reads the JSON `status`.
 async function endpointReady(url, validate) {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(2000) });
@@ -426,9 +417,8 @@ async function getListeningPidsOnPort(port) {
       const line = rawLine.trim();
       if (!line) continue;
       if (!line.includes('LISTENING')) continue;
-      // Use word-boundary match to avoid :3000 matching :30001 etc.
-      // NOTE: double backslash - inside a template literal `\s` collapses to a
-      // literal "s", so the boundary must be written `\\s` to reach the RegExp.
+      // Boundary so :3000 does not match :30001. Written `\\s` because a template
+      // literal turns `\s` into a plain "s".
       if (!new RegExp(`:${port}(?:\\s|$)`).test(line)) continue;
       const parts = line.split(/\s+/);
       const pid = Number(parts[parts.length - 1]);
@@ -693,10 +683,8 @@ async function ensureOllamaModel() {
 }
 
 
-// Provider binary installation, cross platform
-//
-// Pinned by default so an install is reproducible and nobody silently runs
-// whatever upstream published this morning. Override to move to a newer build.
+// Provider binary installation. Release tags are pinned so installs are
+// reproducible; override the env vars below to take a newer build.
 /** llama-server and KoboldCpp are opt-in at startup; Ollama covers the default case. */
 function startAllEngines() {
   return process.env.MIRABILIS_ALL_ENGINES === '1' || process.argv.includes('--all-engines');
@@ -709,15 +697,8 @@ function skipOllama() {
 }
 
 /**
- * Image generation is optional and by far the heaviest part of an install:
- * torch and diffusers are a multi-gigabyte download, and the model assets are
- * another one on first use.
- *
- * One predicate governs BOTH installing and starting it. MIRABILIS_SKIP_IMAGE
- * already existed for the start path; skipping the start while still spending
- * ten minutes installing torch would be a strange thing to ask for, so the same
- * answer is used for both. --no-image is the same switch for people who would
- * rather not remember an environment variable.
+ * Image generation is optional and the heaviest install (torch, diffusers, model
+ * assets). One switch skips both installing and starting it.
  */
 function skipImageService() {
   return process.env.MIRABILIS_SKIP_IMAGE_SERVICE === '1'
@@ -739,12 +720,8 @@ async function downloadTo(url, destPath) {
 }
 
 /**
- * Extract a .zip or .tar.gz without assuming any one tool exists.
- *
- * bsdtar (macOS, and Windows 10+) reads both formats, so `tar -xf` covers those.
- * GNU tar on Linux cannot read a zip, so unzip is tried there. Each candidate is
- * attempted in turn rather than assuming, because the previous code shelled out
- * to `unzip` and `rm -rf`, neither of which exists on a stock Windows.
+ * Extract a .zip or .tar.gz without assuming any one tool exists. bsdtar (macOS,
+ * Windows 10+) reads both; GNU tar cannot read a zip, so unzip is tried too.
  */
 async function extractArchive(archivePath, destDir) {
   await fsp.mkdir(destDir, { recursive: true });
@@ -789,14 +766,9 @@ function findFileRecursive(dir, fileName) {
 }
 
 /**
- * The direct download URL for a release asset.
- *
- * Preferred over the releases API because the API is rate limited per IP for
- * unauthenticated callers, and shared IPs hit that limit routinely: on a CI
- * macOS runner every asset lookup came back 403 and the install quietly
- * produced nothing. Release downloads do not share that limit. Since the tags
- * are pinned, the asset name is known exactly, so the API is only needed when
- * that guess is wrong.
+ * The direct download URL for a release asset. Preferred over the releases API,
+ * which is rate limited per IP when unauthenticated; the API is only the fallback
+ * when the guessed asset name is wrong.
  */
 function releaseAssetUrl(repo, tag, assetName) {
   return `https://github.com/${repo}/releases/download/${tag}/${assetName}`;
@@ -818,10 +790,8 @@ async function githubRelease(repo, tag) {
 }
 
 /**
- * The plain CPU llama.cpp asset for this machine.
- * Accelerator builds (cuda, vulkan, sycl, rocm, openvino, opencl) are excluded:
- * they need drivers most machines do not have, and fail at startup rather than
- * at install, which is the worst place to find out.
+ * The plain CPU llama.cpp asset for this machine. Accelerator builds need drivers
+ * most machines lack, and they fail at startup rather than at install.
  */
 function llamaAssetName(tag, platform, arch) {
   const a = arch === 'arm64' ? 'arm64' : 'x64';
@@ -896,9 +866,8 @@ async function installLlamaServer() {
     await fsp.copyFile(found, target);
     if (process.platform !== 'win32') await fsp.chmod(target, 0o755);
 
-    // llama-server needs its shared libraries beside it on macOS and Linux.
-    // Copying only the executable produced a binary that installed cleanly and
-    // then failed to start with a dynamic-linker error.
+    // llama-server needs its shared libraries beside it on macOS and Linux, or it
+    // fails to start with a dynamic-linker error.
     const libDir = path.dirname(found);
     for (const entry of await fsp.readdir(libDir)) {
       if (/\.(so|so\.\d+|dylib|dll)$/.test(entry) || /^lib.*\.(so|dylib)/.test(entry)) {
@@ -941,11 +910,8 @@ async function installKoboldCpp() {
 }
 
 /**
- * Install the optional local provider runtimes.
- *
- * Never fatal. Ollama is the default provider and needs none of this, so a
- * machine with no prebuilt binary still gets a working app; it just cannot use
- * the llama.cpp or KoboldCpp providers.
+ * Install the optional local provider runtimes. Never fatal: Ollama is the
+ * default provider and needs none of this.
  */
 async function installProviderBinaries() {
   if (!fs.existsSync(PROVIDERS_DIR)) fs.mkdirSync(PROVIDERS_DIR, { recursive: true });
@@ -1002,9 +968,7 @@ async function ensureLlamaModel(modelPath) {
 async function startOpenAICompatible(threads) {
   const llamaBin = path.join(PROVIDERS_DIR, process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
   if (!fs.existsSync(llamaBin)) {
-    // Say what will actually help. Telling every platform to run `install` was
-    // a dead end wherever no prebuilt binary exists: the command runs, reports
-    // success, and the binary is still missing.
+    // Suggest `install` only where a prebuilt binary exists; elsewhere it cannot help.
     process.stderr.write(
       llamaAssetPattern(process.platform, process.arch)
         ? 'llama-server not found. Run: node run.js install\n'
@@ -1161,9 +1125,8 @@ async function installOllama() {
       );
     }
     statusLine('OK', 'Ollama installed via PowerShell installer');
-    // The installer adds Ollama to PATH but only for new processes.
-    // Inject the known install directory into the current process PATH so
-    // subsequent commandExists() and spawn() calls find ollama.exe immediately.
+    // The installer updates PATH only for new processes; add the install dir here
+    // so commandExists() and spawn() find ollama.exe.
     const ollamaInstallDir = path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Ollama');
     if (fs.existsSync(ollamaInstallDir)) {
       process.env.PATH = `${ollamaInstallDir}${path.delimiter}${process.env.PATH}`;
@@ -1183,11 +1146,8 @@ async function runInstall() {
   }
   statusLine('OK', `Node.js: ${require('child_process').execSync('node -v', { encoding: 'utf8' }).trim()}`);
 
-  // Check Ollama - auto-install if missing.
-  //
-  // Skippable, because it is not always wanted: someone using only cloud
-  // providers does not need a local engine, and CI must be able to prove this
-  // launcher works on each platform without pulling a multi-gigabyte runtime.
+  // Ollama: auto-install if missing. Skippable for cloud-only setups and for CI,
+  // which must not pull a multi-gigabyte runtime.
   if (skipOllama()) {
     statusLine('INFO', 'Ollama install skipped (--no-ollama / MIRABILIS_SKIP_OLLAMA).');
   } else if (!(await hasOllamaCommand())) {
@@ -1197,9 +1157,8 @@ async function runInstall() {
     statusLine('OK', 'Ollama: installed');
   }
 
-  // Ensure Ollama service is running so we can check/pull models.
-  // All of this is Ollama work; skip it wholesale when Ollama is opted out,
-  // otherwise the launcher would try to start a binary that is not there.
+  // Ensure the Ollama service is running so models can be checked and pulled.
+  // Skipped when Ollama is opted out, since the binary may not exist.
   if (!skipOllama()) {
   const ollamaRunning = await endpointReady('http://127.0.0.1:11434');
   if (!ollamaRunning) {
@@ -1234,12 +1193,8 @@ async function runInstall() {
     throw new Error('Frontend npm install failed');
   }
 
-  // Setup Python venv, unless the caller opted out.
-  //
-  // This step pulls torch and diffusers, which is a multi-gigabyte download and
-  // by far the slowest part of a first run. It only powers image generation, so
-  // anyone who does not want that (and CI, which must not spend ten minutes
-  // downloading torch to prove the launcher works) can skip it.
+  // Python venv for image generation. It pulls multi-GB torch and diffusers, so
+  // it is skippable for anyone who does not want images, CI included.
   if (skipImageService()) {
     statusLine('INFO', 'Skipping the image service (MIRABILIS_SKIP_IMAGE_SERVICE / --no-image).');
     statusLine('INFO', 'Everything except image generation works. Re-run without the flag to add it.');
@@ -1267,20 +1222,7 @@ async function runInstall() {
 
   } // end image service setup
 
-  // Provider binaries, on every platform.
-  //
-  // These used to install on macOS only. Everywhere else the step was skipped
-  // with a warning, and then the runtime told the user "llama-server not found.
-  // Run: node run.js install" - a command that, on their platform, would never
-  // install it. An instruction the user cannot act on is worse than an honest
-  // "not supported here".
-  //
-  // The upstream layouts differ, and both matter:
-  //   llama.cpp  ships .tar.gz for macOS and Linux, .zip for Windows, and
-  //              publishes many accelerator variants (cuda, vulkan, sycl, rocm,
-  //              openvino) alongside the plain CPU build. Picking the wrong one
-  //              gives a binary that will not start on most machines.
-  //   koboldcpp  ships a single bare executable per platform.
+  // Optional provider binaries (llama.cpp, KoboldCpp), on every platform.
   await installProviderBinaries();
 
   // Validation
@@ -1475,10 +1417,7 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
     validationFailed = true;
   }
 
-  // Only demand the Python environment if we were asked to install it.
-  // Validating a component the caller explicitly skipped turned --no-image into
-  // a guaranteed failure at the very last step, after everything else had
-  // installed correctly.
+  // --no-image never creates the Python venv, so do not require it then.
   if (!skipImageService() && !fs.existsSync(imagePythonPath())) {
     statusLine('FAIL', 'Python venv not set up');
     validationFailed = true;
@@ -1583,11 +1522,8 @@ async function stopAll() {
   }
 
   if (!stoppedAny) {
-    // No recorded PID state. We deliberately do NOT fall back to broad
-    // `taskkill /IM node.exe` / `pkill -f` here: those match unrelated processes
-    // (the user's editor, another project's `next dev`, an unrelated Ollama) and
-    // would kill them with unsaved work. Instead, target only the processes that
-    // are actually listening on Mirabilis's own ports.
+    // No recorded PID state. Target only processes listening on Mirabilis ports;
+    // a broad `taskkill /IM node.exe` or `pkill -f` would hit unrelated work.
     process.stdout.write('No active PID state found; stopping only processes on Mirabilis ports (3000, 4000, 7860).\n');
     for (const port of [3000, 4000, 7860]) {
       const pids = await getListeningPidsOnPort(port);
@@ -1608,14 +1544,8 @@ async function stopAll() {
 }
 
 async function runDoctor() {
-  // Two kinds of check, and conflating them made `doctor` useless as a gate.
-  //
-  //   required     something is missing that a working install needs
-  //   informational  a service is simply not running right now
-  //
-  // Everything used to be treated as a failure, so `doctor` on a correctly
-  // installed machine that had not been started yet exited 1 and reported
-  // "4 warning(s)". Any script wrapping it, CI included, read that as broken.
+  // Only required checks fail `doctor`. Informational ones (a service not running
+  // yet) do not, so a correct install that is not started still exits 0.
   const checks = [];
   const add = (name, ok, detail, required = true) => checks.push({ name, ok, detail, required });
   const info = (name, ok, detail) => add(name, ok, detail, false);
@@ -1980,12 +1910,9 @@ async function main() {
     statusLine('OK', 'Frontend: http://127.0.0.1:3000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });
 
-    // The image service (Stable Diffusion) is OPTIONAL - only image generation
-    // needs it, and its first run downloads multi-GB model assets. Do NOT block
-    // the launcher on it: chat and every other feature are ready right now, so we
-    // start it in the background and let it warm up. Set MIRABILIS_SKIP_IMAGE=1
-    // to skip it entirely, or MIRABILIS_WAIT_IMAGE=1 to restore the old blocking
-    // wait (e.g. for a headless setup that must have image generation ready).
+    // The image service is optional and its first run downloads multi-GB assets,
+    // so it starts in the background. MIRABILIS_SKIP_IMAGE=1 skips it;
+    // MIRABILIS_WAIT_IMAGE=1 blocks until it is ready.
     const imageEnv = { ...process.env, IMAGE_SERVICE_PORT: '7860', PYTHONUNBUFFERED: '1' };
     const imageLogFile = path.join(os.tmpdir(), 'image-service.log');
     if (skipImageService()) {

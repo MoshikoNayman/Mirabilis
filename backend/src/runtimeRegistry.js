@@ -1,15 +1,6 @@
 // @ts-check
-// backend/src/runtimeRegistry.js
-// Declarative registry of inference RUNTIMES (as opposed to model providers). Every
-// runtime is treated as an OpenAI-compatible-or-Ollama endpoint with a known shape,
-// so adding a backend (llama.cpp, vLLM, an external server) is a data row here rather
-// than another branch in modelService's if/else. The registry answers three things:
-//   - what runtimes exist and how to reach them (baseUrl)
-//   - whether Mirabilis can LAUNCH one locally or only consume an EXTERNAL one
-//   - what each runtime is good at (capabilities), for the model router
-//
-// This is additive: the existing provider adapters keep working. The registry gives
-// the launch layer, the router, and the UI a single source of truth.
+// Inference runtimes as data: how to reach each, whether it can be launched
+// locally, and its capabilities. Adding a backend means adding a row.
 
 import os from 'node:os';
 
@@ -105,9 +96,8 @@ export function isAppleSilicon() {
 export function listRuntimes() {
   const appleSilicon = isAppleSilicon();
   return RUNTIMES.map((r) => {
-    // vLLM (and SGLang later) are CUDA-only, so they cannot be LAUNCHED on this
-    // Mac - but they are fully usable as a REMOTE endpoint over the OpenAI
-    // transport. So they stay available (consumable), just not localLaunchable.
+    // vLLM is CUDA-only: not launchable on Apple Silicon, but still usable as a
+    // remote endpoint over the OpenAI transport.
     const cudaLocalBlocked = r.kind === 'vllm' && appleSilicon;
     return {
       id: r.id,
@@ -119,8 +109,7 @@ export function listRuntimes() {
       capabilities: r.capabilities,
       canPull: r.capabilities?.pull === true,
       note: r.note,
-      // Coarse capability for the UI; the vLLM status route does the real probe
-      // (NVIDIA GPU present + vLLM installed) before offering a local launch.
+      // Coarse; the vLLM status route probes for an NVIDIA GPU and vLLM before a launch.
       localLaunchable: (r.managed === 'spawn' || r.managed === 'spawn-or-external') && !cudaLocalBlocked,
       available: true,
       remoteOnlyReason: cudaLocalBlocked

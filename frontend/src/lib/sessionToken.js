@@ -1,13 +1,6 @@
 // @ts-check
-// frontend/src/lib/sessionToken.js
-// Holds the local session token that privileged backend routes require (remote
-// SSH control, workspace file access, config vault indexing).
-//
-// The backend mints the token at startup and serves it from
-// GET /api/session/token, which answers only loopback callers on an allowed
-// origin. We fetch it once, lazily, and cache it for the page lifetime. The
-// in-flight promise is cached too, so a burst of parallel privileged calls on a
-// cold start triggers exactly one bootstrap request.
+// Fetches the session token for privileged routes once and caches it, including
+// the in-flight promise so parallel cold-start calls share one request.
 
 import { API_BASE } from './api.js';
 

@@ -1,9 +1,4 @@
 'use strict';
-// Tests for the update decision rules.
-//
-// These run without Electron on purpose: the interesting failures are policy
-// failures (checking while Go Dark is on, offering a macOS update that cannot
-// install), and none of them need a browser process to demonstrate.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -21,10 +16,7 @@ test('no update check runs while Go Dark is on', () => {
 });
 
 test('no update check runs before the lockdown state is known', () => {
-  // The renderer reports Go Dark after it loads. Between app start and that
-  // report we do not know, and a check fired in that window would leak on
-  // exactly the launch where the user had locked the app down. Unknown is
-  // treated as locked.
+  // Go Dark is unknown until the renderer reports it; unknown counts as locked.
   const { check, reason } = shouldCheck({ ...base, localOnly: null });
   assert.equal(check, false);
   assert.match(reason, /waiting/);
@@ -52,15 +44,14 @@ test('checks are rate limited, and resume after the interval', () => {
 });
 
 test('Go Dark outranks a due check', () => {
-  // Ordering matters: a stale lastCheckAt must not talk its way past lockdown.
+  // Lockdown is checked before the interval, so a stale lastCheckAt cannot pass it.
   assert.equal(shouldCheck({ ...base, localOnly: true, lastCheckAt: 0 }).check, false);
 });
 
 // -- what we may do with an update -------------------------------------------
 
 test('an unsigned macOS build is never offered a self install', () => {
-  // Squirrel.Mac validates the running bundle's signature and fails the swap,
-  // so a download would break at the final step. Send them to the page instead.
+  // Squirrel.Mac rejects an unsigned bundle, so send the user to the download page.
   assert.equal(installMode('darwin', false), 'manual');
 });
 
@@ -82,8 +73,7 @@ test('a newer version notifies, the same or older does not', () => {
 });
 
 test('skipping one version does not silence later ones', () => {
-  // The bug this guards: storing a boolean "skip" instead of a version, which
-  // mutes every future release including a security fix.
+  // Skip stores a version; a boolean would mute every future release.
   assert.equal(shouldNotify({ available: '26.3.2', current: '26.3.1', skipped: '26.3.2' }).notify, false);
   assert.equal(shouldNotify({ available: '26.4.0', current: '26.3.1', skipped: '26.3.2' }).notify, true);
 });

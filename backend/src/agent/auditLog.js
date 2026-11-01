@@ -1,16 +1,6 @@
 // @ts-check
-// backend/src/agent/auditLog.js
-// A durable record of what an autonomous run actually did.
-//
-// The premise of the long tiers is that nobody is watching. That is exactly why
-// there has to be a record: when a run touches something it should not have, the
-// live event feed is gone (it lives in a browser tab that was closed hours ago)
-// and the transcript only holds the final summary. Without this there is no way
-// to answer "what did it run?" after the fact.
-//
-// One append-only JSONL file per run. Append-only because the interesting case
-// is a run that ended badly: a crash mid-write must leave every prior line
-// readable, which rules out rewriting a JSON document.
+// Durable per-run record of what an autonomous run did, one append-only JSONL file
+// per run so a crash mid-write leaves every prior line readable.
 
 import { appendFile, mkdir, readdir, stat, unlink, readFile } from 'node:fs/promises';
 import { hardenFile, ensureSecureDir, SECURE_FILE_MODE } from '../storage/securePaths.js';
@@ -81,7 +71,7 @@ export function createRunAuditor({ dir, runId, nowIso = () => new Date().toISOSt
     file,
     get lineCount() { return lines; },
 
-    /** The run's identity and, importantly, what it was permitted to do. */
+    /** The run's identity and what it was permitted to do. */
     start({ goal, effort, policy, provider, model, fsRoot, limits }) {
       return write({
         kind: 'run-start',
@@ -103,7 +93,6 @@ export function createRunAuditor({ dir, runId, nowIso = () => new Date().toISOSt
         iteration,
         tool,
         mutating: Boolean(mutating),
-        // The full command matters more than anything else in this file.
         args: clip(args, MAX_ARG_CHARS)
       });
     },
@@ -141,10 +130,7 @@ export async function readRunAudit(dir, runId) {
   });
 }
 
-/**
- * Drop logs older than `maxAgeDays`, keeping at most `maxFiles`.
- * A record nobody prunes eventually becomes the reason the disk fills.
- */
+/** Drop logs older than `maxAgeDays`, keeping at most `maxFiles`. */
 export async function pruneRunAudits(dir, { maxAgeDays = 30, maxFiles = 500 } = {}) {
   let entries;
   try {

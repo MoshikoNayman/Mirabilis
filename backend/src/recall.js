@@ -1,8 +1,5 @@
-// backend/src/recall.js
-// Recall Orb: local semantic recall over the user's own history. Builds a corpus
-// from past chats (chats.json) and IntelLedger signals (intelledger.json), embeds
-// every document with a local Ollama model, and ranks them against a query by
-// cosine similarity. Everything runs on the local machine - no cloud egress.
+// Local semantic recall over past chats and IntelLedger signals, embedded with a local
+// Ollama model and ranked by cosine similarity. Also flags reversed past decisions.
 
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -11,24 +8,20 @@ const DEFAULT_OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
 const PREFERRED_EMBED_MODEL = 'nomic-embed-text';
 const CHUNK_CHARS = 600;
 const DEFAULT_TOP_K = 6;
-// Safety caps so a huge history never turns the first query into a multi-minute
-// embed storm. Most recent chats are preferred when the cap is hit.
+// Caps keep the first query on a large history from taking minutes; newest chats win.
 const MAX_DOCS = 600;
 const EMBED_CONCURRENCY = 4;
-// Raised from 30s: the first embed includes a cold load of the embedding model,
-// which can breach 30s on a slow disk and silently fail the first Recall query.
+// Covers a cold load of the embedding model on a slow disk.
 const EMBED_TIMEOUT_MS = 90000;
 
-// Contradiction detection ("Your Past Self Disagrees"). A small local chat model
-// judges whether a current decision conflicts with a similar past one. All caps
-// are deliberate so a scan can never turn into a long LLM storm.
+// Contradiction detection: a small local chat model judges each candidate pair.
+// The caps bound the number of LLM calls per scan.
 const DEFAULT_JUDGE_MODEL = 'qwen2.5:0.5b';
 const CONTRA_SIM_THRESHOLD = 0.55; // minimum cosine similarity to bother judging
 const CONTRA_NEAR_DUPLICATE = 0.985; // above this it is almost certainly the same sentence
 const CONTRA_TOP_K = 3; // at most this many past candidates per statement
 const CONTRA_MAX_JUDGE_CALLS = 6; // hard cap on LLM judge calls per request
-// Raised from 30s: the judge model is user-selectable and its first call includes a
-// cold load; a larger judge on CPU can exceed 30s and be killed mid-verdict.
+// The judge is user-selectable; a larger one cold-loading on CPU needs the headroom.
 const CHAT_TIMEOUT_MS = 120000;
 
 function sha1(text) {
@@ -46,8 +39,7 @@ function chunkText(text, size = CHUNK_CHARS) {
   return chunks;
 }
 
-// Common words that carry no subject meaning, so they never count as a shared
-// topic between two statements.
+// Words that never count as a shared topic between two statements.
 const CONTRA_STOPWORDS = new Set([
   'about', 'after', 'again', 'against', 'their', 'there', 'these', 'those', 'which',
   'while', 'would', 'could', 'should', 'shall', 'going', 'gonna', 'still', 'instead',
@@ -102,8 +94,7 @@ async function readJsonSafe(filePath, fallback) {
   }
 }
 
-// Run an async mapper over items with a small fixed concurrency so the first
-// query does not fire hundreds of simultaneous requests at Ollama.
+// Bounded concurrency so a cold query does not flood Ollama.
 async function mapLimit(items, limit, mapper) {
   const results = new Array(items.length);
   let cursor = 0;
@@ -129,7 +120,7 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
   let chosenModel = null;
   let chosenJudgeModel = null;
   const embedCache = new Map(); // sha1(text) -> number[]
-  const EMBED_CACHE_MAX = 2000; // bound memory: LRU-evict beyond this many vectors
+  const EMBED_CACHE_MAX = 2000; // LRU bound
 
   async function embedOnce(model, prompt) {
     const controller = new AbortController();
@@ -171,15 +162,8 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     }
   }
 
-  // Pick an embedding model once, and only ever a REAL embedding model.
-  //
-  // This used to probe the preferred model and then walk every entry from
-  // /api/tags until one answered /api/embeddings. Every chat model answers that
-  // endpoint, so the winner was simply whichever model Ollama happened to list
-  // first: recall could end up driving a 70B chat model through hundreds of
-  // embedding calls per query. That is orders of magnitude slower than a real
-  // embedder, produces worse vectors for retrieval, and evicts the user's actual
-  // chat model from memory. Better to fail with an actionable message.
+  // Only purpose-built embedders qualify. Chat models also answer /api/embeddings,
+  // but they are far slower, embed worse and evict the user's chat model.
   const EMBED_NAME_RE = /embed|bge|gte|minilm|e5|nomic/i;
 
   async function ensureModel() {
@@ -189,7 +173,7 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
       chosenModel = PREFERRED_EMBED_MODEL;
       return chosenModel;
     } catch {
-      /* preferred model unavailable - look for another purpose-built embedder */
+      /* preferred model unavailable: look for another embedder */
     }
     const tags = await listTagModels();
     const candidates = tags.filter((name) => EMBED_NAME_RE.test(String(name)));
@@ -223,7 +207,6 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     return vector;
   }
 
-  // Assemble the corpus of documents from chats + ledger signals.
   async function buildCorpus() {
     const docs = [];
 
@@ -281,8 +264,7 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     return docs;
   }
 
-  // Main entry point. Returns { ok:true, model, results } on success or
-  // { ok:false, reason } when Ollama is unreachable or nothing can be embedded.
+  // Returns { ok:true, model, results } or { ok:false, reason }.
   async function query(queryText, limit = DEFAULT_TOP_K) {
     const term = String(queryText || '').trim();
     if (!term) return { ok: false, reason: 'query is empty' };
@@ -343,12 +325,9 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     return { ok: true, model: chosenModel, results: ranked };
   }
 
-  // Pick the chat model that judges conflicts. Prefer an explicit model, then the
-  // small default if installed, then any non-embedding model reported by /api/tags.
+  // Judge model precedence: request, config/env, small default, then any non-embedding model.
+  // A larger judge separates reaffirmations from reversals better, at higher latency.
   async function ensureJudgeModel(preferred) {
-    // Precedence: explicit request model > config/env override > small default.
-    // A stronger installed model (for example gemma3:12b) judges reaffirmations
-    // far more reliably than the 0.5b default, at the cost of higher latency.
     const wanted = String(
       preferred || config.contradictionModel || process.env.MIRABILIS_CONTRADICTION_MODEL || ''
     ).trim();
@@ -364,7 +343,7 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     return chosenJudgeModel;
   }
 
-  // Pull the first {...} block out of a model reply and read the verdict leniently.
+  // Lenient: take the first {...} block, else fall back to a keyword scan.
   function parseJudgeVerdict(content) {
     const raw = String(content || '');
     const match = raw.match(/\{[\s\S]*\}/);
@@ -379,14 +358,12 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
         /* fall through to keyword scan */
       }
     }
-    // Last resort: a bare yes/true anywhere in the text counts as a conflict.
     if (/\b(conflict"?\s*:\s*true|yes|contradict|superseded|changed)\b/i.test(raw)) {
       return { conflict: true, why: '' };
     }
     return { conflict: false, why: '' };
   }
 
-  // Ask the local chat model whether two statements express a reversed decision.
   async function judgeConflict(model, current, past) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
@@ -428,14 +405,12 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     }
   }
 
-  // Given a set of current decision/commitment statements, find the ones that
-  // contradict or supersede something in the user's own past chats or ledger.
-  // Resilient by design: any failure (Ollama down, no model) yields no conflicts.
+  // Find current statements that reverse something in past chats or the ledger.
+  // Any failure yields no conflicts rather than an error.
   async function findContradictions(statements, opts = {}) {
     const stmts = (Array.isArray(statements) ? statements : [])
       .map((item) => (typeof item === 'string' ? item : String(item?.value || item?.text || '')).replace(/\s+/g, ' ').trim())
       .filter((item) => item.length >= 8);
-    // De-duplicate while preserving order.
     const seenStmt = new Set();
     const uniqueStmts = [];
     for (const stmt of stmts) {
@@ -489,11 +464,9 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
 
       const ranked = docs
         .map((doc, index) => ({ doc, score: docVectors[index] ? cosine(stmtVector, docVectors[index]) : 0 }))
-        // Skip near-identical text: that is the same sentence, not a conflict.
+        // Near-identical text is the same sentence, not a conflict.
         .filter((entry) => entry.score >= simThreshold && entry.score < CONTRA_NEAR_DUPLICATE)
-        // Require a shared subject word so unrelated topics never reach the judge.
-        // This keeps the small local model honest and bounds the judge-call count,
-        // even when only a general chat model is available for embeddings.
+        // A shared subject word keeps unrelated topics away from the small judge.
         .filter((entry) => sharesContentToken(statement, entry.doc.snippet))
         .sort((a, b) => b.score - a.score)
         .slice(0, topK);
@@ -515,7 +488,7 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
             why: verdict.why || 'This appears to reverse an earlier decision.',
             score: Number(entry.score.toFixed(4))
           });
-          break; // one flagged conflict per statement is enough
+          break; // one conflict per statement
         }
       }
     }
@@ -523,12 +496,9 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     return { ok: true, model: judgeModel, embedModel: chosenModel, conflicts };
   }
 
-  // embedText/ensureModel are exposed so the Config Vault reuses this exact
-  // embedding path (same Ollama model pick and the same in-process cache) rather
-  // than standing up a second, parallel vector stack.
+  // Exposed so the Config Vault shares this model pick and embed cache.
   return { query, findContradictions, embedText, ensureModel, getEmbedModel: () => chosenModel };
 }
 
-// Module-level similarity + chunking, shared with the Config Vault so there is
-// one canonical implementation of each.
+// Shared with the Config Vault.
 export { cosine, chunkText };

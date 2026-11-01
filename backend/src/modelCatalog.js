@@ -1,28 +1,6 @@
 // @ts-check
-// backend/src/modelCatalog.js
-// Where the suggested-model list comes from.
-//
-// It used to be a hardcoded array in modelService.js, which meant every new
-// model upstream was a code change, a commit and an app update for every user.
-// That is the wrong shape for a list whose whole purpose is to track something
-// that moves weekly.
-//
-// Three sources, merged in this order, later wins:
-//
-//   1. bundled     backend/models.json, ships with the app. Always works:
-//                  offline, first run, and under Go Dark.
-//   2. remote      the same file from the repository, refreshed in the
-//                  background. Editing that one file updates every install.
-//   3. user        ~/.mirabilis/models.json, so someone can add their own
-//                  without waiting for anyone.
-//
-// The remote copy is a convenience, never a dependency. If it is unreachable,
-// malformed, or blocked by Go Dark, the bundled list is used and nothing about
-// the app degrades.
-//
-// This list only SUGGESTS. It is not a permission gate: the pull route already
-// validates model ids by format and accepts any well-formed name, so a bad
-// entry here cannot cause anything the user could not already type themselves.
+// Suggested-model catalog, merged from bundled, remote and user models.json (later wins).
+// Suggestions only: the pull route validates ids itself, and the bundled list covers offline and Go Dark.
 
 import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
@@ -38,14 +16,11 @@ export const USER_CATALOG_PATH = process.env.MIRABILIS_USER_CATALOG
 export const REMOTE_CATALOG_URL = process.env.MIRABILIS_CATALOG_URL
   || 'https://raw.githubusercontent.com/MoshikoNayman/Mirabilis/main/backend/models.json';
 
-/** Refresh at most this often. The list changes weekly at best. */
+/** Refresh at most this often. */
 const REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 4000;
 
-/**
- * Same shape the pull route enforces. A malformed id is dropped rather than
- * shown, so a typo upstream cannot put an uninstallable row in the picker.
- */
+/** Same shape the pull route enforces, so the picker never offers an uninstallable id. */
 const SAFE_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]{0,99}$/i;
 
 /** @typedef {{id: string, label: string, group: string, ollamaId?: string, size?: string, uncensored?: boolean, deprecated?: boolean}} CatalogModel */
@@ -102,13 +77,7 @@ function parseDefaults(text) {
   }
 }
 
-/**
- * The bundled list, read synchronously the first time it is needed.
- *
- * Synchronous on purpose: it is a small file that ships with the app, and every
- * caller wants an answer immediately. Making the catalog async would put a
- * network round trip in front of opening the model picker for no benefit.
- */
+/** The bundled list, read synchronously on first use so callers never wait. */
 function loadBundled() {
   if (bundled) return bundled;
   try {
@@ -116,7 +85,7 @@ function loadBundled() {
     bundled = parseCatalog(text);
     bundledDefaults = parseDefaults(text);
   } catch {
-    bundled = []; // packaging accident: the app still runs on discovered models
+    bundled = []; // missing or unreadable bundle: fall back to discovered models
   }
   return bundled;
 }
@@ -139,12 +108,8 @@ export function getModels() {
 }
 
 /**
- * The last-resort model for a cloud provider whose live listing failed.
- *
- * These live in models.json rather than in code for the same reason the catalog
- * does: when a provider ships a new flagship, the old id here is what a user
- * silently gets, and that should not require an app release to correct.
- *
+ * Last-resort model for a cloud provider whose live listing failed.
+ * Kept in models.json so it can change without an app release.
  * @param {string} provider
  * @returns {string} the id, or '' when there is nothing sensible to offer
  */
@@ -162,12 +127,7 @@ export function getSources() {
 }
 
 /**
- * Refresh the remote and user copies in the background.
- *
- * Fire and forget: callers never await this. The updated list is picked up by
- * the next getModels(), so nothing waits on the network for a list we already
- * have a perfectly good copy of.
- *
+ * Refresh the remote and user copies. Fire and forget; the next getModels() sees the result.
  * @param {{ localOnly?: boolean, force?: boolean }} [opts]
  */
 export async function refreshCatalog({ localOnly = false, force = false } = {}) {
@@ -184,8 +144,7 @@ export async function refreshCatalog({ localOnly = false, force = false } = {}) 
       userModels = null; // absent is the normal case
     }
 
-    // Go Dark means nothing leaves the machine, and a catalog refresh is egress
-    // like any other. The bundled list is complete, so this costs nothing.
+    // A catalog refresh is egress, so Go Dark skips it.
     if (localOnly) { lastFetchAt = Date.now(); return; }
 
     try {
@@ -203,7 +162,7 @@ export async function refreshCatalog({ localOnly = false, force = false } = {}) 
       remoteDefaults = parseDefaults(text);
       etag = res.headers.get('etag') || '';
     } catch {
-      // Offline, slow, blocked, rate limited: the bundled list stands.
+      // Network failure: keep the bundled list.
       lastFetchAt = Date.now();
     }
   })().finally(() => { inFlight = null; });

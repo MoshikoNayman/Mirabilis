@@ -1,17 +1,5 @@
-/**
- * Mirabilis MCP Server
- *
- * Exposes Mirabilis as a Model Context Protocol (MCP) server over streamable-http.
- * VS Code, GitHub Copilot, or any MCP client can connect to POST /mcp and use
- * Mirabilis AI tools directly from the editor.
- *
- * Exposed tools:
- *   - mirabilis_chat         - Send a prompt and get an AI response
- *   - mirabilis_list_models  - List available providers and models
- *   - mirabilis_health       - Check provider readiness
- *
- * All requests are logged to mcp-server-audit.jsonl in the data directory.
- */
+// MCP server over streamable-http at POST /mcp, so any MCP client can call Mirabilis tools.
+// Requests are audited to mcp-server-audit.jsonl when MIRABILIS_LOG=1.
 
 import { mkdir, appendFile, readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import { dirname, resolve, normalize, sep, join } from 'node:path';
@@ -24,8 +12,7 @@ import { isSafeCommand, safeResolvePath } from '../agent/sandbox.js';
 
 const execAsync = promisify(exec);
 
-// Single-source the reported version from package.json so it can never drift out
-// of sync with the app the way a hardcoded string did.
+// Reported version comes from package.json so it cannot drift from the app.
 const require = createRequire(import.meta.url);
 const { version: PKG_VERSION } = require('../../package.json');
 
@@ -175,10 +162,8 @@ async function appendServerAudit(auditLogPath, eventType, details = {}) {
   }
 }
 
-// Local Change Journal: before an MCP write_file overwrites an existing file we
-// snapshot its old bytes so the change is reversible, and we log every write and
-// command to a journal. Unlike the audit log this ALWAYS records (not gated by
-// MIRABILIS_LOG) - it is a safety net for an agent touching your real disk.
+// Change journal: snapshots a file before write_file overwrites it and logs every write
+// and command. Unlike the audit log it always records, regardless of MIRABILIS_LOG.
 async function appendChangeJournal(journalDir, entry) {
   if (!journalDir) return;
   try {
@@ -259,9 +244,7 @@ async function callMirabilisHealth(config) {
   };
 }
 
-// Safety primitives (destructive-command blocklist, path jail) now live in
-// agent/sandbox.js so the MCP server and the autonomous agent enforce exactly
-// the same rules. See the import at the top of this file.
+// Command blocklist and path jail come from agent/sandbox.js, shared with the agent.
 
 async function callSystemInfo() {
   return {

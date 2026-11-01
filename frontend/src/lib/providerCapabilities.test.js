@@ -14,8 +14,7 @@ describe('needsServerModelSwitch', () => {
   });
 
   it('is false for every cloud provider, which just carries the model id per request', () => {
-    // The bug: the picker POSTed all of these to a route that rejects them, so
-    // picking a model was impossible for ten providers.
+    // The server-switch route rejects these providers.
     for (const p of ['openai', 'claude', 'gemini', 'groq', 'grok', 'openrouter', 'cerebras', 'gpuaas', 'vllm', 'llamacpp']) {
       expect(needsServerModelSwitch(p)).toBe(false);
     }
@@ -24,9 +23,7 @@ describe('needsServerModelSwitch', () => {
 
 describe('drift guard', () => {
   it('matches the allowlist the backend route actually enforces', () => {
-    // Reads the real route. If someone adds a provider to the backend allowlist
-    // and not here, the picker silently stops offering a server switch for it;
-    // if they add it here only, every click 400s. Both fail this test instead.
+    // Reads the real route so the two allowlists cannot drift apart.
     const src = readFileSync(SERVER, 'utf8');
     const route = src.slice(src.indexOf("app.post('/api/providers/switch-model'"));
     const match = route.match(/if \(!\[([^\]]+)\]\.includes\(provider\)\)/);

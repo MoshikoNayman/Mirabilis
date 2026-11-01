@@ -1,14 +1,6 @@
 // @ts-check
-// backend/src/vllmRuntime.js
-// Managed LOCAL vLLM runtime for machines with a supported NVIDIA GPU (Linux/CUDA).
-// vLLM is a high-throughput OpenAI-compatible server; here Mirabilis can launch,
-// health-check, and stop a local `vllm serve` process, the same way it manages
-// llama.cpp. It is a high-performance local alternative to Ollama on NVIDIA boxes.
-//
-// vLLM is CUDA-only, so on Apple Silicon it cannot run locally at all - the app
-// keeps using llama.cpp / MLX locally there, and vLLM stays usable only as a
-// REMOTE endpoint. Both paths coexist: local (managed here) when the hardware
-// supports it, remote (point at a URL) everywhere. One managed server at a time.
+// Launches, health-checks and stops one local `vllm serve` (Linux/CUDA only).
+// Elsewhere vLLM is reachable only as a remote endpoint.
 
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -20,20 +12,17 @@ import { getRuntime } from './runtimeRegistry.js';
 
 const execFileP = promisify(execFile);
 
-// A model ref is a Hugging Face repo id or a local path. Restrict to a safe
-// charset so it can never inject shell/args (it is spawned as an argv element,
-// but this is defense in depth and rejects obvious garbage early).
+// Hugging Face repo id or local path. It is passed as one argv element; the
+// charset check is defense in depth.
 const SAFE_VLLM_MODEL = /^[a-zA-Z0-9][a-zA-Z0-9._/@-]*$/;
 
 /** @type {import('node:child_process').ChildProcess | null} */
-let _proc = null;   // running vLLM child, or null
+let _proc = null;
 /** @type {{ pid?: number, port: number, baseUrl: string, model: string, startedAt: number } | null} */
-let _state = null;  // { pid, port, baseUrl, model, startedAt }
+let _state = null;
 
-// Bounded tail of the child's stdout+stderr. Draining matters more here than for
-// llama.cpp: vLLM is extremely verbose during weight load, so an unread pipe
-// fills its OS buffer and deadlocks the process before it ever serves a request.
-// The tail also turns an opaque health timeout into the actual CUDA or OOM error.
+// The pipes must be drained: vLLM logs heavily during weight load and a full
+// pipe deadlocks it. The tail surfaces the real CUDA or OOM error on timeout.
 const LOG_TAIL_MAX = 200;
 /** @type {string[]} */
 let _log = [];
@@ -62,8 +51,7 @@ function isAppleSilicon() {
   return os.platform() === 'darwin' && os.arch() === 'arm64';
 }
 
-// Is a command on PATH? Uses `command -v` (posix) / `where` (win) with no shell
-// interpolation of untrusted input (cmd is always a fixed literal here).
+// cmd must be a fixed literal: it is interpolated into a shell string.
 /** @param {string} cmd @returns {Promise<boolean>} */
 async function has(cmd) {
   try {
@@ -86,7 +74,7 @@ async function detectLauncher() {
   return { installed: false, launcher: null, python: null };
 }
 
-// Can this machine run a LOCAL vLLM server? Returns a rich, UI-facing verdict.
+// Whether vLLM can run locally, with a reason the UI can show.
 /** @returns {Promise<VllmCapability>} */
 export async function detectCapability() {
   if (isAppleSilicon()) {
@@ -139,8 +127,7 @@ export function status() {
     : { running: false, logTail: logTail(12) };
 }
 
-// Launch a local vLLM OpenAI-compatible server for `model` (a HF repo id or a
-// local path). Refuses cleanly on hardware that cannot run it.
+// model is a Hugging Face repo id or a local path.
 /** @param {{ model?: string, port?: number, gpuMemoryUtilization?: number, maxModelLen?: number, dtype?: string, extraArgs?: string[], timeoutMs?: number }} [args] */
 export async function startServer({ model, port, gpuMemoryUtilization, maxModelLen, dtype = 'auto', extraArgs = [], timeoutMs = 1000 * 60 * 15 } = {}) {
   const cap = await detectCapability();
@@ -162,8 +149,7 @@ export async function startServer({ model, port, gpuMemoryUtilization, maxModelL
     if (typeof a === 'string' && a.length > 0 && a.length < 200 && !a.includes('\0')) common.push(a);
   }
 
-  // cap.canRunLocal guaranteed a launcher above; the `|| 'python3'` is a null-safe
-  // fallback so the spawn target is never undefined.
+  // canRunLocal implies a launcher; the python3 fallback only keeps cmd defined.
   const cmd = cap.launcher === 'python' ? (cap.python || 'python3') : 'vllm';
   const args = cap.launcher === 'python'
     ? ['-m', 'vllm.entrypoints.openai.api_server', '--model', raw, ...common]

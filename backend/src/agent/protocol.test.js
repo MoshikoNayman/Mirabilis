@@ -16,7 +16,7 @@ test('a clean finish action parses', () => {
   assert.equal(a.summary, 'All done.');
 });
 
-// the ways real models actually reply
+// reply shapes real models produce
 
 test('a fenced json block parses', () => {
   const a = parseAgentAction('Sure, here is my next step:\n```json\n{"action":"tool","tool":"list_dir","args":{"path":"."}}\n```\n');
@@ -64,7 +64,7 @@ test('alternate argument keys are accepted', () => {
   assert.deepEqual(parseAgentAction('{"action":"tool","tool":"t","parameters":{"b":2}}').args, { b: 2 });
 });
 
-// genuine failures are reported, not guessed at
+// genuine failures
 
 test('a reply with no JSON is invalid, with a usable message', () => {
   const a = parseAgentAction('I think we should probably read the config file first.');
@@ -79,10 +79,7 @@ test('a tool action with no tool name is invalid', () => {
 });
 
 test('an unrecognised action is read as a tool name, so the registry can correct it', () => {
-  // Real models put the tool name in the action field: {"action":"read_file"}.
-  // Treating that as a tool call means the registry answers with "Unknown tool
-  // X. Available: ..." which tells the model exactly what it may use. The older
-  // behaviour returned "Unrecognised action" and taught it nothing.
+  // Models often put the tool name in "action"; the registry's reply lists the valid tools.
   const a = parseAgentAction('{"action":"ponder"}');
   assert.equal(a.kind, 'tool');
   assert.equal(a.tool, 'ponder');

@@ -1,562 +1,175 @@
 # Mirabilis AI
 
-**Version:** 26.3R1-S1  
-**Author:** Moshiko Nayman
+Version 26.3R1-S1. Author: Moshiko Nayman.
 
-[![Download Latest Release](https://img.shields.io/badge/Download-Latest%20Release-1aa86f?style=for-the-badge)](https://github.com/MoshikoNayman/Mirabilis/releases/latest)
+Mirabilis is a local-first AI chat app. It runs a model on your own machine
+through Ollama or another local engine, or talks to a cloud provider with your
+own key, chosen per conversation. Chats and other data stay on disk locally
+unless you pick a remote provider. It ships with IntelLedger, a workspace that
+pulls decisions, risks, asks and commitments out of conversations and tracks
+them.
 
-Default recommendation: use the desktop installer from Releases (macOS DMG / Windows EXE / Linux AppImage). Source/web mode is available for advanced users.
+## Requirements
 
-Mirabilis AI is a privacy-first AI assistant that runs on your own machine. Chat with a local model or connect any cloud provider - your choice, per conversation - and nothing leaves your computer unless you decide it should. It pairs a clean, ICQ-inspired interface (themeable, light or dark) with IntelLedger, a built-in workspace that turns messy conversations into clear decisions and next steps.
-
----
-
-## Prerequisites
-
-**Node.js 18+** must be installed before running Mirabilis.
+Node.js 18 or newer.
 
 | Platform | Install |
 |---|---|
 | macOS | `brew install node` |
-| Linux | `sudo apt install nodejs npm` or see [nodejs.org](https://nodejs.org) |
-| FreeBSD / Solaris | `pkg install node` / `pkgadd nodejs` or build from [nodejs.org](https://nodejs.org) |
+| Linux | `sudo apt install nodejs npm` |
 | Windows | `winget install OpenJS.NodeJS` |
 
----
-
-## Quick Start
+## Quick start
 
 ```bash
 node run.js
 ```
 
-Open: **http://localhost:3000**
+Then open http://localhost:3000.
 
-That is the whole setup. On a machine with none of this installed, `node run.js`
-checks what is missing, installs it, and starts everything: backend, frontend,
-image service and any local providers. No shell scripts, no separate install
-step, and the same command on macOS, Linux and Windows. CI runs it on all three
-from a cold checkout on every push, so the claim is tested rather than asserted.
-
-A first run pulls a lot. To skip the heavy optional parts:
+On first run the launcher installs what is missing (npm packages, the image
+service venv, Ollama) and starts the backend (port 4000), the frontend (port
+3000), the image service (port 7860) and Ollama. The same command works on
+macOS, Linux and Windows.
 
 ```bash
-node run.js --no-image     # skip image generation (torch/diffusers, multi-GB)
-node run.js --no-ollama    # skip the local engine (for a cloud-only setup)
+node run.js --no-image      # skip the image service (torch/diffusers, several GB)
+node run.js --no-ollama     # do not install or start Ollama; cloud providers only
+node run.js --all-engines   # also start llama-server and KoboldCpp
+node run.js dev             # hot reload for frontend and backend
+node run.js doctor          # check the install and the data folder
+node run.js stop            # stop everything the launcher started
 ```
 
-Useful checks:
+Other modes:
 
 ```bash
-node run.js doctor         # what is installed, what is running
-node run.js install        # install or repair dependencies explicitly
-node run.js stop           # stop everything it started
+node run.js ollama              # start with Ollama
+node run.js openai-compatible   # start with llama-server
+node run.js koboldcpp           # start with KoboldCpp
+node run.js install             # install or repair dependencies
+node run.js restart [mode]      # stop, then start
+node run.js logs                # tail backend, frontend and image-service logs
+node run.js uninstall           # remove dependencies and caches
+node run.js --help
 ```
 
-`doctor` exits non-zero only when something is genuinely missing. Services that
-are merely not running yet are reported as notes, not failures.
+Flags: `--log` prints live backend and MCP logs and writes the MCP audit log,
+`--verbose` prints more startup detail, `--dev-ui` runs only the frontend with
+hot reload.
 
----
+`doctor` exits non-zero only when something required is missing. A service that
+is not running is reported as a note.
 
-## Desktop Downloads (Recommended)
+`uninstall` removes `node_modules`, the image-service venv, `backend/.env`,
+`frontend/.env.local` and the launcher's downloaded model. It does not touch the
+data folder.
 
-Mirabilis supports both:
+## Providers
 
-- **Web mode** (run from source with `node run.js`)
-- **Desktop app** (prebuilt installers)
+Pick the provider in the UI and set its base URL and key in the Configure
+endpoint panel.
 
-Download desktop installers from the **[latest public release](https://github.com/MoshikoNayman/Mirabilis/releases/latest)** - pick the file for your platform:
+| Provider | Where it runs |
+|---|---|
+| Ollama (default) | Local |
+| llama.cpp (managed `llama-server`) | Local |
+| Local/Custom Endpoint (any OpenAI-compatible server) | Local or remote |
+| KoboldCpp | Local |
+| vLLM | Local on NVIDIA/CUDA, or a remote server by URL |
+| GPUaaS Endpoint | Remote, any OpenAI-compatible GPU host |
+| OpenAI, Claude, Gemini, Grok, Groq, OpenRouter, Cerebras | Cloud, your API key |
 
-- **macOS** (Apple Silicon): the `-arm64.dmg` asset
-- **Windows** (x64): the `-x64.exe` asset
-- **Linux** (x64): the `-x86_64.AppImage` asset
+Base URLs, key formats, the model catalog and the MCQ models are in
+[docs/PROVIDERS.md](docs/PROVIDERS.md).
 
-> These point at `releases/latest`, so the links never go stale as the version advances. Exact filenames carry the current version (e.g. `Mirabilis.AI-<version>-arm64.dmg`).
+### Uncensored models
 
-**Verify your download (recommended):** each release publishes a `SHA256SUMS-<os>.txt`. Check the file you downloaded matches:
+An Uncensored toggle in the composer is off by default. Turning it on for a chat
+switches to an installed uncensored local model, if there is one, and puts a
+directive at the top of the system prompt that drops the app's content
+restrictions. The model list has an Uncensored group (Dolphin variants, Wizard
+Vicuna Uncensored, Llama 2 Uncensored) and MCQ-Raw-8B, which has no safety
+filters. These run locally on hardware you control.
 
-```bash
-# macOS / Linux
-shasum -a 256 -c SHA256SUMS-macos.txt      # or: sha256sum -c SHA256SUMS-linux.txt
-# Windows (PowerShell)
-Get-FileHash .\Mirabilis.AI-*-x64.exe -Algorithm SHA256
-```
+## Go Dark
 
-> Note: installers are not yet Apple-notarized / Windows-signed, so the OS may still show an unsigned-app warning even after the checksum matches.
-
-### Opening on macOS (first launch)
-
-The Mac build is not yet Apple-notarized, so on first launch macOS may say the app
-is **"damaged and can't be opened"** or is from an **"unidentified developer"**. The
-app is not damaged - this is macOS Gatekeeper blocking any app that is not signed
-with a paid Apple Developer certificate. Clear it once and it opens normally from
-then on. Pick whichever is easiest:
-
-- **Terminal (most reliable).** After moving the app out of the DMG (e.g. to
-  `Applications`), run:
-
-  ```bash
-  xattr -cr "/Applications/Mirabilis AI.app"
-  ```
-
-  Then double-click the app. Done.
-
-- **No Terminal, macOS Ventura / Sonoma.** Right-click the app, choose **Open**,
-  then **Open** again in the dialog.
-
-- **No Terminal, macOS Sequoia (15).** Double-click (it gets blocked), then open
-  **System Settings > Privacy & Security**, scroll down, and click **Open Anyway**.
-
-To remove this step for everyone, the build must be **code-signed and notarized**
-with an Apple Developer account. The release pipeline is ready to enable it as soon
-as those credentials are provided.
-
----
-
-## Public Repo Notes
-
-Mirabilis is built to be local-first.
-
-- Chats, IntelLedger session data, prompt profiles, and local runtime state stay on your machine unless you intentionally connect a remote provider or external service.
-- Cloud providers are optional. If you use one, you bring your own API key and endpoint configuration.
-- Desktop release artifacts may be packaged before Apple signing/notarization is configured for every release cycle. When that happens, the app can still be built and run locally, but macOS may show its normal unsigned-app warning.
-
-If you prefer, you can always build Mirabilis directly from this repository instead of relying on prebuilt desktop artifacts.
-
----
-
-## IntelLedger in 60 Seconds
-
-IntelLedger is the built-in memory workspace for turning messy conversations into clear decisions and next steps.
-
-- Create a session for a topic (incident, project, customer thread, etc.)
-- Ingest text or media notes
-- Auto-extract signals such as risks, asks, commitments, and decisions
-- Generate session synthesis and action-focused summaries
-- Track prompt provenance and audit trails with human-readable labels
-
-If you want structured follow-through instead of raw chat history, use the IntelLedger tab.
-
----
-
-## AI Providers
-
-Mirabilis supports local and remote providers, switchable live from the UI. Configure base URL and API key per provider in the **Configure endpoint** panel.
-
-### Local Providers
-
-| Provider | Description | Startup |
-|---|---|---|
-| **Ollama** | Default local inference engine. Pull and manage models from the UI. | `node run.js ollama` |
-| **Local/Custom Endpoint** | Any OpenAI-compatible local server: LM Studio, llama-server, llama.cpp, Oobabooga, etc. | `node run.js openai-compatible` |
-| **KoboldCpp** | KoboldCpp local engine. Install directly from the provider dropdown if not present. | `node run.js koboldcpp` |
-
-### Remote Providers
-
-All remote providers require an API key. Configure in the **Configure endpoint** panel inside the app.
-
-| Provider | Base URL | Free Tier | Key Format |
-|---|---|---|---|
-| **OpenAI** | `https://api.openai.com/v1` | No | `sk-...` |
-| **Grok** (xAI) | `https://api.x.ai/v1` | No | `xai-...` |
-| **Groq** | `https://api.groq.com/openai/v1` | Yes | `gsk_...` |
-| **OpenRouter** | `https://openrouter.ai/api/v1` | Yes | `sk-or-...` |
-| **Gemini** | `https://generativelanguage.googleapis.com/v1beta/openai` | Yes | `AIza...` |
-| **Cerebras** | `https://api.cerebras.ai/v1` | Yes | `csk-...` |
-| **Claude** (Anthropic) | `https://api.anthropic.com` | No | `sk-ant-...` |
-| **GPUaaS Endpoint** | Your endpoint URL | Varies | Provider-specific |
-
-> **GPUaaS Endpoint** works with any OpenAI-compatible GPU-as-a-service: Together AI, Fireworks, RunPod OpenAI proxy, vLLM gateway, and similar platforms. Enter the base URL and API key from your provider.
-
-### Provider UX
-
-- Dropdown shows **Local** / **Remote** scope under each provider name.
-- Local providers that require a binary (`llama-server`, `KoboldCpp`) are **greyed out** when not installed - click **Install** inline to download and install automatically, or **Uninstall** to remove.
-- Per-provider hint banner in the config panel shows the expected base URL and key format.
-- **Estimated monthly budget bar** - set a USD budget; the bar tracks estimated token spend against it (shown for all remote providers).
-- **Auto model resolution** - selecting `auto` picks a sensible default model per provider (e.g. `gpt-4o-mini` for OpenAI, `llama-3.3-70b-versatile` for Groq, `meta-llama/llama-3.3-70b-instruct:free` for OpenRouter, `gemini-2.5-flash` for Gemini).
-- **Stream stall watchdog** - aborts a stalled local stream after 120 s with a clear timeout message.
-- No forced fallback: if a remote provider is unreachable, an error is shown rather than silently switching to Ollama.
-
----
-
-## Commands
-
-All operations run pure JavaScript - no shell scripts required.
-
-```
-node run.js                        # Start (UI provider selection)
-node run.js ollama                 # Start with Ollama
-node run.js openai-compatible      # Start with llama-server
-node run.js koboldcpp              # Start with KoboldCpp
-node run.js install                # Install / reinstall all dependencies
-node run.js uninstall              # Remove dependencies and caches
-node run.js stop                   # Stop all running services
-node run.js restart [provider]     # Restart services
-node run.js doctor                 # Validate environment
-node run.js logs                   # Real-time log tail (for debugging)
-node run.js --help                 # Show full help
-```
-
-### Flags
-
-```
---log                 # Stream backend logs to terminal
---verbose             # Extended startup diagnostics
-```
-
-### Examples
-
-```bash
-node run.js                                    # Default: choose provider in UI
-node run.js ollama --verbose                   # Ollama + detailed diagnostics
-node run.js restart openai-compatible --log    # Restart + live log tail
-node run.js logs                               # Watch all service logs
-node run.js doctor                             # Check environment health
-```
-
-### Cleanup
-
-Remove dependencies and caches (chat/IntelLedger session data is preserved):
-
-```bash
-node run.js uninstall
-```
-
-Everything is pure JavaScript - there are no shell-script cleanup helpers to run.
-
----
-
-## Verification
-
-```bash
-node run.js doctor
-curl -sS http://127.0.0.1:4000/health
-curl -sS http://127.0.0.1:4000/api/models
-curl -sS "http://127.0.0.1:4000/api/providers/health?provider=ollama"
-```
-
----
+Go Dark is a local-only lockdown. While it is on, the backend refuses any
+outbound request to a host that is not this machine or the local network, so
+remote providers, web search, registry lookups and SSH to outside hosts are
+blocked, and the desktop app does not check for updates. The state is stored in
+the data folder and survives a restart.
 
 ## Features
 
-| Category | Feature |
-|---|---|
-| **Chat** | Streaming AI chat with persistent local history |
-| **Chat** | Built-in and custom instruction profiles, persisted per chat |
-| **Chat** | Chat branching and restore snapshots for safe experimentation |
-| **Chat** | File attachments and image messages per conversation |
-| **Chat** | Canvas mode, Deep Thinking mode, Guided Learning mode |
-| **Effort** | Answer style (Instant, Fast, Balanced, Thorough, Deep): controls how the model answers, single request |
-| **Effort** | Autonomous work (High effort, 1 hour, 5 hours): controls how much work it does, with a hard budget |
-| **Autonomous runs** | Plan, act with tools, observe, validate, repair; live progress with a stop button |
-| **Autonomous runs** | Budget enforced in code (wall clock, steps, tool calls, tokens); exhausting it still returns the work done so far |
-| **Autonomous runs** | Least-privilege tools: read-only by default, `write` and `full` are explicit grants |
-| **Autonomous runs** | Optional parallel sub-agents that share the parent budget rather than adding to it |
-| **Config Vault** | Cited local retrieval (RAG) over your own config folder; on-device embeddings, jailed reads, `file:line` citations |
-| **Inference Cockpit** | Per-model Ollama controls: temperature, top-p, top-k, repeat penalty, context window, GPU layers, fixed seed |
-| **Performance Receipt** | Real tokens/sec and time-to-first-token per reply; pre-pull Fits / Tight / Will-swap model-fit estimate vs device memory |
-| **IntelLedger** | Session-based memory workspace for context capture and structured follow-through |
-| **IntelLedger** | Signal extraction for risks, asks, commitments, opportunities, and decisions |
-| **IntelLedger** | Session synthesis, cross-session synthesis, and action-oriented next-step tracking |
-| **IntelLedger** | Prompt registry with version activation plus provenance and audit visibility |
-| **Providers** | 11 providers: Ollama, OpenAI, Grok, Groq, OpenRouter, Gemini, Cerebras, Claude, GPUaaS, Custom Endpoint, KoboldCpp |
-| **Providers** | Live provider health check; switch provider per session from the UI |
-| **Providers** | Pull, delete, and monitor Ollama models from the UI |
-| **Providers** | Estimated remote spend tracker with configurable monthly budget |
-| **Image Generation** | Local image generation via image-service (Stable Diffusion, port 7860) |
-| **Voice / TTS** | Hands-free Voice Chat mode (male/female local Piper voice); text-to-speech with Piper neural voices; download models from the UI |
-| **Voice / TTS** | Browser speech synthesis fallback; rate and pitch controls |
-| **Web Search** | Automatic web search classification; enriches answers with live results |
-| **Remote Execution** | SSH or local remote control - run commands and read files from the UI |
-| **System Monitor** | Live CPU/RAM utilization, hardware profile, system specs |
-| **Training / Memory** | Personal memory store, fine-tuning examples, dataset export |
-| **MCP Client** | Connect to external MCP servers with per-server tool approval policy |
-| **MCP Server** | Exposes Mirabilis as an MCP server to VS Code / GitHub Copilot / Claude Desktop |
-| **MCP Server** | System control tools: `system_info`, `list_dir`, `read_file`, `write_file`, `run_command` |
-| **MCQ Models** | Custom model family (Raw-8B, Pro-12B, Ultra-31B) tuned for Mirabilis |
-| **Desktop App** | Native installers for macOS, Windows, and Linux - download from Releases or build from the `desktop/` folder |
+- Streaming chat with local history, instruction profiles, branches and snapshots
+- Attachments, image input for vision models, LaTeX math
+- Answer styles (Instant to Deep) and autonomous runs (High effort, 1 hour,
+  5 hours) with a hard budget and read-only tools by default
+- Config Vault: cited local retrieval over a folder you choose
+- Recall over past chats and IntelLedger signals, on-device embeddings
+- Inference controls for Ollama models and per-reply tokens/sec
+- Voice chat with local whisper.cpp and Piper voices
+- Web search through Tavily (needs `TAVILY_API_KEY`)
+- Local image generation (Stable Diffusion)
+- SSH remote execution and a homelab host list
+- MCP server and MCP client, see [docs/MCP.md](docs/MCP.md)
 
----
+## Desktop app
+
+Installers are on the
+[latest release](https://github.com/MoshikoNayman/Mirabilis/releases/latest):
+`-arm64.dmg` for macOS (Apple Silicon), `-x64.exe` for Windows, `-x86_64.AppImage`
+for Linux. Each release has `SHA256SUMS-<os>.txt` for checking the download.
+
+The macOS build is not notarized yet. If macOS says the app is damaged, run
+`xattr -cr "/Applications/Mirabilis AI.app"` once.
+
+To build from source:
+
+```bash
+cd desktop
+./build.sh dmg        # macOS
+./build.sh appimage   # Linux
+build.bat             # Windows
+```
+
+Signing, updates and release details are in [docs/DESKTOP.md](docs/DESKTOP.md).
+
+## Where data lives
+
+All app data is in one folder: `../mirabilis-data` beside the repo when run from
+source, or the per-app data folder when run as the desktop app. Set
+`MIRABILIS_DATA_DIR` to move it. It holds chats, IntelLedger, the config vault
+index, personal memory, provider keys, agent run logs and the MCP token. Files
+are written `0600` and the folder `0700`.
 
 ## Configuration
 
-Mirabilis runs with no configuration at all. Every setting is an environment
-variable, and the full reference is in [docs/CONFIGURATION.md](docs/CONFIGURATION.md);
-`backend/.env.example` is a copy-and-edit starting point.
-
-The two worth knowing before you start:
-
-- `MIRABILIS_BIND_HOST` defaults to loopback and should stay there. The API
-  includes endpoints that run shell commands, so binding it wider exposes them.
-- `MIRABILIS_MCP_FS_ROOT` confines file tools to one subtree. Worth setting
-  before you use the long autonomous tiers.
-
-## Effort: answering vs working
-
-Mirabilis separates two things most tools conflate.
-
-**Answer style** (Instant, Fast, Balanced, Thorough, Deep) changes how the model
-replies. It is a single request, and it is what you want for a question.
-
-**Autonomous work** (High effort, 1 hour, 5 hours) changes how much work happens.
-Picking one changes what Send does: instead of sending a message, it starts a job
-that plans, uses tools, checks its own result and repairs it, until the goal is
-met or the budget runs out. A live panel shows the current step, every tool call
-and how much of each budget is gone, with a stop button that stays reachable.
-
-| Tier | Wall clock | Steps | Tool calls | Sub-agents |
-|---|---|---|---|---|
-| High effort | 30 min | 12 | 60 | none |
-| 1 hour | 60 min | 80 | 500 | up to 3 |
-| 5 hours | 5 hours | 400 | 2500 | up to 6 |
-
-The budget is enforced in code, not requested of the model, and running out of it
-still returns whatever was established rather than an empty failure.
-
-### What a run may touch
-
-A run gets **read-only** tools unless you grant more, because the long tiers run
-with nobody watching.
-
-| Policy | Tools |
-|---|---|
-| Read only (default) | `list_dir`, `read_file`, `search_files` |
-| Read + write | adds `write_file` |
-| Full | adds `run_command` |
-
-`Full` is a real shell. A destructive-command blocklist and a filesystem jail are
-in place, but the jail sets where a command *starts*, not what it can reach.
-Treat granting `Full` the same way you would treat handing over a terminal.
-
-### Notes
-
-- Runs are held in memory, so restarting the backend loses one that is in flight.
-- Sub-agents run at most two at a time. Against a single local engine more is not
-  faster (Ollama serialises per model) but does hold more live contexts, which is
-  how a 16 GB machine ends up swapping. Raise with
-  `MIRABILIS_AGENT_FANOUT_CONCURRENCY` if your engine can genuinely serve in
-  parallel.
-- A small model will struggle to hold the tool-calling format. Something in the
-  12B class or larger is a much better experience.
-
-## Desktop App
-
-If you just want to install and run Mirabilis, use the **Desktop Downloads** section above.
-
-Mirabilis can be packaged as a native desktop app (Electron) using the `desktop/` folder.
-The build system stages everything in a temp directory and cleans up automatically - no mess.
-
-### macOS
-
-```bash
-cd desktop
-./build.sh
-```
-
-Output: `desktop/dist/mac-arm64/Mirabilis AI.app`  
-Copy to `/Applications` or double-click to run.
-
-To create a desktop-friendly installer image instead of the unpacked app bundle:
-
-```bash
-cd desktop
-./build.sh dmg
-```
-
-Output: `desktop/dist/Mirabilis AI-<version>-arm64.dmg` (the version comes from `desktop/package.json`; filename may vary slightly by electron-builder version).
-
-For full Gatekeeper-friendly distribution, macOS signing/notarization still requires:
-
-- a valid `Developer ID Application` certificate in Keychain
-- notarization credentials configured for `xcrun notarytool`
-
-Without those, Mirabilis can still be packaged locally, but macOS will treat it as an unsigned app.
-
-### Windows
-
-```bat
-cd desktop
-build.bat
-```
-
-Output: `desktop/dist/Mirabilis AI-<version>-x64.exe` (NSIS installer with custom install directory + desktop shortcut).
-
-> **Requirements:** Node.js 18+ must be installed on the machine running the build. The resulting app is self-contained and does not require Node.js on the end-user machine.
-
-### Linux
-
-```bash
-cd desktop
-./build.sh appimage
-```
-
-Output: `desktop/dist/Mirabilis AI-<version>-x86_64.AppImage`. Build this on Linux - it cannot be cross-built from macOS.
-
----
-
-## CPU / Thread Control
-
-For `openai-compatible` and `koboldcpp`, Mirabilis uses all logical CPU cores by default.
-
-```bash
-MIRABILIS_THREADS=8 node run.js openai-compatible
-MIRABILIS_THREADS=8 node run.js koboldcpp
-```
-
----
-
-## MCP Server
-
-Mirabilis exposes itself as an MCP server at:
-
-```
-POST http://127.0.0.1:4000/mcp
-```
-
-### Exposed Tools
-
-| Tool | Description |
-|---|---|
-| `mirabilis_chat` | Send a prompt and get a streaming AI response (provider + model selectable) |
-| `mirabilis_list_models` | List available models for a given provider |
-| `mirabilis_health` | Check readiness of all configured providers |
-| `system_info` | OS, platform, architecture, hostname, home dir, cwd |
-| `list_dir` | List files and directories at a path |
-| `read_file` | Read a file's text content (<= 512 KB) |
-| `write_file` | Write/overwrite a file - requires `confirmed: true` |
-| `run_command` | Run a shell command (macOS/Linux/Windows) - requires `confirmed: true` |
-
-### Authentication (local token)
-
-Because these tools include `run_command` and `write_file`, the `/mcp` endpoint
-requires a **local bearer token**. On startup Mirabilis prints it and saves it to
-`<data-dir>/mcp-token`:
-
-```
-MCP token (for external MCP clients): <token>  [also saved at .../mcp-token]
-```
-
-Pass it as `Authorization: Bearer <token>`. Override it with `MIRABILIS_MCP_TOKEN`.
-Requests without the token get `401`. (The backend also binds to loopback by
-default and rejects foreign `Host` headers, so `/mcp` is never reachable from the
-network unless you deliberately reconfigure it.)
-
-> Optional: set `MIRABILIS_MCP_FS_ROOT=/path` to confine `read_file` / `write_file`
-> / `list_dir` to a single directory subtree.
-
-### Connect from VS Code
-
-Add to `.vscode/mcp.json` (replace `<token>` with the value from the startup log):
-
-```json
-{
-  "servers": {
-    "mirabilis": {
-      "url": "http://127.0.0.1:4000/mcp",
-      "headers": { "Authorization": "Bearer <token>" },
-      "description": "Mirabilis local AI - start with node run.js first"
-    }
-  }
-}
-```
-
-Then ask Copilot Chat: `Use mirabilis_chat to explain BGP` or `Call mirabilis_health`.
-
-### Audit Logging
-
-Pass `--log` to enable live terminal output and write an audit log to `backend/data/mcp-server-audit.jsonl`:
-
-```bash
-node run.js --log
-```
-
----
-
-## MCP Client
-
-Mirabilis can connect **to** external MCP servers (Junos, Synology, Debian, etc.) from the UI. Configure servers in the **MCP** panel. Connections are persisted in `backend/data/mcp-servers.json`.
-
----
-
-## Chat Workflow
-
-- **Instruction profiles**: Choose from built-in instruction profiles or save your current instructions as a custom reusable profile.
-- **Per-chat instructions**: Mirabilis now keeps the selected profile and current instructions with each chat, so switching conversations does not silently reset your setup.
-- **Branch chat**: Clone the current conversation into a new branch before trying a different prompt, model, or reasoning path.
-- **Snapshots**: Save restore points for an active chat, then roll back to a selected snapshot later from the chat header.
-
----
-
-## Architecture
-
-Mirabilis is 100% pure JavaScript for all launcher and lifecycle operations:
-
-- **Installation** - automatic on first run; or explicitly via `node run.js install`: validates prerequisites, installs npm/Python deps, downloads provider binaries.
-- **Startup** - `node run.js [provider]`: orchestrates backend (Express, port 4000), frontend (Next.js, port 3000), image-service (port 7860), and local AI providers.
-- **Lifecycle** - `stop`, `restart`, `doctor`, `logs`, `uninstall`: all pure JS, no shell scripts.
-- **Self-healing** - auto-installs missing dependencies on startup; auto-creates missing provider adapter files.
-- **No shell dependencies** - works cross-platform without any `.sh` wrappers.
+Nothing is required. Every setting is an environment variable; copy
+`backend/.env.example` to `backend/.env` to set them. Keep
+`MIRABILIS_BIND_HOST` on loopback: the API includes endpoints that run shell
+commands.
+
+## Docs
+
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): environment variables, agent tool policies, updates
+- [docs/PROVIDERS.md](docs/PROVIDERS.md): providers, models, MCQ family
+- [docs/MCP.md](docs/MCP.md): MCP server and client
+- [docs/DESKTOP.md](docs/DESKTOP.md): installers, building, signing, updates
+- [CHANGELOG.md](CHANGELOG.md)
+
+## Layout
 
 ```text
-frontend/       Next.js UI (React, Tailwind)
-backend/        Express API + provider adapters
-  src/
-    providers/  ollama.js, openaiCompatible.js, anthropic.js
-    modelService.js
-    server.js
-image-service/  Local Stable Diffusion image generation
-providers/      Local runtime binaries (llama-server, koboldcpp)
-training/mcq/   MCQ model family - Modelfiles and setup script
-config/         default.json - port, model, and path configuration
-run.js          Unified launcher, installer, doctor, logs, and cleanup
+run.js          launcher, installer, doctor, logs, cleanup
+backend/        Express API, providers, agent, MCP
+frontend/       Next.js UI
+image-service/  Stable Diffusion service (Python)
+desktop/        Electron packaging
+training/mcq/   MCQ Modelfiles and setup script
 ```
-
----
-
-## MCQ Model Family
-
-MCQ is a custom model family created by Moshiko Nayman, built on publicly available base models and tuned specifically for Mirabilis workflows. Install via `training/mcq/setup.sh` or pull directly through the Ollama panel in the UI.
-
-| Model             | Base                           | Params | Context | Character                                     |
-|-------------------|--------------------------------|-------:|--------:|-----------------------------------------------|
-| **MCQ-Raw-8B**    | dolphin3 / Llama 3.1 (4.9 GB) |     8B |   8 192 | Fast local inference. Fully unrestricted, no safety filters. |
-| **MCQ-Pro-12B**   | gemma3:12b (8.1 GB)            |    12B |  32 768 | Balanced quality and speed. Thorough, deep reasoning. Everyday workhorse. |
-| **MCQ-Ultra-31B** | gemma4:31b (~20 GB)            |    31B |  65 536 | Maximum local quality. Flagship depth and reasoning. |
-
-### Setup
-
-Requires Ollama. Run once to create all three models:
-
-```bash
-bash training/mcq/setup.sh
-```
-
-If Ultra is too heavy (download/memory), install a lighter set first:
-
-```bash
-bash training/mcq/setup.sh --lite
-```
-
-The setup script now auto-pulls missing base models and prints clear diagnostics when a pull/create fails.
-
-Models will appear in the **MCQ** group at the top of the model selector after setup.
-
-You can also install MCQ models directly from the UI model menu in Ollama mode; Mirabilis now builds `mcq-*` models from local Modelfiles when you click Install.
-
-Model installs now run as server-side jobs (with status persistence and cancel support), so refresh/reload does not lose install state.
-
-> **MCQ-Ultra-31B** requires ~20 GB RAM/VRAM. Works on Apple Silicon Macs with 24 GB+ unified memory.
->
-> **MCQ-Raw-8B** disables all content filters. Use responsibly and only on hardware you control.
-
-## Notes
-
-- Provider names are canonical and consistent across launcher, backend, and UI.
-- If a provider is unavailable, UI can still fall back to Ollama when reachable.
-- Chat history is local (`backend/data/chats.json`).
 
 ## Legal
 
-Copyright (c) 2026 Moshiko Nayman. All rights reserved.
-See `LICENSE` for terms.
+Copyright (c) 2026 Moshiko Nayman. All rights reserved. See `LICENSE`.

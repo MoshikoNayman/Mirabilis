@@ -1,19 +1,7 @@
 'use client';
 
-// Live view of an autonomous run, as a single line.
-//
-// This used to be a block above the composer. It was honest but expensive: a
-// five-hour job owned a permanent slab of the screen to show three numbers, and
-// it pushed the conversation up every time a run started.
-//
-// It now lives in the composer's action row, in the gap that was already empty
-// between the attach/mic icons and the Send button. Nothing is lost: the same
-// meters and the full event log are one click away in a popover that floats
-// over the transcript instead of displacing it.
-//
-// There is deliberately no Stop button here. The composer's own Send button
-// already becomes Stop during a run and routes to the same handler, and a
-// second one in the same row would be both redundant and confusing.
+// One-line live view of an agent run in the composer's action row, with details
+// in a popover. No Stop button here: Send becomes Stop during a run.
 
 import { memo, useEffect, useRef, useState } from 'react';
 
@@ -25,7 +13,7 @@ const fmtMs = (ms) => {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 };
 
-/** Compact form for the strip: "12m", not "12m 03s". Seconds are noise at a glance. */
+/** Compact strip format, e.g. "12m" or "1h05". */
 const fmtShort = (ms) => {
   const s = Math.max(0, Math.floor((ms || 0) / 1000));
   if (s < 60) return `${s}s`;
@@ -80,8 +68,7 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
   const limits = budget?.limits;
   const lastEvent = events.length ? events[events.length - 1].text : '';
 
-  // The one line. Numbers only, no labels: "8m | 3/12 | 7/60" reads at a glance
-  // and the popover carries the words for anyone who wants them.
+  // Numbers only, e.g. "8m | 3/12 | 7/60"; the popover carries the labels.
   const summary = limits
     ? [
       live ? fmtShort(limits.maxWallMs - (budget.elapsedMs || 0)) : (stopReason || status),
@@ -112,12 +99,7 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${error || status === 'failed' ? 'bg-red-500' : 'bg-[color:var(--text-muted)]'}`}
             />
           )}
-        {/* Progressive disclosure by width, because this shares one row with
-            the Send button and must never push it off screen. Everything here
-            was shrink-0 at first, which meant nothing could truncate and the
-            strip simply overflowed on a narrow window. The state word always
-            survives; the numbers and the running commentary are the parts that
-            can wait for a wider window. */}
+        {/* Parts appear by width so the strip never pushes Send off screen. */}
         <span className="hidden shrink-0 font-medium text-[color:var(--text-main)] sm:inline">{headline}</span>
         <span className="hidden shrink-0 font-mono text-[color:var(--text-muted)] md:inline">{summary}</span>
         {live && lastEvent && (
@@ -131,8 +113,7 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
         </svg>
       </button>
 
-      {/* Finished runs can be cleared, so a completed job does not sit in the
-          composer forever. Live runs are stopped with the composer's Stop. */}
+      {/* Finished runs can be dismissed; live runs stop via the composer's Stop. */}
       {!live && onDismiss && (
         <button
           type="button"
@@ -148,13 +129,8 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
       )}
 
       {open && (
-        // Floats over the transcript rather than displacing it: opening the
-        // details must not move the conversation the user is reading.
-        //
-        // Same surface treatment as every other popover in the app: these
-        // material tokens are translucent by design and only read correctly
-        // with the blur behind them. Without it the toolbar underneath showed
-        // straight through the text.
+        // Floats over the transcript so opening it does not move the conversation.
+        // The material tokens are translucent and need backdrop-blur to stay legible.
         <div
           className="absolute bottom-full left-1/2 z-30 mb-2 w-[min(30rem,85vw)] -translate-x-1/2 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur"
           role="dialog"

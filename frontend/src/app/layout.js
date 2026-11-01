@@ -11,9 +11,7 @@ export const viewport = {
   initialScale: 1
 };
 
-// Applies the saved theme/scheme/font before first paint so there is no flash
-// of the wrong theme. Uses the SAME localStorage keys as the in-app controls
-// (see src/lib/theme.js + ChatApp.jsx).
+// Applies the saved theme before first paint. Keys must match src/lib/theme.js and ChatApp.jsx.
 const THEME_BOOT = `(function(){try{
 var d=document.documentElement,ls=window.localStorage;
 var mode=ls.getItem('local-ai-theme-mode')||'auto';

@@ -1,7 +1,5 @@
-// frontend/src/components/shell/AuroraChrome.jsx
-// The Aurora shell chrome: floating dock, command palette, omni-search, buddy
-// list, toasts, and the footer - layered over the existing app so every screen
-// gains the Fusion experience without fighting ChatApp's full-screen layout.
+// Overlay shell (dock, palette, search, buddy list, toasts) layered above ChatApp
+// so it does not fight its full-screen layout.
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -30,13 +28,11 @@ export default function AuroraChrome({ activeTab, onTab }) {
   const workspaceOpen = useAppStore((s) => s.workspaceOpen);
   const wywaOpen = useAppStore((s) => s.wywaOpen);
 
-  // Apply persisted theme on mount + follow OS theme changes in system mode.
   useEffect(() => {
     applyTheme();
     return watchSystemTheme();
   }, []);
 
-  // Global keyboard: Cmd+K / Ctrl-K command palette, Cmd+/ search.
   useEffect(() => {
     function onKey(e) {
       const meta = e.metaKey || e.ctrlKey;
@@ -57,8 +53,7 @@ export default function AuroraChrome({ activeTab, onTab }) {
     };
   }, []);
 
-  // Let ChatApp drive the orb's "busy" state when it starts/stops streaming,
-  // and the ICQ "searching" spin while a web search is running.
+  // ChatApp drives the orb's busy and searching states through window events.
   useEffect(() => {
     const start = () => setStreaming(true);
     const stop = () => setStreaming(false);

@@ -11,18 +11,17 @@ describe('SSE parsing', () => {
     expect(parseSseBody('data: plain\n\n')).toEqual([{ event: 'message', data: 'plain' }]);
   });
 
-  // the three assumptions the inline version got wrong
+  // line format
 
   test('handles CRLF line endings', () => {
-    // The \r used to survive into the payload and break JSON.parse.
+    // A stray \r in the payload breaks JSON.parse.
     const events = parseSseBody('event: token\r\ndata: {"token":"hi"}\r\n\r\n');
     expect(events).toEqual([{ event: 'token', data: '{"token":"hi"}' }]);
     expect(JSON.parse(events[0].data)).toEqual({ token: 'hi' });
   });
 
   test('joins multiple data lines into one payload', () => {
-    // Per spec, data lines accumulate. Taking only the first silently truncated
-    // any multi-line payload.
+    // Per spec, data lines accumulate.
     const events = parseSseBody('event: e\ndata: line one\ndata: line two\n\n');
     expect(events[0].data).toBe('line one\nline two');
   });

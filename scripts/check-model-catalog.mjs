@@ -1,16 +1,5 @@
-// Does every model we suggest still exist upstream?
-//
-// The catalog is a list of things someone can click to install. When a model is
-// renamed or withdrawn, the row stays, the click fails, and nobody finds out
-// until a user reports it. This asks the Ollama registry directly, so the list
-// cannot rot quietly.
-//
-// It also reports entries that exist but are absent from the catalog's own
-// family tags, which is the usual sign a newer size or generation has shipped.
-//
-// Exit 1 when a suggested model has disappeared. Entries marked "local": true
-// are built on the user's machine (training/mcq/setup.sh) and are correctly
-// absent from the public registry, so they are skipped.
+// Checks each catalog model against the Ollama registry; exits 1 when one is gone.
+// Entries marked "local": true are built on the user's machine and skipped.
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -49,8 +38,7 @@ for (const entry of entries) {
   const status = await manifestStatus(pullId);
   checked += 1;
   if (status === 200) continue;
-  // A network failure is not evidence that a model is gone. Separate the two,
-  // so a flaky runner does not delete a perfectly good entry from the catalog.
+  // Unreachable is not missing: a flaky network must not get a good entry removed.
   if (status === 0) unreachable.push({ pullId, label: entry.label });
   else missing.push({ pullId, label: entry.label, status });
 }
