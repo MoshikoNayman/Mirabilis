@@ -136,6 +136,7 @@
 .au-dot[data-presence='needkey'] { background: var(--presence-needkey); }
 .au-dot[data-presence='busy']    { background: var(--presence-busy); }
 .au-dot[data-presence='offline'] { background: var(--presence-offline); }
+.au-dot[data-presence='dark']    { background: transparent; box-shadow: inset 0 0 0 1.5px var(--presence-offline); }
 .au-dot[data-presence='online'],
 .au-dot[data-presence='busy'] {
   animation: au-pulse 2.4s var(--ease-out) infinite;

@@ -53,6 +53,7 @@ import { createProviderKeyStore } from './providerKeys.js';
 import { hardenFile, hardenExistingData, ensureSecureDir, SECURE_FILE_MODE } from './storage/securePaths.js';
 import { checkDataAccess, formatAccessProblems, describeStorageError } from './storage/dataAccess.js';
 import { isTextAttachment, readAttachmentText, buildAttachmentPrompt, attachmentTokenHint } from './attachmentText.js';
+import { installEgressGuard, loadGoDark, setGoDark, isGoDark, EgressBlockedError, egressAllowed } from './egress.js';
 import { commandExists, runCommand, extractAudioTrack } from './services/proc.js';
 import {
   WHISPER_MODEL_CATALOG, getWhisperModelsDir, getInstalledWhisperModelIds,
@@ -63,6 +64,11 @@ import { createAgentRouter } from './agent/routes.js';
 import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
 import { shouldSuppressReminder, buildReminderWebhookHeaders } from './intelLedgerReminderUtils.js';
 import { expandHome } from './paths.js';
+
+// Go Dark is enforced here, below every route: while it is on, fetch() refuses
+// anything that is not this machine or the local network.
+await loadGoDark(dirname(config.chatStorePath));
+installEgressGuard();
 
 const app = express();
 const upload = multer({
@@ -906,13 +912,20 @@ app.get('/api/providers/health', async (req, res) => {
   // Fall back to the key the backend holds. The app no longer sends one, so
   // without this a health check for a cloud provider would always report
   // unreachable even with a key configured.
+  // The env OpenAI key is only a fallback for OpenAI-style endpoints. It used to
+  // be sent to every cloud provider, so xAI or Groq received your OpenAI key.
   const apiKey = String(
     req.get('x-provider-key')
     || req.query?.apiKey
     || providerKeys.get(String(req.query?.provider || config.aiProvider))
-    || config.openAIApiKey
+    || ((provider === 'openai' || provider === 'openai-compatible') ? config.openAIApiKey : '')
     || ''
   ).trim();
+
+  if (normalizedBase && !egressAllowed(normalizedBase)) {
+    res.json({ ok: true, provider, reachable: false, dark: true, baseUrl: normalizedBase, hint: 'Go Dark is on.' });
+    return;
+  }
 
   if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas') && !apiKey) {
     res.status(400).json({
@@ -1338,13 +1351,25 @@ app.post('/api/voice/transcribe', upload.single('audio'), async (req, res) => {
   }
 });
 
+app.get('/api/go-dark', (_req, res) => {
+  res.json({ on: isGoDark() });
+});
+
+app.post('/api/go-dark', async (req, res) => {
+  try {
+    res.json({ on: await setGoDark(req.body?.on === true) });
+  } catch (error) {
+    res.status(500).json({ error: describeStorageError(error, 'go-dark.json') });
+  }
+});
+
 app.get('/api/models', async (req, res) => {
   const provider = req.query.provider || config.aiProvider;
   // Kick the suggested-model catalog refresh here rather than on a timer: this
   // is the moment someone is about to look at the list. It is fire and forget,
   // rate limited internally, and skipped entirely under Go Dark, so it never
   // delays the response and never leaks under lockdown.
-  void refreshCatalog({ localOnly: req.query.localOnly === '1' || req.query.localOnly === 'true' });
+  void refreshCatalog({ localOnly: isGoDark() || req.query.localOnly === '1' || req.query.localOnly === 'true' });
   const overrideBaseUrl = typeof req.query.baseUrl === 'string' ? req.query.baseUrl.trim() : '';
   // Prefer the key from a header (kept out of URLs/logs); fall back to query for
   // backward compatibility with older clients.
@@ -1717,6 +1742,9 @@ app.get('/api/models/install-jobs/:jobId', async (req, res) => {
 });
 
 app.post('/api/models/install-jobs', async (req, res) => {
+  if (isGoDark()) {
+    return res.status(403).json({ error: 'Go Dark is on: downloading a model would reach the internet. Turn Go Dark off to install models.' });
+  }
   const modelId = String(req.body?.modelId || '').trim().toLowerCase();
   if (!modelId || !SAFE_MODEL_RE.test(modelId)) {
     return res.status(400).json({ error: 'Invalid model ID' });
@@ -1767,7 +1795,7 @@ app.get('/api/models/registry-lookup', async (req, res) => {
   if (!id.trim()) return res.status(400).json({ error: 'id is required' });
   // A registry lookup is egress. Under Go Dark it does not happen, and the
   // field simply stops offering the hint.
-  if (req.query.localOnly === '1' || req.query.localOnly === 'true') {
+  if (isGoDark() || req.query.localOnly === '1' || req.query.localOnly === 'true') {
     return res.json({ status: 'unknown', reason: 'Go Dark is on, so the registry was not contacted.' });
   }
   res.json(await lookupModel(id));
@@ -1775,6 +1803,9 @@ app.get('/api/models/registry-lookup', async (req, res) => {
 
 app.post('/api/models/pull', async (req, res) => {
   const { modelId } = req.body || {};
+  if (isGoDark()) {
+    return res.status(403).json({ error: 'Go Dark is on: downloading a model would reach the internet. Turn Go Dark off to install models.' });
+  }
   if (!modelId || !SAFE_MODEL_RE.test(modelId)) {
     return res.status(400).json({ error: 'Invalid model ID' });
   }
@@ -1951,6 +1982,10 @@ app.post('/api/remote/connect', guardRemote, async (req, res) => {
   if (type === 'ssh') {
     if (!host || typeof host !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(host.trim())) {
       return res.status(400).json({ error: 'Invalid hostname' });
+    }
+    // LAN devices (the SRX, the Pi) stay reachable under Go Dark; public hosts do not.
+    if (!egressAllowed(`ssh://${host.trim()}`)) {
+      return res.status(403).json({ error: `Go Dark is on: ${host.trim()} is not on this machine or the local network.` });
     }
     if (!user || typeof user !== 'string') {
       return res.status(400).json({ error: 'user is required' });
@@ -2573,7 +2608,7 @@ app.post('/api/web-search', async (req, res) => {
   // app could leak: it is the user's raw message text, sent to a third party.
   // The client-side check only covered remote MODEL providers, so searching with
   // a local model selected still reached out. Enforce it here as well.
-  if (localOnly === true) {
+  if (localOnly === true || isGoDark()) {
     res.status(403).json({ error: 'Go Dark is on: web search is disabled because it would send your query to a third-party service.' });
     return;
   }
@@ -2900,7 +2935,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   // Go Dark (local-only lockdown): hard-block any remote provider before a single
   // byte leaves the machine. The frontend also greys these out, but this is the
   // real guarantee - the promise is enforced here, in the send path.
-  if (localOnly === true) {
+  if (localOnly === true || isGoDark()) {
     const activeProvider = provider || config.aiProvider;
     // Judged by resolved host, not by provider ID: openai-compatible, vllm and
     // llamacpp accept an arbitrary base URL, so any of them can point at a cloud
@@ -3598,6 +3633,14 @@ app.post('/mcp', makeMcpAuthGuard(mcpToken), mcpServerHandler);
 // Autonomous agent runs. Behind the same privileged guard as remote control:
 // a run can execute shell commands unattended for hours, so it is emphatically
 // not something an unauthenticated local caller should be able to start.
+app.use((err, _req, res, next) => {
+  if (err instanceof EgressBlockedError && !res.headersSent) {
+    res.status(403).json({ error: err.message, goDark: true });
+    return;
+  }
+  next(err);
+});
+
 app.use('/api/agent', createAgentRouter({
   config,
   streamWithProvider,

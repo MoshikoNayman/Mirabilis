@@ -15,6 +15,7 @@ import { resolveEffort, EFFORT_PROFILES, EFFORT_ORDER, isAgenticEffort } from '.
 import { createToolRegistry, TOOL_POLICIES } from './tools.js';
 import { createModelAdapter } from './modelAdapter.js';
 import { classifyProviderScope } from '../providerScope.js';
+import { isGoDark } from '../egress.js';
 import { createRunAuditor, pruneRunAudits, readRunAudit } from './auditLog.js';
 import { createRunStore } from './runStore.js';
 import { getFsRoot, safeResolvePath } from './sandbox.js';
@@ -217,7 +218,7 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
     }
     // Go Dark applies to an agent exactly as it applies to a chat turn, and
     // matters more: a long run makes many calls.
-    if (localOnly === true) {
+    if (localOnly === true || isGoDark()) {
       const scope = classifyProviderScope(provider || config.aiProvider, providerBaseUrl);
       if (scope.offDevice) {
         res.status(403).json({ error: `Go Dark is on - ${scope.reason} Pick a local model or turn Go Dark off.` });

@@ -30,7 +30,8 @@ export const PRESENCE_LABELS = {
   needkey: 'Needs API key',
   busy: 'Streaming',
   offline: 'Offline',
-  unknown: 'Checking…'
+  dark: 'Dark',
+  unknown: 'Checking...'
 };
 
 // Model Warmth: which Ollama models are currently loaded in memory (warm in
@@ -84,6 +85,9 @@ export async function probeProvider(id, { signal } = {}) {
     );
     const data = await res.json().catch(() => ({}));
     const hint = data?.hint || data?.error || data?.reason || data?.message || '';
+
+    // Go Dark: the backend refused to contact it.
+    if (data?.dark === true) return 'dark';
 
     // Healthy in any of the shapes the backend uses.
     if (

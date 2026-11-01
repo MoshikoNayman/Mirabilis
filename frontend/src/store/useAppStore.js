@@ -60,20 +60,39 @@ let state = {
   toasts: []
 };
 
-// The desktop shell needs to know about Go Dark.
-//
-// Go Dark is enforced here and in the backend send path, but the Electron main
-// process sits outside both, and it is the thing that would contact the update
-// server. It refuses to check until this reports false, so an unreported state
-// is treated as locked down. That is also why this is called on load and not
-// only on toggle: without the initial report, updates would never be checked.
+// The desktop updater runs outside the backend and checks for updates only
+// after this reports that Go Dark is off.
 function reportLocalOnly(on) {
   if (typeof window === 'undefined') return;
   try { window.electron?.setLocalOnly?.(on === true); } catch { /* not the desktop app */ }
 }
 
-/** Publish the current lockdown state to the desktop shell. */
-export function publishGoDark() {
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
+
+/** Tell the backend, which enforces Go Dark for every outbound call. */
+async function pushGoDark(on) {
+  try {
+    await fetch(`${API_BASE}/api/go-dark`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ on: on === true })
+    });
+  } catch { /* backend not up yet: publishGoDark reconciles on next load */ }
+}
+
+/**
+ * Reconcile with the backend on load, then tell the desktop shell.
+ * If either side says on, it is on: an unreachable backend must not turn it off.
+ */
+export async function publishGoDark() {
+  let backendOn = null;
+  try {
+    const res = await fetch(`${API_BASE}/api/go-dark`);
+    if (res.ok) backendOn = (await res.json())?.on === true;
+  } catch { /* backend not reachable */ }
+  const on = state.goDark || backendOn === true;
+  if (on !== state.goDark) appStore.setGoDark(on, { sync: false });
+  if (backendOn !== null && backendOn !== on) await pushGoDark(on);
   reportLocalOnly(state.goDark);
 }
 
@@ -257,11 +276,12 @@ export const appStore = {
     state.workspaceOpen = false;
     emit();
   },
-  setGoDark(on) {
+  setGoDark(on, { sync = true } = {}) {
     state.goDark = !!on;
     if (typeof window !== 'undefined') {
       try { window.localStorage.setItem(GO_DARK_KEY, on ? '1' : '0'); } catch { /* ignore */ }
     }
+    if (sync) void pushGoDark(state.goDark);
     reportLocalOnly(state.goDark);
     emit();
   },
