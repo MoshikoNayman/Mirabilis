@@ -370,3 +370,13 @@ test('an attached text file reaches the model, not just its name', async () => {
   const stored = (await getChat(chatId)).messages.find((m) => m.type === 'attachments');
   assert.equal(stored.content, 'Uploaded 1 file: srx300.conf', 'the transcript keeps the short line');
 });
+
+test('without a search key, a technical question gets no news headlines', async () => {
+  const res = await fetch(`${baseUrl}/api/web-search`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: 'verify this SRX NAT rule' })
+  });
+  const body = await res.json();
+  assert.equal(body.needsKey, true);
+  assert.deepEqual(body.sources, []);
+});

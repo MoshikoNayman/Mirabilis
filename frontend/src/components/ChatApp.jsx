@@ -67,6 +67,15 @@ const TOOL_POLICY_OPTIONS = [
   { value: 'full',      label: 'Full', hint: 'can run commands' }
 ];
 
+/** First line of the message, code removed, short enough to be a search query. */
+function searchQueryFrom(text) {
+  const plain = String(text || '').replace(/```[\s\S]*?```/g, ' ').trim();
+  const firstLine = plain.split('\n').map((l) => l.trim()).find(Boolean) || '';
+  if (firstLine.length <= 200) return firstLine;
+  const cut = firstLine.slice(0, 200);
+  return cut.slice(0, cut.lastIndexOf(' ') > 120 ? cut.lastIndexOf(' ') : 200);
+}
+
 function safeStorageGet(key, fallback = null) {
   try {
     if (typeof window === 'undefined') return fallback;
@@ -1495,8 +1504,14 @@ export default function ChatApp() {
   const [isDragOverChat, setIsDragOverChat] = useState(false);
   const [deepWebEnabled, setDeepWebEnabled] = useState(() => {
     if (typeof window !== 'undefined') {
-      const saved = safeStorageGet('local-ai-deep-web-enabled');
-      return saved === null ? true : saved === 'true'; // default ON
+      // Off by default. Earlier builds defaulted it on and saved that, so the
+      // saved value is reset once.
+      if (safeStorageGet('mirabilis-web-default-v2') !== '1') {
+        safeStorageSet('mirabilis-web-default-v2', '1');
+        safeStorageSet('local-ai-deep-web-enabled', 'false');
+        return false;
+      }
+      return safeStorageGet('local-ai-deep-web-enabled') === 'true';
     }
     return true;
   });
@@ -5369,25 +5384,30 @@ export default function ChatApp() {
       setStatusText('Searching the web...');
       setWebSearchStatus('searching');
       try {
+        const query = searchQueryFrom(content);
         const payload = await api('/api/web-search', {
           method: 'POST',
-          body: JSON.stringify({ query: content, maxResults: 5, localOnly: appStore.getGoDark() })
+          body: JSON.stringify({ query, maxResults: 5, localOnly: appStore.getGoDark() })
         });
 
         const sources = Array.isArray(payload.sources) ? payload.sources : [];
-        if (sources.length > 0) {
+        if (payload.needsKey) {
+          appStore.toast(payload.error, { kind: 'info' });
+          setWebSearchStatus('idle');
+        } else if (sources.length > 0) {
           const context = sources
             .map((item, index) => `${index + 1}. ${item.title || 'Untitled'}\nURL: ${item.url}\nSnippet: ${item.snippet || ''}`)
             .join('\n\n');
           const answerHint = payload.answer ? `High-level answer: ${payload.answer}\n\n` : '';
+          // Appended, so effort, canvas and remote notes added above are kept.
           outboundContent = [
-            content,
+            outboundContent,
             '',
-            'Use this web research context when relevant. Prefer these sources over prior assumptions.',
-            'Always cite exact source URLs from this context when making factual claims.',
+            `Web results for "${query}". Use them when relevant and cite their URLs.`,
             '',
             answerHint + context
           ].join('\n');
+          setStatusText(`Searched: ${query}`);
           setWebSearchStatus('idle');
         } else {
           // Search succeeded but no results - treat as soft error

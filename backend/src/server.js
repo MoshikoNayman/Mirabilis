@@ -2656,6 +2656,17 @@ app.post('/api/web-search', async (req, res) => {
       return;
     }
 
+    // Without a search key, only news questions are answered, from RSS feeds.
+    // Anything else would get today's headlines attached to a technical answer.
+    if (!/\b(news|headlines?|breaking|bbc|guardian|cnn|reuters|fox ?news|hacker ?news|hn)\b/i.test(query)) {
+      res.json({
+        sources: [],
+        needsKey: true,
+        error: 'Web search needs a Tavily API key (set TAVILY_API_KEY). News questions work without one.'
+      });
+      return;
+    }
+
     // ── RSS news feed fallback (free, no API key required) ───────────────
     // Maps keywords in the query to the relevant outlet's RSS feed.
     const NEWS_FEEDS = {
@@ -2728,8 +2739,8 @@ app.post('/api/web-search', async (req, res) => {
         const hay = `${item.title} ${item.snippet}`.toLowerCase();
         item.score = terms.reduce((acc, t) => acc + (hay.includes(t) ? 1 : 0), 0);
       }
-      const relevant = collected.filter((i) => i.score > 0);
-      if (relevant.length) collected = relevant;
+      // Unrelated headlines are worse than none.
+      collected = collected.filter((i) => i.score > 0);
     }
 
     // De-dupe by title, sort by score (then keep feed order), cap to limit.
