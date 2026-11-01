@@ -584,8 +584,8 @@ function ensureDeps() {
 
   const venvUnix = path.join(IMAGE_SERVICE_DIR, '.venv', 'bin', 'python');
   const venvWin = path.join(IMAGE_SERVICE_DIR, '.venv', 'Scripts', 'python.exe');
-  if (!fs.existsSync(venvUnix) && !fs.existsSync(venvWin)) {
-    throw new Error('Python environment not set up. Run: node run.js install');
+  if (!skipImageService() && !fs.existsSync(venvUnix) && !fs.existsSync(venvWin)) {
+    throw new Error('Python environment not set up. Run: node run.js install, or start with --no-image');
   }
 }
 
