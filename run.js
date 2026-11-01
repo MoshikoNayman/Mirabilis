@@ -81,7 +81,7 @@ function printStartupSummary(provider, verbose) {
   statusLine('INFO', `Active provider: ${provider}`);
   statusLine('INFO', 'Frontend: http://localhost:3000');
   statusLine('INFO', 'Backend:  http://localhost:4000');
-  statusLine('INFO', 'Image:    http://127.0.0.1:7860');
+  if (!skipImageService()) statusLine('INFO', 'Image:    http://127.0.0.1:7860');
   statusLine('INFO', `State file: ${RUN_STATE_PATH}`);
   if (verbose) {
     statusLine('INFO', `Logs: ${path.join(os.tmpdir(), 'backend.log')}, ${path.join(os.tmpdir(), 'frontend.log')}, ${path.join(os.tmpdir(), 'image-service.log')}`);
@@ -94,17 +94,52 @@ function printStartupSummary(provider, verbose) {
 }
 
 function usage() {
-  process.stdout.write(`Usage: node run.js [provider|command] [args] [--log] [--verbose] [--prod-ui]\n\nProviders:\n  ui                 - Start app and choose provider from UI (default)\n  ollama             - Use Ollama provider\n  openai-compatible  - Use llama-server as OpenAI-compatible provider\n  koboldcpp          - Use KoboldCpp provider\n\nCommands:\n  stop               - Stop processes started by launcher (PID-based); fallback to pattern kill if needed\n  restart [provider] - Stop then start again (provider optional, default: ui)\n  doctor             - Validate environment, binaries, and service reachability\n  logs               - Tail live logs from backend, frontend, and image-service\n  install            - Install dependencies (pure JavaScript, no shell needed)\n  uninstall          - Remove dependencies and caches\n\nFlags:\n  --log              - Print live backend/MCP logs to terminal and write audit files\n  --verbose          - Print richer launch diagnostics and phase summaries\n  --no-image         - Skip the image service (torch/diffusers). Everything except
-                       image generation works, and a first run is far faster.
-  --no-ollama        - Do not auto-install Ollama (for cloud-only setups).
-  --dev-ui           - Force frontend dev mode (next dev, hot reload)\n  --prod-ui          - Force frontend production mode (next start, requires build)\n\nEnvironment:\n  MIRABILIS_THREADS  - Override CPU threads for llama-server/koboldcpp (default: all logical cores)\n\nExample:\n  node run.js\n  node run.js restart ui\n  node run.js --prod-ui\n  node run.js ollama\n  node run.js openai-compatible --log --verbose\n  node run.js doctor\n  node run.js logs\n  node run.js restart koboldcpp --log\n  node run.js install\n  node run.js uninstall\n  node run.js stop\n\n`);
+  process.stdout.write(`Usage: node run.js [mode] [flags]
+
+Modes:
+  (none) | ui        Start the app; pick the provider in the UI (default)
+  dev                Same, with hot reload for frontend and backend
+  ollama             Start with Ollama
+  openai-compatible  Start with llama-server
+  koboldcpp          Start with KoboldCpp
+  install            Install or repair dependencies
+  doctor             Check the install and the data folder
+  logs               Tail backend, frontend and image-service logs
+  stop               Stop everything the launcher started
+  restart [mode]     Stop, then start
+  uninstall          Remove dependencies and caches
+
+Flags:
+  --no-image         Skip the image service (torch/diffusers, several GB)
+  --no-ollama        Do not install or start Ollama (cloud providers only)
+  --all-engines      Also start llama-server and KoboldCpp in ui mode
+  --dev-ui           Frontend hot reload only
+  --prod-ui          Production frontend (the default)
+  --log              Print live backend and MCP logs
+  --verbose          More startup detail
+
+Environment:
+  MIRABILIS_DATA_DIR  Data folder (default: ../mirabilis-data)
+  MIRABILIS_THREADS   CPU threads for llama-server and KoboldCpp
+
+Examples:
+  node run.js
+  node run.js --no-image
+  node run.js dev
+  node run.js doctor
+  node run.js stop
+`);
 }
+
+// Flags read elsewhere through process.argv; they must never be taken as the mode.
+const PASSTHROUGH_FLAGS = new Set(['--no-image', '--no-ollama', '--all-engines']);
 
 function parseArgs(argv) {
   let logEnabled = false;
   let verbose = false;
-  let devUi = true;
+  let devUi = false;
   let prodUi = false;
+  let devBackend = false;
   const filtered = [];
   for (const arg of argv) {
     if (arg === '--log') {
@@ -117,18 +152,58 @@ function parseArgs(argv) {
     } else if (arg === '--prod-ui') {
       prodUi = true;
       devUi = false;
+    } else if (PASSTHROUGH_FLAGS.has(arg)) {
+      // handled by skipImageService(), skipOllama(), startAllEngines()
     } else {
       filtered.push(arg);
     }
   }
+  // `node run.js dev`: hot reload for the frontend and the backend.
+  if (filtered[0] === 'dev') {
+    filtered.shift();
+    devUi = true;
+    prodUi = false;
+    devBackend = true;
+  }
   const mode = filtered[0] || 'ui';
   const arg = filtered[1] || '';
   const extraArgs = filtered.slice(1);
-  return { mode, arg, extraArgs, logEnabled, verbose, devUi, prodUi };
+  return { mode, arg, extraArgs, logEnabled, verbose, devUi, prodUi, devBackend };
 }
 
 function hasFrontendBuild() {
   return fs.existsSync(path.join(FRONTEND_DIR, '.next', 'BUILD_ID'));
+}
+
+/** Newest modification time under a directory, skipping build output. */
+function newestMtime(dir) {
+  let newest = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    let entries;
+    try { entries = fs.readdirSync(cur, { withFileTypes: true }); } catch { continue; }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === '.next' || e.name.startsWith('.')) continue;
+      const full = path.join(cur, e.name);
+      if (e.isDirectory()) stack.push(full);
+      else {
+        try { newest = Math.max(newest, fs.statSync(full).mtimeMs); } catch { /* raced */ }
+      }
+    }
+  }
+  return newest;
+}
+
+/** A production build older than the source would serve yesterday's UI. */
+function frontendBuildIsCurrent() {
+  if (!hasFrontendBuild()) return false;
+  const built = fs.statSync(path.join(FRONTEND_DIR, '.next', 'BUILD_ID')).mtimeMs;
+  const inputs = [newestMtime(path.join(FRONTEND_DIR, 'src')), newestMtime(path.join(FRONTEND_DIR, 'public'))];
+  for (const f of ['package.json', 'package-lock.json', 'next.config.mjs', 'next.config.js', 'tailwind.config.js', 'postcss.config.js']) {
+    try { inputs.push(fs.statSync(path.join(FRONTEND_DIR, f)).mtimeMs); } catch { /* absent */ }
+  }
+  return built >= Math.max(...inputs);
 }
 
 function normalizeProvider(raw) {
@@ -622,6 +697,11 @@ async function ensureOllamaModel() {
 //
 // Pinned by default so an install is reproducible and nobody silently runs
 // whatever upstream published this morning. Override to move to a newer build.
+/** llama-server and KoboldCpp are opt-in at startup; Ollama covers the default case. */
+function startAllEngines() {
+  return process.env.MIRABILIS_ALL_ENGINES === '1' || process.argv.includes('--all-engines');
+}
+
 /** A local engine is not needed by someone using only cloud providers. */
 function skipOllama() {
   return process.env.MIRABILIS_SKIP_OLLAMA === '1'
@@ -1543,6 +1623,27 @@ async function runDoctor() {
   add('backend node_modules', fs.existsSync(path.join(BACKEND_DIR, 'node_modules')), path.join(BACKEND_DIR, 'node_modules'));
   add('frontend node_modules', fs.existsSync(path.join(FRONTEND_DIR, 'node_modules')), path.join(FRONTEND_DIR, 'node_modules'));
 
+  // Files owned by another account (usually root, after a sudo launch) make the
+  // app fail on first use with EACCES.
+  const dataDir = process.env.MIRABILIS_DATA_DIR || path.resolve(ROOT_DIR, '..', 'mirabilis-data');
+  if (fs.existsSync(dataDir)) {
+    const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+    const blocked = [];
+    for (const name of fs.readdirSync(dataDir)) {
+      const full = path.join(dataDir, name);
+      try {
+        const st = fs.statSync(full);
+        if (uid !== null && st.uid !== uid) { blocked.push(full); continue; }
+        if (st.isFile()) fs.accessSync(full, fs.constants.R_OK | fs.constants.W_OK);
+      } catch { blocked.push(full); }
+    }
+    add('data folder is yours and writable', blocked.length === 0, blocked.length === 0
+      ? dataDir
+      : `${blocked.length} item(s) not writable, e.g. ${blocked[0]}. Fix: sudo chown -R "$(id -un)" "${dataDir}"`);
+  } else {
+    info('data folder', false, `${dataDir} (created on first start)`);
+  }
+
   const pyPath = imagePythonPath();
   // Optional: only image generation needs it (see --no-image).
   info('image-service python venv', fs.existsSync(pyPath), pyPath);
@@ -1653,7 +1754,7 @@ function cleanup() {
 }
 
 async function main() {
-  const { mode, arg, extraArgs, logEnabled, verbose, devUi, prodUi } = parseArgs(process.argv.slice(2));
+  const { mode, arg, extraArgs, logEnabled, verbose, devUi, prodUi, devBackend } = parseArgs(process.argv.slice(2));
   const uiDevMode = devUi && !prodUi;
   process.env.MIRABILIS_LOG = logEnabled ? '1' : '0';
   process.env.MIRABILIS_VERBOSE = verbose ? '1' : '0';
@@ -1719,14 +1820,16 @@ async function main() {
 
   await withPhase('Preflight', async () => {
     ensureDeps();
-    if (!uiDevMode && !hasFrontendBuild()) {
-      statusLine('INFO', 'Frontend production build missing. Running npm run build...');
+    if (!uiDevMode && !frontendBuildIsCurrent()) {
+      statusLine('INFO', hasFrontendBuild()
+        ? 'Frontend source changed since the last build. Rebuilding (about a minute)...'
+        : 'Building the frontend (first run, about a minute)...');
       const buildCode = await runForeground(npmCommand(), npmArgs(['run', 'build']), FRONTEND_DIR);
       if (buildCode !== 0) {
         throw new Error('Frontend build failed. Run: cd frontend && npm run build');
       }
     }
-    await ensureImageServicePythonDeps();
+    if (!skipImageService()) await ensureImageServicePythonDeps();
     if (verbose) {
       statusLine('INFO', `Node: ${process.version}`);
       statusLine('INFO', `Threads: ${detectThreadCount()}`);
@@ -1751,31 +1854,33 @@ async function main() {
   await withPhase('Providers', async () => {
     if (provider === 'ui') {
       statusLine('INFO', 'Starting Mirabilis with provider selection in UI');
-      if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run node run.js.');
-      if (!(await ensureOllamaModel())) throw new Error('Could not ensure an Ollama model is available.');
-
-      let openaiReady = false;
-      let koboldReady = false;
-
-      try {
-        if (await startOpenAICompatible(threads)) {
-          env.OPENAI_BASE_URL = 'http://127.0.0.1:8000/v1';
-          openaiReady = true;
-        }
-      } catch {
-        openaiReady = false;
+      let ollamaState = 'skipped';
+      if (!skipOllama()) {
+        if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run node run.js, or use --no-ollama for cloud providers only.');
+        if (!(await ensureOllamaModel())) throw new Error('Could not ensure an Ollama model is available.');
+        ollamaState = 'ready';
       }
 
-      try {
-        if (await startKoboldCpp(threads)) {
-          env.KOBOLD_BASE_URL = 'http://127.0.0.1:5001/v1';
-          koboldReady = true;
-        }
-      } catch {
-        koboldReady = false;
+      // The other engines load the same small model a second and third time.
+      // Start them only when asked; the app can launch llama.cpp on demand.
+      let openaiReady = 'not started';
+      let koboldReady = 'not started';
+      if (startAllEngines()) {
+        try {
+          if (await startOpenAICompatible(threads)) {
+            env.OPENAI_BASE_URL = 'http://127.0.0.1:8000/v1';
+            openaiReady = 'ready';
+          } else openaiReady = 'unavailable';
+        } catch { openaiReady = 'unavailable'; }
+        try {
+          if (await startKoboldCpp(threads)) {
+            env.KOBOLD_BASE_URL = 'http://127.0.0.1:5001/v1';
+            koboldReady = 'ready';
+          } else koboldReady = 'unavailable';
+        } catch { koboldReady = 'unavailable'; }
       }
 
-      statusLine('INFO', `Provider status: ollama=ready openai-compatible=${openaiReady ? 'ready' : 'unavailable'} koboldcpp=${koboldReady ? 'ready' : 'unavailable'}`);
+      statusLine('INFO', `Provider status: ollama=${ollamaState} openai-compatible=${openaiReady} koboldcpp=${koboldReady}`);
     } else if (provider === 'ollama') {
       statusLine('INFO', 'Using Ollama provider');
       if (!(await ensureOllamaReady())) throw new Error('Ollama is not available and could not be started. Install Ollama and run node run.js.');
@@ -1815,7 +1920,9 @@ async function main() {
       url: 'http://127.0.0.1:4000/health',
       timeoutMs: 45000,
       logFile: backendLogFile,
-      spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', 'dev']), BACKEND_DIR, env, backendLogFile, logEnabled)
+      // --watch restarts the backend whenever a file under backend/ changes,
+      // which kills live agent runs. Only `node run.js dev` uses it.
+      spawnService: () => spawnLogged(npmCommand(), npmArgs(['run', devBackend ? 'dev' : 'start']), BACKEND_DIR, env, backendLogFile, logEnabled)
     });
     statusLine('OK', 'Backend: http://127.0.0.1:4000');
     await writeRunState({ provider: aiProvider, logging: logEnabled });

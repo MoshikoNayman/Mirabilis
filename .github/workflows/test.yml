@@ -132,6 +132,9 @@ jobs:
       - name: Doctor reports a healthy install
         run: node run.js doctor
 
+      - name: The app starts with the documented flags
+        run: node scripts/smoke-start.mjs --no-image --no-ollama
+
   # Dependency advisories. Fast, and needs no installs: --package-lock-only
   # audits the lockfile directly, which also keeps the desktop tree auditable
   # without pulling down an Electron binary.
