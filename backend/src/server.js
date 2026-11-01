@@ -52,6 +52,7 @@ import { describeEngineError } from './engineErrors.js';
 import { createProviderKeyStore } from './providerKeys.js';
 import { hardenFile, hardenExistingData, ensureSecureDir, SECURE_FILE_MODE } from './storage/securePaths.js';
 import { checkDataAccess, formatAccessProblems, describeStorageError } from './storage/dataAccess.js';
+import { isTextAttachment, readAttachmentText, buildAttachmentPrompt, attachmentTokenHint } from './attachmentText.js';
 import { commandExists, runCommand, extractAudioTrack } from './services/proc.js';
 import {
   WHISPER_MODEL_CATALOG, getWhisperModelsDir, getInstalledWhisperModelIds,
@@ -3078,12 +3079,15 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   // from the newest message every turn (the previous behaviour) shifted the
   // front constantly and forced a full re-prefill of the whole history on every
   // single message.
+  // Text attachments are expanded into the prompt below, so the window has to
+  // count them, or a pasted config would push the system prompt out of context.
+  const attachmentCharBudget = Math.min(48000, Math.floor(historyBudget * 4 * 0.5));
   const windowed = selectHistoryWindow(chat.messages, {
     budgetTokens: historyBudget,
     startIndex: chat.historyStartIndex,
     maxMessages: MAX_HISTORY_MESSAGES,
     minMessages: 6,
-    estimateTokens
+    estimateTokens: (text, m) => estimateTokens(text) + attachmentTokenHint(m, attachmentCharBudget)
   });
   const selectedHistory = windowed.messages;
   const historyTokenBudget = windowed.tokens;
@@ -3094,7 +3098,16 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   for (const msg of selectedHistory) {
     const images = await collectMessageImages(msg);
     if (images.length) outgoingHasImages = true;
-    outgoingMessages.push({ role: msg.role, content: msg.content, ...(images.length ? { images } : {}) });
+    let content = msg.content;
+    if (msg.type === 'attachments') {
+      const texts = new Map();
+      for (const a of msg.attachments || []) {
+        const text = await readAttachmentText(uploadDir, a, SAFE_STORED_NAME);
+        if (text !== null) texts.set(a.storedName, text);
+      }
+      content = buildAttachmentPrompt(msg, texts, attachmentCharBudget);
+    }
+    outgoingMessages.push({ role: msg.role, content, ...(images.length ? { images } : {}) });
   }
 
   // Vision gate: only forward attached images to a model that can actually see
@@ -3496,13 +3509,15 @@ app.post('/api/chats/:chatId/attachments', upload.array('files', 10), async (req
 
     await writeFile(filePath, file.buffer);
 
-    attachments.push({
+    const entry = {
       name: file.originalname || 'file',
       storedName,
       mimeType: file.mimetype || 'application/octet-stream',
       size: Number(file.size || 0),
       url: `/api/uploads/${storedName}`
-    });
+    };
+    if (isTextAttachment(entry) && !file.buffer.subarray(0, 8192).includes(0)) entry.text = true;
+    attachments.push(entry);
   }
 
   const content = `Uploaded ${attachments.length} file${attachments.length > 1 ? 's' : ''}: ${attachments

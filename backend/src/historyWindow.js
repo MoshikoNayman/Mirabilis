@@ -24,7 +24,7 @@ const EVICT_TO_FRACTION = 0.75;
  * @param {number} [opts.startIndex] previously anchored start index
  * @param {number} [opts.maxMessages] hard cap on message count
  * @param {number} [opts.minMessages] always keep at least this many recent messages
- * @param {(text: string|undefined) => number} opts.estimateTokens
+ * @param {(text: string|undefined, message?: any) => number} opts.estimateTokens
  * @returns {{ startIndex: number, messages: Array<any>, tokens: number, evicted: boolean }}
  */
 export function selectHistoryWindow(messages, {
@@ -43,7 +43,7 @@ export function selectHistoryWindow(messages, {
   if (start < 0) start = 0;
   if (start > list.length - 1) start = Math.max(0, list.length - 1);
 
-  const cost = list.map((m) => estimateTokens(m?.content));
+  const cost = list.map((m) => estimateTokens(m?.content, m));
   const sumFrom = (i) => {
     let total = 0;
     for (let k = i; k < list.length; k += 1) total += cost[k];

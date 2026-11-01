@@ -35,6 +35,7 @@ const ndjson = (obj) => JSON.stringify(obj) + '\n';
 
 /** Fake Ollama. `mode` decides how /api/chat behaves for the next call. */
 let engineMode = 'ok';
+let lastChatBody = null;
 let engine, engineUrl;
 
 async function startEngine() {
@@ -48,6 +49,9 @@ async function startEngine() {
       return res.end(JSON.stringify({ model_info: { 'general.context_length': 8192 }, capabilities: ['completion'] }));
     }
     if (req.url.startsWith('/api/chat')) {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => { try { lastChatBody = JSON.parse(raw); } catch { lastChatBody = null; } });
       res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
       if (engineMode === 'mid-stream-error') {
         res.write(ndjson({ message: { content: 'partial' } }));
@@ -60,7 +64,7 @@ async function startEngine() {
           if (n >= 20 || res.writableEnded) { clearInterval(timer); try { res.end(); } catch {} return; }
           res.write(ndjson({ message: { content: `chunk${n++} ` } }));
         }, 60);
-        req.on('close', () => clearInterval(timer));
+        res.on('close', () => clearInterval(timer));
         return;
       }
       if (engineMode === 'empty') {
@@ -349,4 +353,20 @@ test('a client that disconnects mid-stream keeps its partial reply, marked trunc
   assert.ok(replies[0].content.length > 0, 'it should contain the tokens that were produced');
   assert.equal(replies[0].truncated, true, 'it must be flagged as cut short');
   assert.equal(replies[0].stopReason, 'client-disconnect');
+});
+
+test('an attached text file reaches the model, not just its name', async () => {
+  engineMode = 'ok';
+  const chatId = await newChat();
+  const form = new FormData();
+  form.append('files', new Blob(['set system host-name FW1-SRX300\nset security zones security-zone trust\n']), 'srx300.conf');
+  const up = await fetch(`${baseUrl}/api/chats/${chatId}/attachments`, { method: 'POST', body: form });
+  assert.equal(up.status, 201);
+
+  await (await send(chatId, { content: 'what is the hostname?' })).text();
+
+  const sent = JSON.stringify(lastChatBody?.messages || []);
+  assert.match(sent, /FW1-SRX300/, 'the file contents must be in the prompt');
+  const stored = (await getChat(chatId)).messages.find((m) => m.type === 'attachments');
+  assert.equal(stored.content, 'Uploaded 1 file: srx300.conf', 'the transcript keeps the short line');
 });
