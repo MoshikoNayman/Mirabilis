@@ -23,7 +23,7 @@ export type Provider =
   | 'gpuaas';
 
 /** ICQ-style presence states rendered by the Buddy List / StatusOrb. */
-export type PresenceState = 'online' | 'away' | 'needkey' | 'busy' | 'offline' | 'unknown';
+export type PresenceState = 'online' | 'away' | 'needkey' | 'busy' | 'offline' | 'dark' | 'unknown';
 
 /** Provider metadata used for presence probing. */
 export interface ProviderMeta {
