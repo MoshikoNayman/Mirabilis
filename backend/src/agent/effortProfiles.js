@@ -37,7 +37,7 @@ const HOUR = 60 * MIN;
 
 /** @type {Record<string, EffortProfile>} */
 export const EFFORT_PROFILES = {
-  // ── Non-agentic: today's behaviour, preserved exactly. ────────────────────
+  // Non-agentic: today's behaviour, preserved exactly.
   // These stay single-shot on purpose. Most messages are a question, not a job,
   // and putting a planning pass in front of "what does this flag do" would make
   // the app feel broken.
@@ -73,7 +73,7 @@ export const EFFORT_PROFILES = {
     styleHint: 'Effort: thorough. Work through the key considerations and give a complete, well-structured answer.'
   },
 
-  // ── Agentic: the loop runs, bounded by these numbers. ─────────────────────
+  // Agentic: the loop runs, bounded by these numbers.
   high: {
     id: 'high', label: 'High effort',
     description: 'Plan, execute with tools, validate, repair. Minutes.',

@@ -31,7 +31,7 @@ async function upstream(handler) {
 const ndjson = (obj) => JSON.stringify(obj) + '\n';
 const sse = (obj) => `data: ${JSON.stringify(obj)}\n\n`;
 
-// ── Ollama ───────────────────────────────────────────────────────────────────
+// Ollama
 
 test('ollama: streams tokens from NDJSON frames', async () => {
   const up = await upstream((_req, res) => {
@@ -158,7 +158,7 @@ test('ollama: a non-2xx response throws with the upstream detail', async () => {
   } finally { await up.close(); }
 });
 
-// ── OpenAI-compatible (llama-server, vLLM, KoboldCpp, cloud) ─────────────────
+// OpenAI-compatible (llama-server, vLLM, KoboldCpp, cloud)
 
 test('openai-compatible: streams tokens from SSE delta frames', async () => {
   const up = await upstream((_req, res) => {
@@ -237,7 +237,7 @@ test('openai-compatible: an aborted stream resolves quietly rather than throwing
   } finally { await up.close(); }
 });
 
-// ── OOM detection and memory memory ─────────────────────────────────────────
+// OOM detection and memory memory
 
 test('ollama: recognizes the OOM wordings Ollama actually emits', async () => {
   // Each of these is a real failure mode. If the pattern misses one, the retry
@@ -384,7 +384,7 @@ test('a remembered fit caps a larger request but respects a smaller one', async 
   } finally { await up.close(); }
 });
 
-// ── Anthropic ───────────────────────────────────────────────────────────────
+// Anthropic
 
 const anthropicFrames = (frames) => frames.map((f) => `event: ${f.type}\ndata: ${JSON.stringify(f)}\n\n`).join('');
 

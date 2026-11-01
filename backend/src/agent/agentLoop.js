@@ -4,9 +4,9 @@
 //
 // Shape of a run:
 //
-//   plan ──> [ decide ──> act ──> observe ] * ──> validate ──┬─ pass ──> done
-//              ^                                              │
-//              └───────────── repair (with the critique) ─────┘
+//   plan -> [ decide -> act -> observe ]* -> validate -> pass -> done
+//                ^                              |
+//                +---- repair (with critique) --+
 //
 // Two properties matter more than anything else here.
 //
@@ -108,7 +108,7 @@ export async function runAgent({
   emit('run-start', { goal, effort: profile.id, budget: budget.snapshot(), policy: registry.policy });
 
   try {
-    // ── plan ────────────────────────────────────────────────────────────────
+    // plan
     if (profile.plan) {
       emit('phase', { phase: 'plan' });
       plan = await ask([
@@ -130,7 +130,7 @@ export async function runAgent({
       emit('plan', { plan });
     }
 
-    // ── act / observe, with validation and repair ───────────────────────────
+    // act / observe, with validation and repair
     let repairNote = '';
     let validated = false;
 
@@ -232,7 +232,7 @@ export async function runAgent({
         continue;
       }
 
-      // ── tool call ─────────────────────────────────────────────────────────
+      // tool call
       let charged = true;
       try {
         budget.chargeToolCall();
@@ -253,7 +253,7 @@ export async function runAgent({
       repairNote = '';
     }
 
-    // ── wrap up ─────────────────────────────────────────────────────────────
+    // wrap up
     // Budget ran out mid-run: salvage the work rather than reporting a bare
     // failure. This is the difference between "your hour produced nothing" and
     // "here is what I established, and here is what is left".

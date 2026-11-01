@@ -16,7 +16,7 @@ test('a clean finish action parses', () => {
   assert.equal(a.summary, 'All done.');
 });
 
-// ── the ways real models actually reply ────────────────────────────────────
+// the ways real models actually reply
 
 test('a fenced json block parses', () => {
   const a = parseAgentAction('Sure, here is my next step:\n```json\n{"action":"tool","tool":"list_dir","args":{"path":"."}}\n```\n');
@@ -64,7 +64,7 @@ test('alternate argument keys are accepted', () => {
   assert.deepEqual(parseAgentAction('{"action":"tool","tool":"t","parameters":{"b":2}}').args, { b: 2 });
 });
 
-// ── genuine failures are reported, not guessed at ──────────────────────────
+// genuine failures are reported, not guessed at
 
 test('a reply with no JSON is invalid, with a usable message', () => {
   const a = parseAgentAction('I think we should probably read the config file first.');

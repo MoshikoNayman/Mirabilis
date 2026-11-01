@@ -278,15 +278,15 @@ function buildProfile({
 
   return {
     compute: {
-      label: `${backend} • ${coresLabel}${gpuClock ? ' @ ' + gpuClock : ''}`,
+      label: `${backend} | ${coresLabel}${gpuClock ? ' @ ' + gpuClock : ''}`,
       expanded: computeLines.join('\n')
     },
     logic: {
-      label: `${logicName || 'Unknown'} • ${cpuCores || 1}C/${cpuThreads || cpuCores || 1}T${cpuClock ? ' @ ' + cpuClock : ''}`,
+      label: `${logicName || 'Unknown'} | ${cpuCores || 1}C/${cpuThreads || cpuCores || 1}T${cpuClock ? ' @ ' + cpuClock : ''}`,
       expanded: logicLines.join('\n')
     },
     memory: {
-      label: `${memoryLimit} • ${resolvedMemType}${memorySpeed ? ' • ' + memorySpeed : ''}`,
+      label: `${memoryLimit} | ${resolvedMemType}${memorySpeed ? ' | ' + memorySpeed : ''}`,
       expanded: memoryLines.join('\n')
     },
     npu: npuLabel
@@ -368,7 +368,7 @@ async function getDarwinProfile() {
   } catch {}
 
   const neuralEngine = lookupAppleNeuralEngine(cpuModel);
-  const npuLabel = neuralEngine ? `NPU • ${neuralEngine}` : 'NPU • on-chip';
+  const npuLabel = neuralEngine ? `NPU | ${neuralEngine}` : 'NPU | on-chip';
   const npuExpanded = [
     'Apple Neural Engine',
     neuralEngine ? `Configuration: ${neuralEngine}` : null,
@@ -471,7 +471,7 @@ async function getLinuxProfile() {
 
   const npuSource = normalizeWhitespace(npuLspci || npuDevfs);
   const hasNpu = Boolean(npuSource);
-  const npuLabel = hasNpu ? 'NPU • detected' : null;
+  const npuLabel = hasNpu ? 'NPU | detected' : null;
   const npuExpanded = hasNpu
     ? ['Neural Processing Unit', `Device: ${npuSource}`, 'Workloads: local AI/ML inference'].join('\n')
     : null;
@@ -576,7 +576,7 @@ async function getWindowsProfile() {
     gpuMemoryType,
     systemMemoryType,
     cpuCaches,
-    npuLabel: hasNpu ? 'NPU • detected' : null,
+    npuLabel: hasNpu ? 'NPU | detected' : null,
     npuExpanded: hasNpu ? ['Neural Processing Unit', `Device: ${npuLine}`, 'Workloads: local AI/ML inference'].join('\n') : null
   });
 }

@@ -44,7 +44,7 @@ test('the most recent messages are always the ones kept', () => {
   );
 });
 
-// ── the point of the whole module: prefix stability ──────────────────────────
+// the point of the whole module: prefix stability
 
 test('the anchor holds still across turns, so the prompt prefix is reused', () => {
   // Simulate a real conversation: after eviction, keep adding turns and feeding
@@ -87,7 +87,7 @@ test('eviction frees a chunk at once rather than trimming one message', () => {
   );
 });
 
-// ── robustness against a rewritten history ──────────────────────────────────
+// robustness against a rewritten history
 
 test('a stale anchor past the end of a truncated history is clamped', () => {
   // Regenerate and branch both rewrite the array. A stale index must never
@@ -114,7 +114,7 @@ test('an empty history yields an empty window', () => {
   assert.equal(out.startIndex, 0);
 });
 
-// ── the guards that bound the window ────────────────────────────────────────
+// the guards that bound the window
 
 test('minMessages keeps recent turns even when a single message blows the budget', () => {
   // One enormous message must not evict the conversation down to nothing, or the

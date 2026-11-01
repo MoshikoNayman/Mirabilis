@@ -32,7 +32,7 @@ async function sandbox() {
   return dir;
 }
 
-// ── the happy path ──────────────────────────────────────────────────────────
+// the happy path
 
 test('the agent uses a tool, then finishes, and validation passes', async () => {
   const dir = await sandbox();
@@ -80,7 +80,7 @@ test('the tool actually ran: its real output reaches the transcript', async () =
     'the observation must be the real file contents, not a model hallucination');
 });
 
-// ── budget enforcement is the whole feature ────────────────────────────────
+// budget enforcement is the whole feature
 
 test('the iteration ceiling stops a model that never finishes', async () => {
   const dir = await sandbox();
@@ -142,7 +142,7 @@ test('an abort stops the run promptly', async () => {
   assert.ok(out.budget.iterations < 10);
 });
 
-// ── running out of budget must still produce useful work ───────────────────
+// running out of budget must still produce useful work
 
 test('an exhausted budget still returns a salvaged answer, not an empty failure', async () => {
   const dir = await sandbox();
@@ -169,7 +169,7 @@ test('an exhausted budget still returns a salvaged answer, not an empty failure'
   void call;
 });
 
-// ── validation and repair ──────────────────────────────────────────────────
+// validation and repair
 
 test('a failed validation triggers a repair that reaches the model', async () => {
   const dir = await sandbox();
@@ -234,7 +234,7 @@ test('validation is skipped when the profile does not ask for it', async () => {
   assert.ok(!model.calls.some((c) => c.purpose === 'validate'));
 });
 
-// ── robustness ─────────────────────────────────────────────────────────────
+// robustness
 
 test('an unparseable reply is corrected in-band and still costs an iteration', async () => {
   const dir = await sandbox();

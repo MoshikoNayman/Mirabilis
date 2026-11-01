@@ -1,7 +1,7 @@
-// frontend/src/components/shell/Toaster.jsx
 'use client';
 
 import { appStore, useAppStore } from '../../store/useAppStore';
+import { AlertIcon, CheckIcon, BellIcon } from '../ui/primitives';
 
 export default function Toaster() {
   const toasts = useAppStore((s) => s.toasts);
@@ -15,7 +15,10 @@ export default function Toaster() {
           onClick={() => appStore.dismissToast(t.id)}
           className="au-pop au-chrome au-hairline au-elev-3 pointer-events-auto flex items-center gap-2 rounded-[var(--r-pill)] px-4 py-2 text-[length:var(--text-xs)] font-medium text-[color:var(--text-main)]"
         >
-          {t.kind === 'error' ? '⚠️' : t.kind === 'success' ? '✓' : '🌼'} {t.message}
+          {t.kind === 'error' || t.kind === 'warn'
+            ? <AlertIcon size={13} />
+            : t.kind === 'success' ? <CheckIcon size={13} /> : <BellIcon size={13} />}
+          <span>{t.message}</span>
         </button>
       ))}
     </div>

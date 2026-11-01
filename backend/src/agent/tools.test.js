@@ -15,7 +15,7 @@ async function sandboxDir() {
   return dir;
 }
 
-// ── policy gate ─────────────────────────────────────────────────────────────
+// policy gate
 
 test('read-only is the default and withholds the mutating tools', async () => {
   const r = createToolRegistry();
@@ -46,7 +46,7 @@ test('an unknown tool name is reported, not thrown', async () => {
   assert.match(res.error, /Unknown tool/);
 });
 
-// ── the read tools ──────────────────────────────────────────────────────────
+// the read tools
 
 test('list_dir and read_file work inside the jail', async () => {
   const dir = await sandboxDir();
@@ -91,7 +91,7 @@ test('large output is truncated so one tool call cannot eat the context', async 
   assert.match(rd.result.note, /truncated/);
 });
 
-// ── the jail ────────────────────────────────────────────────────────────────
+// the jail
 
 test('paths cannot escape the configured root', async () => {
   const dir = await sandboxDir();
@@ -111,7 +111,7 @@ test('safeResolvePath rejects traversal and NUL bytes', () => {
   assert.ok(!safeResolvePath('a\0b', root).includes('\0'));
 });
 
-// ── mutation and execution ──────────────────────────────────────────────────
+// mutation and execution
 
 test('write_file writes and reports what it replaced', async () => {
   const dir = await sandboxDir();

@@ -107,7 +107,7 @@ test('sub-agents run in parallel, not one after another', async () => {
   assert.ok(peak >= 2, `expected concurrent sub-agents, peak was ${peak}`);
 });
 
-// ── the budget rules that stop fan-out being an escape hatch ───────────────
+// the budget rules that stop fan-out being an escape hatch
 
 test('the sub-agent cap is enforced and the surplus is reported as deferred', async () => {
   const dir = await sandbox();

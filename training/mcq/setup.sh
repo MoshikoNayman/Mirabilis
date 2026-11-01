@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
 #  MCQ Model Setup - Mirabilis AI
 #  Registers MCQ-Pro-12B, MCQ-Ultra-31B, and MCQ-Raw-8B into your local Ollama instance.
 #  Run once. Re-run anytime to rebuild after editing a Modelfile.
-# ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -33,7 +31,7 @@ if [[ "${MCQ_SKIP_ULTRA:-0}" == "1" ]]; then
   SKIP_ULTRA=1
 fi
 
-# ── Verify Ollama is running ──────────────────────────────────────────────────
+# Verify Ollama is running
 if ! command -v ollama >/dev/null 2>&1; then
   echo "✗  Ollama CLI not found. Install from https://ollama.com/download"
   exit 1
@@ -57,11 +55,11 @@ ensure_base_model() {
   fi
 }
 
-# ── Build a model from a Modelfile ───────────────────────────────────────────
+# Build a model from a Modelfile
 create() {
   local name=$1 file=$2 base=$3 size=$4
   echo ""
-  echo "  ┌─ $name"
+  echo " ┌ $name"
   echo "  │  Base : $base  ($size)"
   printf "  │  Status : "
 
@@ -82,7 +80,7 @@ create() {
     echo "     ollama pull $base"
     exit 1
   fi
-  echo "  └─ done"
+  echo " └ done"
 }
 
 echo ""
@@ -93,10 +91,10 @@ create "mcq-pro-12b"   "Modelfile.mcq-pro-12b"   "gemma3:12b"      "8.1 GB"
 
 if [[ "$SKIP_ULTRA" -eq 1 ]]; then
   echo ""
-  echo "  ┌─ mcq-ultra-31b"
+  echo " ┌ mcq-ultra-31b"
   echo "  │  Base : gemma4:31b (~20 GB)"
   echo "  │  Status : skipped (--skip-ultra/--lite)"
-  echo "  └─ done"
+  echo " └ done"
 else
   create "mcq-ultra-31b" "Modelfile.mcq-ultra-31b" "gemma4:31b"      "~20 GB"
 fi
@@ -105,10 +103,10 @@ create "mcq-raw-8b"    "Modelfile.mcq-raw-8b"    "dolphin3:latest"  "4.9 GB"
 
 echo ""
 if [[ "$SKIP_ULTRA" -eq 1 ]]; then
-  echo "  ✓  MCQ-Pro-12B and MCQ-Raw-8B are registered."
-  echo "  ✓  To add Ultra later: bash training/mcq/setup.sh"
+  echo "  ok  MCQ-Pro-12B and MCQ-Raw-8B are registered."
+  echo "  ok  To add Ultra later: bash training/mcq/setup.sh"
 else
-  echo "  ✓  All three MCQ models are registered."
+  echo "  ok  All three MCQ models are registered."
 fi
-echo "  ✓  Restart Mirabilis to see them in the model selector under 'MCQ'."
+echo "  ok  Restart Mirabilis to see them in the model selector under 'MCQ'."
 echo ""

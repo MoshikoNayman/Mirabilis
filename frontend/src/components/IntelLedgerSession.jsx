@@ -3,6 +3,7 @@
 
 'use client';
 
+import { ChevronRightIcon } from './ui/primitives';
 import { useState, useEffect, useMemo } from 'react';
 import InfoHint from './ui/InfoHint';
 
@@ -592,7 +593,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
             </div>
             <h1 className="text-lg font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">{session.title}</h1>
             <p className="text-sm text-[color:var(--text-muted)]">
-              {interactions.length} interactions · {signals.length} signals extracted · {actions.length} actions
+              {interactions.length} interactions | {signals.length} signals extracted | {actions.length} actions
             </p>
             <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-[10px] text-[color:var(--text-muted)]">
               <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Open {actionStatusCounts.open || 0}</span>
@@ -750,7 +751,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       <div key={job.id} className="rounded-lg border border-[var(--hairline)] px-3 py-2">
                         <div className="flex flex-wrap items-center gap-2 text-[11px]">
                           <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 font-semibold uppercase tracking-[0.08em]">{job.status || 'queued'}</span>
-                          <span className="text-[color:var(--text-muted)]">{job.phase || 'queued'} · {Number(job.progress || 0)}%</span>
+                          <span className="text-[color:var(--text-muted)]">{job.phase || 'queued'} | {Number(job.progress || 0)}%</span>
                         </div>
                         {job.error && (
                           <div className="mt-1 text-xs text-rose-600 dark:text-rose-300">{job.error}</div>
@@ -775,9 +776,9 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   >
                     <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-[color:var(--text-muted)] font-medium">
                       <span>{int.type}</span>
-                      {int.source_name && <span>· {int.source_name}</span>}
-                      {int.transcript_status && <span>· transcript {int.transcript_status}</span>}
-                      {int.media?.duration_sec ? <span>· {Math.round(int.media.duration_sec)}s</span> : null}
+                      {int.source_name && <span>| {int.source_name}</span>}
+                      {int.transcript_status && <span>| transcript {int.transcript_status}</span>}
+                      {int.media?.duration_sec ? <span>| {Math.round(int.media.duration_sec)}s</span> : null}
                     </div>
                     <div className="line-clamp-4 text-sm text-[color:var(--text-main)] whitespace-pre-wrap">{int.raw_content}</div>
 
@@ -913,7 +914,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                         <div className="text-xs text-[color:var(--text-muted)] mt-2">
                           Confidence: {(sig.confidence * 100).toFixed(0)}%
                           {sig.extracted_at && (
-                            <span className="ml-2">· {new Date(sig.extracted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                            <span className="ml-2">| {new Date(sig.extracted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
                           )}
                         </div>
                       </div>
@@ -984,7 +985,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                         Blocked urgent <span className="font-semibold">{actionInsights.blockedUrgent}</span>
                       </div>
                       <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
-                        Reminders ≤24h <span className="font-semibold">{actionInsights.remindersSoon}</span>
+                        Reminders within 24h <span className="font-semibold">{actionInsights.remindersSoon}</span>
                       </div>
                     </div>
                     {actions.map((action) => (
@@ -1063,7 +1064,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                                 onClick={() => setExpandedActionSource(isOpen ? null : action.id)}
                                 className="flex items-center gap-1 text-[10px] font-medium text-[color:var(--text-muted)] transition hover:text-accent dark:text-[color:var(--text-muted)] dark:hover:text-accent"
                               >
-                                <span className={`transition-transform ${isOpen ? 'rotate-90' : ''}`}>▶</span>
+                                <span className={`inline-flex transition-transform ${isOpen ? 'rotate-90' : ''}`}><ChevronRightIcon size={12} /></span>
                                 Source ({src.signal_type || action.source_signal_type})
                               </button>
                               {isOpen && (
@@ -1094,7 +1095,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
           {activeTab === 'audit' && (
             <div className="space-y-6">
               {auditLoading && (
-                <div className="text-sm text-[color:var(--text-muted)]">Loading audit data…</div>
+                <div className="text-sm text-[color:var(--text-muted)]">Loading audit data...</div>
               )}
               {!auditLoading && !auditSummary && !auditTrends && (
                 <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-5 py-8 text-center text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
@@ -1182,7 +1183,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                           <ul className="space-y-1">
                             {types.slice(0, 5).map((item) => (
                               <li key={item.event_type} className="flex items-center justify-between gap-2">
-                                <span className="truncate text-[11px] text-[color:var(--text-main)]">{item.event_type.replace(/\./g, ' › ')}</span>
+                                <span className="truncate text-[11px] text-[color:var(--text-main)]">{item.event_type.replace(/\./g, ' > ')}</span>
                                 <span className="shrink-0 text-[11px] font-semibold text-[color:var(--text-main)]">{item.count}</span>
                               </li>
                             ))}
@@ -1205,7 +1206,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                 disabled={synthesizing}
                 className="rounded-full bg-accent px-4 py-1.5 text-[11px] font-semibold text-white shadow-[0_8px_18px_-10px_rgba(26,168,111,0.8)] transition hover:brightness-95 disabled:opacity-50"
               >
-                {synthesizing ? 'Analyzing…' : synthesis ? 'Re-analyze' : 'Generate Analysis'}
+                {synthesizing ? 'Analyzing...' : synthesis ? 'Re-analyze' : 'Generate Analysis'}
               </button>
 
               {synthesis && (() => {

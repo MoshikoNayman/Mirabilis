@@ -6,7 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 
-// ── Host-header guard (anti-DNS-rebinding) ──────────────────────────────────
+// Host-header guard (anti-DNS-rebinding)
 // A malicious web page can point its own hostname at 127.0.0.1 (DNS rebinding)
 // and make the victim's browser hit this server. Every such request carries the
 // attacker's hostname in the Host header; a real local client sends localhost /
@@ -27,7 +27,7 @@ export function makeHostGuard(allowedHostnames) {
   };
 }
 
-// ── Local token for the machine-facing /mcp surface ─────────────────────────
+// Local token for the machine-facing /mcp surface
 // /mcp exposes run_command/write_file/read_file to external MCP clients
 // (VS Code, Claude Desktop). It must not be callable by just any local process.
 // We mint a per-install token, persist it 0600, and require it as a bearer.
@@ -126,7 +126,7 @@ export function isLoopbackRequest(req) {
   return addr === '127.0.0.1' || addr === '::1' || addr.startsWith('127.');
 }
 
-// ── Outbound SSRF guard (cloud metadata only) ───────────────────────────────
+// Outbound SSRF guard (cloud metadata only)
 // Local AI legitimately targets loopback (Ollama, llama-server) and the user's
 // own LAN hosts, so we deliberately do NOT block private ranges. We block only
 // the cloud metadata endpoints, which are never a legitimate provider and are

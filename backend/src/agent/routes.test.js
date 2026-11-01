@@ -163,7 +163,7 @@ test('an unreachable engine reports how to fix it, not "fetch failed"', async ()
   assert.match(err.data.error, /ollama serve|running/i, 'and what to do about it');
 });
 
-// ── persisting the run into a chat ──────────────────────────────────────────
+// persisting the run into a chat
 // The client used to POST the goal and answer to /api/chats/:id/messages, a
 // route that does not exist, so the result lived only in the run panel and was
 // lost the moment it closed.
@@ -231,7 +231,7 @@ test('a stopped run still persists the partial work it managed', async () => {
   assert.equal(chat.messages[1].agentRun.stopReason, result.stopReason);
 });
 
-// ── the full tool policy needs an explicit decision ─────────────────────────
+// the full tool policy needs an explicit decision
 
 test('the full policy is refused without an explicit acknowledgement', async () => {
   // Granting a background process a shell must never be reachable by a default

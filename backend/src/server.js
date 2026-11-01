@@ -624,7 +624,7 @@ async function transcribeDictationAudio({ sourcePath }) {
   }
 }
 
-// ── Piper TTS voice catalog ────────────────────────────────────────────────
+// Piper TTS voice catalog
 const PIPER_VOICE_CATALOG = [
   {
     id: 'en_US-lessac-medium',
@@ -692,7 +692,7 @@ async function downloadPiperVoiceModel(modelId) {
   ]);
 }
 
-// ── Whisper.cpp speech-to-text ──────────────────────────────────────────────
+// Whisper.cpp speech-to-text
 // Local, offline STT that works INSIDE Electron. The browser Web Speech API
 // (webkitSpeechRecognition) streams to Google's cloud endpoint and is dead in a
 // packaged Electron build, so the voice loop records audio and posts it here.
@@ -1032,7 +1032,7 @@ app.get('/api/system/specs', async (_req, res) => {
   });
 });
 
-// ── Inference runtimes (Ollama / llama.cpp / vLLM / custom) ──────────────────────
+// Inference runtimes (Ollama / llama.cpp / vLLM / custom)
 // Declarative registry + a managed llama.cpp process (launch/health/stop) so the
 // power-user runtime is first-class, not just "point at a URL".
 app.get('/api/runtimes', (_req, res) => {
@@ -1464,7 +1464,7 @@ app.post('/api/providers/switch-model', async (req, res) => {
   });
 });
 
-// ── Model pull (install from Ollama registry) ──────────────────────────────
+// Model pull (install from Ollama registry)
 
 // Ollama model IDs are alphanumeric + hyphens/dots/colons - validate before forwarding
 const SAFE_MODEL_RE = /^[a-z0-9][a-z0-9._:/-]{0,99}$/i;
@@ -1892,7 +1892,7 @@ app.post('/api/models/pull', async (req, res) => {
   res.end();
 });
 
-// ── Model delete (remove from Ollama) ─────────────────────────────────────
+// Model delete (remove from Ollama)
 
 app.delete('/api/models/:modelId', async (req, res) => {
   const modelId = decodeURIComponent(req.params.modelId || '');
@@ -1916,7 +1916,7 @@ app.delete('/api/models/:modelId', async (req, res) => {
   }
 });
 
-// ── Remote Control (localhost exec + SSH) ─────────────────────────────────
+// Remote Control (localhost exec + SSH)
 
 // In-memory connection state - only one active connection at a time
 let remoteState = null; // { type: 'local'|'ssh', host?, port?, user?, sshClient? }
@@ -2081,7 +2081,7 @@ app.delete('/api/remote/disconnect', guardRemote, (_req, res) => {
   res.status(204).end();
 });
 
-// ── Watched Workspace (live local folder as chat context) ─────────────────
+// Watched Workspace (live local folder as chat context)
 // Point Mirabilis at a local folder; it lists the folder's text files and reads
 // any file's FRESH bytes on demand. All reads are jailed to the watched root by
 // workspace.js (relative paths that escape the root are rejected). Only one root
@@ -2131,7 +2131,7 @@ app.delete('/api/workspace/watch', (_req, res) => {
   res.status(204).end();
 });
 
-// ── Homelab Roster (saved machines + live reachability) ───────────────────
+// Homelab Roster (saved machines + live reachability)
 // The user's own routers, NAS, servers, and Raspberry Pi saved as ICQ-style
 // buddy contacts. Hosts persist to dataDir/homelab-hosts.json (passwords are
 // never stored). Reachability is a quick TCP probe. Connecting reuses the
@@ -2177,7 +2177,7 @@ app.get('/api/homelab/hosts/status', async (_req, res) => {
   }
 });
 
-// ── Generic MCP connector (streamable-http) ───────────────────────────────
+// Generic MCP connector (streamable-http)
 
 const mcpStorePath = join(dirname(config.chatStorePath), 'mcp-servers.json');
 const mcpAuditLogPath = join(dirname(config.chatStorePath), 'mcp-audit.jsonl');
@@ -2619,7 +2619,7 @@ app.post('/api/web-search', async (req, res) => {
   try {
     const limit = Math.max(1, Math.min(Number(maxResults || 5), 10));
 
-    // ── Tavily (preferred, requires API key) ──────────────────────────────
+    // Tavily (preferred, requires API key)
     if (config.tavilyApiKey) {
       const response = await fetch('https://api.tavily.com/search', {
         method: 'POST',
@@ -2667,7 +2667,7 @@ app.post('/api/web-search', async (req, res) => {
       return;
     }
 
-    // ── RSS news feed fallback (free, no API key required) ───────────────
+    // RSS news feed fallback (free, no API key required)
     // Maps keywords in the query to the relevant outlet's RSS feed.
     const NEWS_FEEDS = {
       foxnews:  'https://moxie.foxnews.com/google-publisher/latest.xml',
@@ -3325,7 +3325,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   }
 });
 
-// ── Image generation ────────────────────────────────────────────────────────
+// Image generation
 
 const imageDir = join(dirname(config.chatStorePath), 'images');
 const uploadDir = join(dirname(config.chatStorePath), 'uploads');
@@ -3600,9 +3600,8 @@ app.get('/api/uploads/:filename', async (req, res) => {
   res.sendFile(join(uploadDir, filename));
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 
-// ── Mirabilis MCP Server endpoint ────────────────────────────────────────────
+// Mirabilis MCP Server endpoint
 // VS Code / Copilot / any MCP client can connect to POST /mcp and use
 // Mirabilis AI as MCP tools (mirabilis_chat, mirabilis_list_models, mirabilis_health).
 const mcpServerAuditLogPath = join(dirname(config.chatStorePath), 'mcp-server-audit.jsonl');
@@ -3662,9 +3661,7 @@ app.use('/api/agent', createAgentRouter({
   guard: makePrivilegedGuard(mcpToken, 'agent runs')
 }));
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Local provider binary management
-// ─────────────────────────────────────────────────────────────────────────────
 
 app.get('/api/providers/local-status', (_req, res) => {
   const platform = process.platform;
@@ -3713,13 +3710,13 @@ app.get('/api/providers/install-stream', async (req, res) => {
         null;
       if (!llamaUrl) { send('warn', `Auto-install is not supported on ${platform} ${arch}. Install llama-server manually.`); send('done', ''); res.end(); return; }
 
-      send('info', 'Downloading llama-server…');
+      send('info', 'Downloading llama-server...');
       const fetchRes = await fetch(llamaUrl);
       if (!fetchRes.ok) throw new Error('Failed to download llama-server');
       const buf = await fetchRes.arrayBuffer();
       const zipPath = join(PROVIDERS_DIR, 'llama.zip');
       await writeFile(zipPath, Buffer.from(buf));
-      send('info', 'Extracting…');
+      send('info', 'Extracting...');
       await new Promise((resolve, reject) => {
         const child = platform === 'win32'
           ? spawn('powershell', ['-Command', `Expand-Archive -Path "llama.zip" -DestinationPath "." -Force`], { cwd: PROVIDERS_DIR })
@@ -3749,12 +3746,12 @@ app.get('/api/providers/install-stream', async (req, res) => {
         null;
       if (!koboldAssetName) { send('warn', `Auto-install is not supported on ${platform} ${arch}. Install KoboldCpp manually.`); send('done', ''); res.end(); return; }
 
-      send('info', 'Fetching latest KoboldCpp release…');
+      send('info', 'Fetching latest KoboldCpp release...');
       const releaseRes = await fetch('https://api.github.com/repos/LostRuins/koboldcpp/releases/latest');
       const release = await releaseRes.json();
       const asset = release.assets?.find((a) => a.name === koboldAssetName);
       if (!asset) throw new Error('KoboldCpp release asset not found');
-      send('info', `Downloading ${asset.name}…`);
+      send('info', `Downloading ${asset.name}...`);
       const koboldRes = await fetch(asset.browser_download_url);
       if (!koboldRes.ok) throw new Error('Failed to download KoboldCpp');
       const koboldBuf = await koboldRes.arrayBuffer();
@@ -3787,7 +3784,6 @@ app.delete('/api/providers/local/:provider', async (req, res) => {
   }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
 
 await ensureStoreFile(config.chatStorePath);
 

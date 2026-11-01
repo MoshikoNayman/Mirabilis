@@ -24,7 +24,7 @@ const ctxFor = (modelSizeBytes, over = {}) => deriveInferenceDefaults({
   ...over
 }).options.num_ctx;
 
-// ── invariants that must hold for every input ────────────────────────────────
+// invariants that must hold for every input
 
 test('num_ctx is always a positive multiple of the step and never below the floor', () => {
   for (let gb = 0.5; gb <= 40; gb += 0.5) {
@@ -99,7 +99,7 @@ test('a small model on a big box gets a generous context', () => {
   assert.ok(ctx > 8192, `expected a generous window on 64GB RAM, got ${ctx}`);
 });
 
-// ── the surrounding option flags ─────────────────────────────────────────────
+// the surrounding option flags
 
 test('tight memory turns on the low-VRAM path', () => {
   const { options, meta } = deriveInferenceDefaults({
@@ -137,7 +137,7 @@ test('free memory tightens the budget below the reserve policy', () => {
   assert.ok(squeezed < plenty, `low free memory should shrink ctx (${squeezed} vs ${plenty})`);
 });
 
-// ── estimateParamsB ─────────────────────────────────────────────────────────
+// estimateParamsB
 
 test('estimateParamsB reads both B and M suffixes and falls back to size', () => {
   assert.equal(estimateParamsB('7B', 0), 7);

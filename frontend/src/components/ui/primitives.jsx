@@ -9,7 +9,7 @@ function cx(...parts) {
   return parts.filter(Boolean).join(' ');
 }
 
-/* ── Button ─────────────────────────────────────────────────────────────── */
+/* Button */
 const BTN_BASE =
   'au-focus inline-flex items-center justify-center gap-1.5 font-medium select-none transition active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none';
 
@@ -46,7 +46,7 @@ export function Button({ variant = 'soft', size = 'md', className, style, childr
   );
 }
 
-/* ── IconButton ─────────────────────────────────────────────────────────── */
+/* IconButton */
 export function IconButton({ size = 'md', variant = 'ghost', className, label, children, ...rest }) {
   const dim = size === 'sm' ? 'h-7 w-7' : size === 'lg' ? 'h-10 w-10' : 'h-8 w-8';
   return (
@@ -67,7 +67,7 @@ export function IconButton({ size = 'md', variant = 'ghost', className, label, c
   );
 }
 
-/* ── Panel / Card ───────────────────────────────────────────────────────── */
+/* Panel / Card */
 export const Panel = forwardRef(function Panel(
   { as: Tag = 'div', material = 'thick', className, children, ...rest },
   ref
@@ -80,7 +80,7 @@ export const Panel = forwardRef(function Panel(
   );
 });
 
-/* ── Badge / Pill ───────────────────────────────────────────────────────── */
+/* Badge / Pill */
 export function Badge({ tone = 'neutral', className, children }) {
   const tones = {
     neutral: 'au-hairline text-[color:var(--text-muted)]',
@@ -103,12 +103,12 @@ export function Badge({ tone = 'neutral', className, children }) {
   );
 }
 
-/* ── Presence dot ───────────────────────────────────────────────────────── */
+/* Presence dot */
 export function PresenceDot({ presence = 'offline', className }) {
   return <span className={cx('au-dot', className)} data-presence={presence} aria-hidden="true" />;
 }
 
-/* ── Keyboard hint ──────────────────────────────────────────────────────── */
+/* Keyboard hint */
 export function Kbd({ children }) {
   return (
     <kbd className="au-hairline inline-flex h-5 min-w-[20px] items-center justify-center rounded-[var(--r-xs)] px-1.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-muted)]">
@@ -117,7 +117,7 @@ export function Kbd({ children }) {
   );
 }
 
-/* ── Spinner ────────────────────────────────────────────────────────────── */
+/* Spinner */
 export function Spinner({ size = 16 }) {
   return (
     <span
@@ -128,7 +128,7 @@ export function Spinner({ size = 16 }) {
   );
 }
 
-/* ── Line icons ─────────────────────────────────────────────────────────────
+/* Line icons
    Monochrome, stroke = currentColor, so they follow the active theme accent /
    text color instead of clashing full-colour emoji. */
 function Svg({ size = 16, className, children }) {
@@ -148,6 +148,42 @@ function Svg({ size = 16, className, children }) {
       {children}
     </svg>
   );
+}
+export function CloseIcon(props) {
+  return <Svg {...props}><path d="M6 6l12 12M18 6 6 18" /></Svg>;
+}
+export function PencilIcon(props) {
+  return <Svg {...props}><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></Svg>;
+}
+export function ChatIcon(props) {
+  return <Svg {...props}><path d="M4 5h16v11H9l-5 4V5Z" /></Svg>;
+}
+export function GlobeIcon(props) {
+  return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></Svg>;
+}
+export function PaletteIcon(props) {
+  return <Svg {...props}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.5-.8 1.5-1.6 0-1.4 1-2.4 2.4-2.4H18a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z" /><path d="M7.5 11h.01M10 7.5h.01M14 7.5h.01" /></Svg>;
+}
+export function TypeIcon(props) {
+  return <Svg {...props}><path d="M5 6V4h14v2M12 4v16M9 20h6" /></Svg>;
+}
+export function PlayIcon(props) {
+  return <Svg {...props}><path d="M7 5v14l11-7L7 5Z" /></Svg>;
+}
+export function ChevronRightIcon(props) {
+  return <Svg {...props}><path d="m9 6 6 6-6 6" /></Svg>;
+}
+export function ArrowDownIcon(props) {
+  return <Svg {...props}><path d="M12 5v14M6 13l6 6 6-6" /></Svg>;
+}
+export function AlertIcon(props) {
+  return <Svg {...props}><path d="M12 3 2 20h20L12 3Z" /><path d="M12 10v4M12 17h.01" /></Svg>;
+}
+export function CheckIcon(props) {
+  return <Svg {...props}><path d="m5 12 5 5 9-10" /></Svg>;
+}
+export function UsersIcon(props) {
+  return <Svg {...props}><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5" /></Svg>;
 }
 export function SearchIcon(props) {
   return <Svg {...props}><circle cx="11" cy="11" r="7" /><path d="m21 21-4.35-4.35" /></Svg>;
@@ -235,7 +271,7 @@ export function ContradictionIcon(props) {
   );
 }
 
-/* ── SegmentedControl ───────────────────────────────────────────────────── */
+/* SegmentedControl */
 export function SegmentedControl({ value, onChange, options, size = 'md' }) {
   const pad = size === 'sm' ? 'h-7 px-2.5 text-[length:var(--text-2xs)]' : 'h-8 px-3 text-[length:var(--text-xs)]';
   return (
@@ -264,7 +300,7 @@ export function SegmentedControl({ value, onChange, options, size = 'md' }) {
   );
 }
 
-/* ── Modal / overlay ────────────────────────────────────────────────────── */
+/* Modal / overlay */
 export function Modal({ open, onClose, children, align = 'center', className, labelledBy }) {
   const ref = useRef(null);
 

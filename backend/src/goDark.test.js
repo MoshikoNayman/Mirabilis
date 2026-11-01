@@ -47,7 +47,7 @@ test('the providers with a user-supplied base URL are exactly the ones needing a
   }
 });
 
-// ── isLocalHostUrl: the primitive the lockdown now depends on ────────────────
+// isLocalHostUrl: the primitive the lockdown now depends on
 
 test('isLocalHostUrl accepts loopback and private LAN hosts', () => {
   const local = [
@@ -99,7 +99,7 @@ test('isLocalHostUrl is not fooled by a hostname that merely contains localhost'
   assert.equal(isLocalHostUrl('https://notlocalhost/v1'), false);
 });
 
-// ── classifyProviderScope: what the send path actually calls ─────────────────
+// classifyProviderScope: what the send path actually calls
 
 test('cloud providers are blocked under Go Dark regardless of base URL', () => {
   for (const p of REMOTE_PROVIDERS) {

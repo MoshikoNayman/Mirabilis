@@ -29,10 +29,10 @@ export default function ContactRow({ provider, presence = 'unknown', modelCount,
           </Badge>
         </span>
         <span className="truncate text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
-          {PRESENCE_LABELS[presence] || 'Checking…'}
-          {typeof modelCount === 'number' && modelCount > 0 ? ` · ${modelCount} models` : ''}
+          {PRESENCE_LABELS[presence] || 'Checking...'}
+          {typeof modelCount === 'number' && modelCount > 0 ? ` | ${modelCount} models` : ''}
           {warmLabel ? (
-            <span className="text-emerald-600 dark:text-emerald-300">{` · ${warmLabel}`}</span>
+            <span className="text-emerald-600 dark:text-emerald-300">{` | ${warmLabel}`}</span>
           ) : null}
         </span>
       </span>

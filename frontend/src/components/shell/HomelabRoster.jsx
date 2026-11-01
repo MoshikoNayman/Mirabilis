@@ -7,7 +7,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Panel, PresenceDot, IconButton, Button, Badge } from '../ui/primitives';
+import { Panel, PresenceDot, IconButton, Button, Badge, CloseIcon } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
 import { getJSON, postJSON, apiFetch } from '../../lib/api';
 
@@ -75,13 +75,13 @@ function HostRow({ host, status, connecting, onConnect, onDelete }) {
           </span>
           <span className="truncate text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
             {host.user ? `${host.user}@` : ''}{host.host}:{host.port}
-            {status ? (reachable ? ` · reachable${typeof status.ms === 'number' ? ` (${status.ms}ms)` : ''}` : ' · offline') : ' · checking…'}
+            {status ? (reachable ? ` | reachable${typeof status.ms === 'number' ? ` (${status.ms}ms)` : ''}` : ' | offline') : ' | checking...'}
           </span>
         </span>
         <Button size="sm" variant="soft" onClick={handleConnect} disabled={connecting}>
-          {connecting ? 'Connecting…' : 'Connect'}
+          {connecting ? 'Connecting...' : 'Connect'}
         </Button>
-        <IconButton size="sm" label={`Remove ${host.label}`} onClick={() => onDelete(host)}>✕</IconButton>
+        <IconButton size="sm" label={`Remove ${host.label}`} onClick={() => onDelete(host)}><CloseIcon size={13} /></IconButton>
       </div>
       {showPw ? (
         <div className="mt-2 flex items-center gap-1.5 pl-[26px]">
@@ -268,7 +268,7 @@ export default function HomelabRoster({ open }) {
               {hosts.length ? `${onlineCount} of ${hosts.length} reachable` : 'Your machines as buddies'}
             </span>
           </div>
-          <IconButton label="Close" onClick={() => appStore.closeHomelab()}>✕</IconButton>
+          <IconButton label="Close" onClick={() => appStore.closeHomelab()}><CloseIcon size={14} /></IconButton>
         </div>
 
         <div className="au-scroll flex-1 overflow-y-auto p-1.5">

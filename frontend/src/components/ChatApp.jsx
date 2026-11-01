@@ -9,7 +9,7 @@ import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 import { FlowerMark } from './ui/StatusOrb';
-import { IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon } from './ui/primitives';
+import { IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon } from './ui/primitives';
 import TabSwitch from './shell/TabSwitch';
 import CommitmentRadar from './shell/CommitmentRadar';
 import VoiceChat from './shell/VoiceChat';
@@ -411,7 +411,7 @@ async function api(path, options = {}) {
   return response.json();
 }
 
-// ── Smart web-search classifier ───────────────────────────────────────────────
+// Smart web-search classifier
 // Returns 'search' when the query clearly needs live/current data,
 // or 'skip' for everything that can be answered from training knowledge.
 function classifyWebSearch(text) {
@@ -760,7 +760,7 @@ function MarkdownCode({ inline, className, children, ...props }) {
             className="ml-2 rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-400 transition hover:bg-[var(--material-thin)] hover:text-emerald-300 disabled:opacity-50"
             title={`Run on ${remoteTarget}`}
           >
-            {execResult?.running ? '◌ Running…' : '▶ Run'}
+            {execResult?.running ? 'Running...' : 'Run'}
           </button>
         )}
         <CopyButton text={codeText} />
@@ -789,7 +789,7 @@ function MarkdownCode({ inline, className, children, ...props }) {
             <pre className="whitespace-pre-wrap text-red-400">{execResult.stderr}</pre>
           )}
           <div className={`mt-1 text-[10px] ${execResult.exitCode === 0 ? 'text-[color:var(--text-muted)]' : 'text-red-400'}`}>
-            exit {execResult.exitCode} · {execResult.duration != null ? `${execResult.duration}ms` : ''}
+            exit {execResult.exitCode} | {execResult.duration != null ? `${execResult.duration}ms` : ''}
           </div>
         </div>
       )}
@@ -807,7 +807,7 @@ function renderMessageContent(content, message = {}) {
       <div
         className="relative overflow-hidden rounded-xl bg-[var(--material-thick)]"
         style={{ width: 288, height: 288 }}
-        aria-label="Generating image…"
+        aria-label="Generating image..."
       >
         {/* Shimmer sweep - pure CSS, GPU-only */}
         <div
@@ -821,7 +821,7 @@ function renderMessageContent(content, message = {}) {
             <circle cx="8.5" cy="8.5" r="1.5" />
             <polyline points="21 15 16 10 5 21" />
           </svg>
-          <span className="text-xs font-medium text-white/80">Generating image…</span>
+          <span className="text-xs font-medium text-white/80">Generating image...</span>
         </div>
       </div>
     );
@@ -1076,7 +1076,7 @@ const MessageRow = memo(function MessageRow({
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="truncate text-xs font-medium">{file.name || 'file'}</div>
-                    <div className="text-[10px] opacity-70">{file.mimeType || 'application/octet-stream'} · {formatFileSize(file.size)}</div>
+                    <div className="text-[10px] opacity-70">{file.mimeType || 'application/octet-stream'} | {formatFileSize(file.size)}</div>
                   </div>
                   {file.url ? (
                     <a
@@ -1097,7 +1097,7 @@ const MessageRow = memo(function MessageRow({
       {message.role === 'user' && message.content && (
         <div className="mt-1.5 flex items-center justify-between border-t border-[var(--hairline)] pt-1">
           <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-[color:var(--text-main)] opacity-70">
-            You · {(message.tokenEstimate || 0).toLocaleString()} tok
+            You | {(message.tokenEstimate || 0).toLocaleString()} tok
           </span>
           <CopyMessageButton
             text={message.content || ''}
@@ -1120,7 +1120,7 @@ const MessageRow = memo(function MessageRow({
                   }[prov] || prov;
                   const rawModel = message.effectiveModel || message.model || '';
                   const shortModel = rawModel
-                    ? (rawModel.length > 22 ? rawModel.slice(0, 22) + '…' : rawModel)
+                    ? (rawModel.length > 22 ? rawModel.slice(0, 22) + '...' : rawModel)
                     : '';
                   // Privacy Receipt: a green on-device stamp, or an amber "left the
                   // machine" stamp naming the cloud provider it was sent to.
@@ -1159,7 +1159,7 @@ const MessageRow = memo(function MessageRow({
                   if (perf.wallMs != null) parts.push(`${(perf.wallMs / 1000).toFixed(1)}s total`);
                   return (
                     <span
-                      title={parts.join(' · ')}
+                      title={parts.join(' | ')}
                       className="ml-1.5 inline-flex items-center gap-1 rounded-[var(--r-pill)] bg-black/[0.05] px-1.5 py-[2px] align-middle text-[9px] font-semibold normal-case tracking-normal text-[color:var(--text-muted)] dark:bg-white/[0.06]"
                     >
                       {perf.tokensPerSec} tok/s
@@ -1450,7 +1450,7 @@ export default function ChatApp() {
   const [piperModels, setPiperModels] = useState([]);
   const [downloadingPiperModelId, setDownloadingPiperModelId] = useState(null);
 
-  // ── Voice chat (hands-free spoken conversation) ─────────────────────────────
+  // Voice chat (hands-free spoken conversation)
   // The overlay is a dumb view; the whole listen -> send -> speak -> listen loop
   // is driven from here because speech recognition, the streaming send, and TTS
   // all live in this component.
@@ -1528,7 +1528,7 @@ export default function ChatApp() {
   const [configVaultBusy, setConfigVaultBusy] = useState(false);
   const [configVaultMsg, setConfigVaultMsg] = useState('');
   const [isVaultPanelOpen, setIsVaultPanelOpen] = useState(false);
-  // modelId → { pct: number|null, status: string, ctrl: AbortController } while pulling
+  // modelId -> { pct: number|null, status: string, ctrl: AbortController } while pulling
   const [pullingModels, setPullingModels] = useState({});
   // Free-text "pull any Ollama model" field in the model menu.
   const [customModelInput, setCustomModelInput] = useState('');
@@ -1559,7 +1559,7 @@ export default function ChatApp() {
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
   }, [customModelInput]);
-  // modelId → true while a delete request is in-flight
+  // modelId -> true while a delete request is in-flight
   const [deletingModels, setDeletingModels] = useState({});
   const [isTeachPanelOpen, setIsTeachPanelOpen] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
@@ -1609,7 +1609,7 @@ export default function ChatApp() {
   const [remotePassword, setRemotePassword] = useState('');
   const [remoteKeyPath, setRemoteKeyPath] = useState('');
   const [remoteConnecting, setRemoteConnecting] = useState(false);
-  const [execResults, setExecResults] = useState({}); // codeBlockKey → { stdout, stderr, exitCode, running }
+  const [execResults, setExecResults] = useState({}); // codeBlockKey -> { stdout, stderr, exitCode, running }
   const [uncensoredMode, setUncensoredMode] = useState(false);
   const [isMcpPanelOpen, setIsMcpPanelOpen] = useState(false);
   const [isParamsPanelOpen, setIsParamsPanelOpen] = useState(false);
@@ -2081,7 +2081,7 @@ export default function ChatApp() {
 
   async function downloadPiperModel(modelId) {
     setDownloadingPiperModelId(modelId);
-    setStatusText(`Downloading voice model ${modelId}…`);
+    setStatusText(`Downloading voice model ${modelId}...`);
     try {
       await api('/api/voice/download-model', { method: 'POST', body: JSON.stringify({ modelId }) });
       setStatusText('Voice model downloaded');
@@ -2341,7 +2341,7 @@ export default function ChatApp() {
     }
   }
 
-  /* ── Voice chat loop ──────────────────────────────────────────────────────
+  /* Voice chat loop
      listen (SR) -> send (stream) -> speak (TTS) -> listen, hands-free, until the
      user taps End. State lives in refs so the recognition callbacks never read a
      stale phase, and send/speak are invoked through refs kept fresh every render
@@ -3657,7 +3657,7 @@ export default function ChatApp() {
       dictationPhaseRef.current = 'idle';
       setIsDictating(false);
       const message = error?.name === 'NotAllowedError'
-        ? 'Microphone access denied - check System Settings → Privacy → Microphone.'
+        ? 'Microphone access denied - check System Settings > Privacy > Microphone.'
         : error.message || 'unknown';
       setStatusText(`Dictation error: ${message}`);
     }
@@ -4110,14 +4110,14 @@ export default function ChatApp() {
           compute: null,
           npu: null,
           logic: {
-            label: `${cpuModel || 'Processor'} • ${cpuCores}c/${cpuThreads}t`,
+            label: `${cpuModel || 'Processor'} | ${cpuCores}c/${cpuThreads}t`,
             expanded: [
               archName ? `Arch: ${archName}` : null,
               platform ? `Platform: ${platform}` : null
             ].filter(Boolean).join('\n')
           },
           memory: {
-            label: `${ramLabel} • System RAM`,
+            label: `${ramLabel} | System RAM`,
             expanded: `Size: ${ramLabel}`
           },
           action: { label: 'Engine', options: ['CPU'] }
@@ -4327,7 +4327,7 @@ export default function ChatApp() {
     }
     if (pullingModels[modelId]) return; // already pulling
     const ctrl = new AbortController();
-    setPullingModels((prev) => ({ ...prev, [modelId]: { pct: null, status: 'Queued…', ctrl, jobId: null } }));
+    setPullingModels((prev) => ({ ...prev, [modelId]: { pct: null, status: 'Queued...', ctrl, jobId: null } }));
     (async () => {
       try {
         const started = await api('/api/models/install-jobs', {
@@ -4347,7 +4347,7 @@ export default function ChatApp() {
             [modelId]: {
               ...prev[modelId],
               jobId,
-              status: started?.job?.message || 'Starting…',
+              status: started?.job?.message || 'Starting...',
               pct: started?.job?.pct ?? null
             }
           };
@@ -4633,9 +4633,9 @@ export default function ChatApp() {
     refreshModels();
   }, [provider]);
 
-  // Aurora shell integration: the floating dock + ⌘K command palette now own
+  // Aurora shell integration: the floating dock + Cmd+K command palette now own
   // the global keyboard shortcut, and drive chat actions through these DOM
-  // CustomEvents. We intentionally no longer bind ⌘K here to avoid double-firing
+  // CustomEvents. We intentionally no longer bind Cmd+K here to avoid double-firing
   // (palette opening AND a new chat) with the shell.
   useEffect(() => {
     const onNewChat = () => shortcutRef.current.createChat?.();
@@ -4695,7 +4695,7 @@ export default function ChatApp() {
   // Auto-scroll to bottom while streaming new tokens - throttled to one rAF per frame.
   // IMPORTANT: we re-check autoScrollRef.current INSIDE the RAF, not just at effect entry.
   // This closes the race where the effect runs (ref=true), queues a RAF, the user scrolls
-  // up (ref→false), then the RAF fires anyway and overrides the user's position.
+  // up (ref->false), then the RAF fires anyway and overrides the user's position.
   useEffect(() => {
     if (!isStreaming || !messagesScrollRef.current) return;
     const el = messagesScrollRef.current;
@@ -4841,11 +4841,11 @@ export default function ChatApp() {
         id: placeholderId,
         role: 'assistant',
         content: [
-          '⚠️ Image service is not running.',
+          'Image service is not running.',
           '',
           'To enable on-device image generation:',
-          '  1. Make sure you launched the app with run-local.sh from the mirabilis directory.',
-          '  2. On first run it installs PyTorch + Stable Diffusion (~6 GB). Wait for “Image service ready”.',
+          '  1. Start the app with node run.js (without --no-image).',
+          '  2. The first run installs PyTorch and Stable Diffusion (about 6 GB). Wait for "Image service ready".',
           '  3. Alternatively start it manually:',
           '       cd mirabilis/image-service && python3 -m venv .venv',
           '       .venv/bin/pip install -r requirements.txt',
@@ -5021,7 +5021,7 @@ export default function ChatApp() {
     const userId = safeStorageGet('mirabilis-user-id') || 'user-local';
     const chatTitle = (chats.find((c) => c.id === activeChatId)?.title || '').trim() || 'Untitled chat';
     setIsCommittingToLedger(true);
-    setStatusText('Committing chat to Ledger…');
+    setStatusText('Committing chat to Ledger...');
     try {
       const created = await api('/api/intelledger/sessions', {
         method: 'POST',
@@ -5054,7 +5054,7 @@ export default function ChatApp() {
   }
 
 
-  // ── Autonomous runs ────────────────────────────────────────────────────────
+  // Autonomous runs
   // An agentic effort tier does not send a chat message: it starts a job on the
   // backend and streams its progress. The transcript still gets the goal and the
   // final result, so the conversation reads normally afterwards, but everything
@@ -5658,15 +5658,15 @@ export default function ChatApp() {
       };
 
       // Live during-stream progress in the status line: real generated-token count,
-      // elapsed seconds, and rolling tok/s (replaces the faked "Thinking…" ladder).
+      // elapsed seconds, and rolling tok/s (replaces the faked "Thinking..." ladder).
       // Before the first token it shows a genuine "loading" state, not a wall-clock guess.
       let liveTokenCount = 0;
       let liveFirstTokenTs = null;
       liveProgressTimer = setInterval(() => {
-        if (liveFirstTokenTs == null) { setStatusText('Loading model / prefilling…'); return; }
+        if (liveFirstTokenTs == null) { setStatusText('Loading model / prefilling...'); return; }
         const elapsed = (Date.now() - liveFirstTokenTs) / 1000;
         const tps = elapsed > 0 ? liveTokenCount / elapsed : 0;
-        setStatusText(`${liveTokenCount.toLocaleString()} tok · ${tps >= 10 ? tps.toFixed(0) : tps.toFixed(1)} tok/s · ${elapsed.toFixed(0)}s`);
+        setStatusText(`${liveTokenCount.toLocaleString()} tok | ${tps >= 10 ? tps.toFixed(0) : tps.toFixed(1)} tok/s | ${elapsed.toFixed(0)}s`);
       }, 400);
 
       while (true) {
@@ -5785,7 +5785,7 @@ export default function ChatApp() {
       // New chats are already in the sidebar (added before streaming started).
       // Titles are updated via the 'titleUpdate' SSE event during the stream.
       // Calling refreshChats() here was the second failure path for the
-      // "clear all → chats come back" bug: if the stream finished just after
+      // "clear all -> chats come back" bug: if the stream finished just after
       // clearAllChats(), this call would return the backend-saved chat and
       // overwrite the just-emptied chats list.
       if (trainingMode === 'fine-tuning') {
@@ -5955,7 +5955,7 @@ export default function ChatApp() {
             <input
               type="text"
               autoComplete="off"
-              placeholder="Search chats…"
+              placeholder="Search chats..."
               value={chatSearch}
               onChange={(e) => setChatSearch(e.target.value)}
               className="min-w-0 flex-1 rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-1.5 text-xs outline-none placeholder:text-[color:var(--text-muted)] focus:border-accent dark:placeholder:text-[color:var(--text-muted)]"
@@ -6161,7 +6161,7 @@ export default function ChatApp() {
                     <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M9 12h6M12 9v6"/>
                     </svg>
-                    {isCommittingToLedger ? 'Committing…' : 'To Ledger'}
+                    {isCommittingToLedger ? 'Committing...' : 'To Ledger'}
                   </button>
                 )}
                 <div className="relative">
@@ -6228,15 +6228,15 @@ export default function ChatApp() {
                       <div className="space-y-1 text-[11px] text-[color:var(--text-main)]">
                         <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
                           <span>System instructions</span>
-                          <span>{contextUsage.systemPct}% · {contextUsage.systemTokens.toLocaleString()} tok</span>
+                          <span>{contextUsage.systemPct}% | {contextUsage.systemTokens.toLocaleString()} tok</span>
                         </div>
                         <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
                           <span>User content</span>
-                          <span>{contextUsage.userPct}% · {contextUsage.userTokens.toLocaleString()} tok</span>
+                          <span>{contextUsage.userPct}% | {contextUsage.userTokens.toLocaleString()} tok</span>
                         </div>
                         <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
                           <span>Assistant</span>
-                          <span>{contextUsage.uncategorizedPct}% · {contextUsage.uncategorizedTokens.toLocaleString()} tok</span>
+                          <span>{contextUsage.uncategorizedPct}% | {contextUsage.uncategorizedTokens.toLocaleString()} tok</span>
                         </div>
                       </div>
 
@@ -6305,7 +6305,7 @@ export default function ChatApp() {
                     <h3 className="text-sm font-semibold text-[color:var(--text-main)]">Branching & Snapshots</h3>
                     <p className="text-[11px] text-[color:var(--text-muted)]">
                       {activeChatMeta?.parentChatId
-                        ? `Branch chat${activeChatMeta?.branchLabel ? ` · ${activeChatMeta.branchLabel}` : ''}`
+                        ? `Branch chat${activeChatMeta?.branchLabel ? ` | ${activeChatMeta.branchLabel}` : ''}`
                         : 'Create a branch before experimenting, or save a restore point first.'}
                     </p>
                   </div>
@@ -6336,7 +6336,7 @@ export default function ChatApp() {
                     {Array.isArray(activeChatMeta?.snapshots) && activeChatMeta.snapshots.length > 0 ? (
                       [...activeChatMeta.snapshots].reverse().map((snapshot) => (
                         <option key={snapshot.id} value={snapshot.id}>
-                          {snapshot.label} · {snapshot.messageCount} msgs
+                          {snapshot.label} | {snapshot.messageCount} msgs
                         </option>
                       ))
                     ) : (
@@ -6535,7 +6535,7 @@ export default function ChatApp() {
                         onClick={() => deleteMemoryItem(item.id)}
                         className="shrink-0 rounded px-1 text-[10px] text-[color:var(--text-muted)] transition hover:text-red-500"
                         title="Remove"
-                      >✕</button>
+                      ><CloseIcon size={11} /></button>
                     </li>
                   ))}
                 </ul>
@@ -6663,7 +6663,7 @@ export default function ChatApp() {
                                         onClick={(e) => { e.stopPropagation(); installLocalProvider(opt.requiresBinary); setIsProviderMenuOpen(false); }}
                                         className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-accent hover:bg-accent/10 disabled:opacity-50"
                                       >
-                                        {isInstalling ? 'Installing…' : 'Install'}
+                                        {isInstalling ? 'Installing...' : 'Install'}
                                       </button>
                                     )}
                                     {!binaryMissing && opt.requiresBinary && (
@@ -6717,7 +6717,7 @@ export default function ChatApp() {
                         Installing {installingBinary.provider}
                       </span>
                       {installingBinary.done && (
-                        <button type="button" onClick={() => setInstallingBinary(null)} className="text-[10px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)] dark:hover:text-slate-200">✕</button>
+                        <button type="button" onClick={() => setInstallingBinary(null)} className="text-[10px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)] dark:hover:text-slate-200"><CloseIcon size={11} /></button>
                       )}
                     </div>
                     <div className="max-h-32 overflow-y-auto space-y-0.5">
@@ -6726,7 +6726,7 @@ export default function ChatApp() {
                           {line.text}
                         </p>
                       ))}
-                      {!installingBinary.done && <p className="text-[11px] text-[color:var(--text-muted)] animate-pulse">…</p>}
+                      {!installingBinary.done && <p className="text-[11px] text-[color:var(--text-muted)] animate-pulse">...</p>}
                     </div>
                   </div>
                 )}
@@ -6739,7 +6739,7 @@ export default function ChatApp() {
                     </p>
                     {provider === 'koboldcpp' && (
                       <p className="mb-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                        ⚠ KoboldCpp is a <strong>separate app</strong> you must install &amp; run on your machine. It is not included in Mirabilis. Once running, enter its URL below.
+                        KoboldCpp is a <strong>separate app</strong> you must install &amp; run on your machine. It is not included in Mirabilis. Once running, enter its URL below.
                       </p>
                     )}
                     {provider === 'llamacpp' && (
@@ -6758,7 +6758,7 @@ export default function ChatApp() {
                           <div className="flex items-center justify-between gap-2">
                             <span className="min-w-0 truncate text-[11px] text-[color:var(--text-main)]">{llamacppStatus.model} @ {llamacppStatus.baseUrl}</span>
                             <button type="button" onClick={stopLlamacpp} disabled={isLlamacppBusy} className="shrink-0 rounded-lg border border-[var(--hairline)] px-2 py-1 text-[11px] font-medium text-red-500 transition hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-900/20">
-                              {isLlamacppBusy ? '…' : 'Stop'}
+                              {isLlamacppBusy ? '...' : 'Stop'}
                             </button>
                           </div>
                         ) : (
@@ -6781,7 +6781,7 @@ export default function ChatApp() {
                               />
                             )}
                             <button type="button" onClick={startLlamacpp} disabled={isLlamacppBusy || !llamacppModel.trim()} className="w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
-                              {isLlamacppBusy ? 'Starting…' : 'Start llama.cpp with this model'}
+                              {isLlamacppBusy ? 'Starting...' : 'Start llama.cpp with this model'}
                             </button>
                             <p className="text-[10px] leading-relaxed text-[color:var(--text-muted)]">Runs the model file directly with KV-cache quant + flash attention. Your downloaded models are reused - Ollama does not need to be running.</p>
                           </div>
@@ -6790,12 +6790,12 @@ export default function ChatApp() {
                     )}
                     {provider === 'openai-compatible' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ Point to any OpenAI-compatible local server (LM Studio, llama.cpp, Oobabooga, etc.) or a cloud API that requires a key.
+                        Point to any OpenAI-compatible local server (LM Studio, llama.cpp, Oobabooga, etc.) or a cloud API that requires a key.
                       </p>
                     )}
                     {provider === 'gpuaas' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ Use your GPUaaS OpenAI-compatible endpoint URL and key (for example Together, Fireworks, RunPod OpenAI proxy, vLLM gateway).
+                        Use your GPUaaS OpenAI-compatible endpoint URL and key (for example Together, Fireworks, RunPod OpenAI proxy, vLLM gateway).
                       </p>
                     )}
                     {provider === 'vllm' && (
@@ -6811,7 +6811,7 @@ export default function ChatApp() {
                             <div className="flex items-center justify-between gap-2">
                               <span className="min-w-0 truncate text-[11px] text-[color:var(--text-main)]">{vllmStatus.model} @ {vllmStatus.baseUrl}</span>
                               <button type="button" onClick={stopLocalVllm} disabled={isVllmBusy} className="shrink-0 rounded-lg border border-[var(--hairline)] px-2 py-1 text-[11px] font-medium text-red-500 transition hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-900/20">
-                                {isVllmBusy ? '…' : 'Stop'}
+                                {isVllmBusy ? '...' : 'Stop'}
                               </button>
                             </div>
                           ) : (
@@ -6824,7 +6824,7 @@ export default function ChatApp() {
                                 className="au-focus min-w-0 flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[11px] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
                               />
                               <button type="button" onClick={startLocalVllm} disabled={isVllmBusy || !vllmLocalModel.trim()} className="shrink-0 rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
-                                {isVllmBusy ? 'Starting…' : 'Start'}
+                                {isVllmBusy ? 'Starting...' : 'Start'}
                               </button>
                             </div>
                           )
@@ -6837,42 +6837,42 @@ export default function ChatApp() {
                     )}
                     {provider === 'vllm' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ Or connect to a <strong>remote vLLM server</strong>: enter its URL below (e.g. <code>http://gpu-host:8000/v1</code>). Models load from that server automatically. Key optional.
+                        Or connect to a <strong>remote vLLM server</strong>: enter its URL below (e.g. <code>http://gpu-host:8000/v1</code>). Models load from that server automatically. Key optional.
                       </p>
                     )}
                     {provider === 'openai' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ OpenAI uses https://api.openai.com/v1 and requires an API key.
+                        OpenAI uses https://api.openai.com/v1 and requires an API key.
                       </p>
                     )}
                     {provider === 'grok' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ Grok uses xAI API at https://api.x.ai/v1 and requires an API key.
+                        Grok uses xAI API at https://api.x.ai/v1 and requires an API key.
                       </p>
                     )}
                     {provider === 'groq' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ Groq uses https://api.groq.com/openai/v1 and requires an API key.
+                        Groq uses https://api.groq.com/openai/v1 and requires an API key.
                       </p>
                     )}
                     {provider === 'openrouter' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ OpenRouter uses https://openrouter.ai/api/v1 and requires an API key.
+                        OpenRouter uses https://openrouter.ai/api/v1 and requires an API key.
                       </p>
                     )}
                     {provider === 'gemini' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ Gemini uses Google AI OpenAI endpoint at https://generativelanguage.googleapis.com/v1beta/openai and requires an API key.
+                        Gemini uses Google AI OpenAI endpoint at https://generativelanguage.googleapis.com/v1beta/openai and requires an API key.
                       </p>
                     )}
                     {provider === 'cerebras' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ Cerebras uses https://api.cerebras.ai/v1 and requires an API key (csk-…). Free tier available.
+                        Cerebras uses https://api.cerebras.ai/v1 and requires an API key (csk-...). Free tier available.
                       </p>
                     )}
                     {provider === 'claude' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        ℹ Claude uses Anthropic API at https://api.anthropic.com and requires an API key.
+                        Claude uses Anthropic API at https://api.anthropic.com and requires an API key.
                       </p>
                     )}
                     <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">Base URL</label>
@@ -6946,7 +6946,7 @@ export default function ChatApp() {
                         onClick={() => { setProvider('ollama'); setIsProviderConfigOpen(false); setStatusText('Switched back to Ollama'); }}
                         className="flex-1 rounded-lg border border-[var(--hairline)] px-2 py-1 text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                       >
-                        ← Back to Ollama
+                        Back to Ollama
                       </button>
                       <button
                         type="button"
@@ -7003,7 +7003,7 @@ export default function ChatApp() {
                               <span className="truncate font-semibold">Auto</span>
                             </span>
                             <span className="ml-2 shrink-0 text-[10px] text-[color:var(--text-muted)]">
-                              {pickBestAutoModel(models) ? `→ ${pickBestAutoModel(models).label}` : 'no model installed'}
+                              {pickBestAutoModel(models) ? `uses ${pickBestAutoModel(models).label}` : 'no model installed'}
                             </span>
                           </button>
                         </div>
@@ -7098,7 +7098,7 @@ export default function ChatApp() {
                                         </div>
                                       )}
                                       <span className="animate-pulse text-[10px] text-accent">
-                                        {pulling.pct !== null ? `${pulling.pct}%` : '…'}
+                                        {pulling.pct !== null ? `${pulling.pct}%` : '...'}
                                       </span>
                                       <span
                                         role="button"
@@ -7107,7 +7107,7 @@ export default function ChatApp() {
                                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); cancelInstall(item.id); } }}
                                         className="ml-0.5 cursor-pointer rounded px-1 text-[10px] text-red-400 hover:text-red-600"
                                         title="Cancel install"
-                                      >✕</span>
+                                      ><CloseIcon size={11} /></span>
                                     </div>
                                   ) : (
                                     <span className="ml-2 flex shrink-0 items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
@@ -7141,10 +7141,10 @@ export default function ChatApp() {
                                     onClick={(e) => { e.stopPropagation(); deleteModel(item.ollamaId || item.id, item.id); }}
                                     className="ml-0.5 shrink-0 rounded p-1 text-[10px] text-slate-300 opacity-0 transition hover:text-red-500 group-hover/row:opacity-100 dark:text-[color:var(--text-main)] dark:hover:text-red-400"
                                     title={`Remove ${item.label} to free space`}
-                                  >✕</button>
+                                  ><CloseIcon size={11} /></button>
                                 )}
                                 {isDeleting && (
-                                  <span className="ml-1 shrink-0 animate-pulse text-[10px] text-red-400">…</span>
+                                  <span className="ml-1 shrink-0 animate-pulse text-[10px] text-red-400">...</span>
                                 )}
                                 </div>
                                 );
@@ -7254,7 +7254,7 @@ export default function ChatApp() {
                           rel="noopener noreferrer"
                           className="mt-1.5 inline-block text-[10px] text-[color:var(--text-muted)] underline decoration-[var(--hairline)] underline-offset-2 hover:text-accent"
                         >
-                          Browse the Ollama model library ↗
+                          Browse the Ollama model library
                         </a>
                       </div>
                     )}
@@ -7580,7 +7580,7 @@ export default function ChatApp() {
                           }`}
                         >
                           <span>Config Vault</span>
-                          <span className="text-[10px] opacity-70">{(configVaultStatus?.chunkCount || 0) > 0 ? `${configVaultStatus.fileCount} files · ${configVaultEnabled ? 'on' : 'off'}` : (configVaultEnabled ? 'on · not indexed' : 'off')}</span>
+                          <span className="text-[10px] opacity-70">{(configVaultStatus?.chunkCount || 0) > 0 ? `${configVaultStatus.fileCount} files | ${configVaultEnabled ? 'on' : 'off'}` : (configVaultEnabled ? 'on | not indexed' : 'off')}</span>
                         </button>
                         <button
                           type="button"
@@ -7908,7 +7908,7 @@ export default function ChatApp() {
                             disabled={remoteConnecting || (remoteType === 'ssh' && (!remoteHost.trim() || !remoteUser.trim()))}
                             className="w-full rounded-xl bg-accent py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
                           >
-                            {remoteConnecting ? 'Connecting…' : remoteType === 'local' ? 'Connect to Localhost' : 'Connect via SSH'}
+                            {remoteConnecting ? 'Connecting...' : remoteType === 'local' ? 'Connect to Localhost' : 'Connect via SSH'}
                           </button>
                         </div>
                       )}
@@ -7950,7 +7950,7 @@ export default function ChatApp() {
                           onChange={(event) => setMcpSelectedServerId(event.target.value)}
                           className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                         >
-                          <option value="">Select server…</option>
+                          <option value="">Select server...</option>
                           {mcpServers.map((server) => (
                             <option key={server.id} value={server.id}>{server.name} ({server.id})</option>
                           ))}
@@ -8105,7 +8105,7 @@ export default function ChatApp() {
                                 onChange={(event) => setMcpToolName(event.target.value)}
                                 className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
                               >
-                                <option value="">Select tool…</option>
+                                <option value="">Select tool...</option>
                                 {mcpTools.map((tool) => {
                                   const name = String(tool?.name || '');
                                   return <option key={name} value={name}>{name}</option>;
@@ -8117,7 +8117,7 @@ export default function ChatApp() {
                                 disabled={mcpCalling || !mcpToolName}
                                 className="rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
                               >
-                                {mcpCalling ? 'Running…' : 'Run'}
+                                {mcpCalling ? 'Running...' : 'Run'}
                               </button>
                             </div>
                             <textarea
@@ -8184,7 +8184,7 @@ export default function ChatApp() {
                           disabled={isSettingUpStt}
                           className="w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
                         >
-                          {isSettingUpStt ? 'Installing…' : 'Install local speech-to-text'}
+                          {isSettingUpStt ? 'Installing...' : 'Install local speech-to-text'}
                         </button>
                       )}
                     </div>
@@ -8250,7 +8250,7 @@ export default function ChatApp() {
                           </select>
                           {voiceTools?.platform === 'darwin' && (
                             <p className="text-[10px] text-[color:var(--text-muted)]">
-                              More voices: System Settings → Accessibility → Spoken Content → Manage Voices
+                              More voices: System Settings, Accessibility, Spoken Content, Manage Voices
                             </p>
                           )}
                         </div>
@@ -8282,7 +8282,7 @@ export default function ChatApp() {
                               disabled={isSettingUpVoiceTools}
                               className="w-full rounded-md bg-accent px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40"
                             >
-                              {isSettingUpVoiceTools ? 'Installing…' : 'Install Piper'}
+                              {isSettingUpVoiceTools ? 'Installing...' : 'Install Piper'}
                             </button>
                           </div>
                         )}
@@ -8319,7 +8319,7 @@ export default function ChatApp() {
                                         disabled={downloadingPiperModelId !== null}
                                         className="rounded-md bg-black/5 px-2 py-0.5 font-medium text-[color:var(--text-main)] transition hover:bg-accent hover:text-white disabled:opacity-40 dark:bg-[var(--material-thin)] dark:hover:bg-accent dark:hover:text-white"
                                       >
-                                        {downloadingPiperModelId === model.id ? 'Downloading…' : `${model.sizeMb}MB`}
+                                        {downloadingPiperModelId === model.id ? 'Downloading...' : `${model.sizeMb}MB`}
                                       </button>
                                     )}
                                   </div>
@@ -8517,7 +8517,7 @@ export default function ChatApp() {
                 title="Jump to latest messages"
                 aria-label="Scroll to bottom"
               >
-                {isStreaming && !autoScrollEnabled ? 'New messages ↓' : '↓'}
+                {isStreaming && !autoScrollEnabled ? <span className="inline-flex items-center gap-1">New messages <ArrowDownIcon size={12} /></span> : <ArrowDownIcon size={14} />}
               </button>
             </div>
           )}
@@ -8525,7 +8525,7 @@ export default function ChatApp() {
       </div>
       <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-[color:var(--text-main)]/90">
         {APP_FOOTER_TEXT}
-        <span className="mx-1.5 opacity-40">·</span>
+        <span className="mx-1.5 opacity-40">|</span>
         <span className="opacity-55">{APP_VERSION}</span>
       </footer>
       <CommitmentRadar

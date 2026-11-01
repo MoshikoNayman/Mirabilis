@@ -153,7 +153,7 @@ const send = (chatId, body) => fetch(`${baseUrl}/api/chats/${chatId}/messages/st
 
 const getChat = async (chatId) => (await (await fetch(`${baseUrl}/api/chats/${chatId}`)).json()).chat;
 
-// ── happy path ───────────────────────────────────────────────────────────────
+// happy path
 
 test('a successful stream emits meta, then tokens, then done, in that order', async () => {
   engineMode = 'ok';
@@ -204,7 +204,7 @@ test('a successful reply is persisted with its performance receipt', async () =>
   assert.equal(reply.performance?.source, 'ollama', 'exact engine metrics should be recorded');
 });
 
-// ── failure paths: the defects that shipped ─────────────────────────────────
+// failure paths: the defects that shipped
 
 test('a mid-stream engine error emits an error event and persists NOTHING', async () => {
   engineMode = 'mid-stream-error';
@@ -242,7 +242,7 @@ test('the user message is preserved when generation fails, so the text is not lo
   assert.equal(chat.messages[0]?.content, 'hi');
 });
 
-// ── validation and guards ───────────────────────────────────────────────────
+// validation and guards
 
 test('a missing content field is rejected with 400', async () => {
   const chatId = await newChat();
@@ -305,7 +305,7 @@ test('the session token bootstrap works and unlocks the privileged routes', asyn
   await res.text();
 });
 
-// ── clear-all: the privacy path ─────────────────────────────────────────────
+// clear-all: the privacy path
 
 test('DELETE /api/chats clears every chat and leaves no backup behind', async () => {
   engineMode = 'ok';
@@ -324,7 +324,7 @@ test('DELETE /api/chats clears every chat and leaves no backup behind', async ()
   );
 });
 
-// ── client disconnect ───────────────────────────────────────────────────────
+// client disconnect
 
 test('a client that disconnects mid-stream keeps its partial reply, marked truncated', async () => {
   // The provider adapters swallow AbortError and return normally, so without an

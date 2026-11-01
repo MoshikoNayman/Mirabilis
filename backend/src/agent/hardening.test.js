@@ -14,7 +14,7 @@ import { runAgent } from './agentLoop.js';
 import { resolveEffort } from './effortProfiles.js';
 import { runCommand } from '../services/proc.js';
 
-// ── the destructive-command blocklist ──────────────────────────────────────
+// the destructive-command blocklist
 
 test('the blocklist is not bypassed by flag order or an indirect target', () => {
   // The pattern used to anchor on a target starting with / or ~, so every one
@@ -47,7 +47,7 @@ test('the blocklist does not block ordinary development commands', () => {
   }
 });
 
-// ── the filesystem jail ────────────────────────────────────────────────────
+// the filesystem jail
 
 test('a symlink inside the root does not grant access outside it', async () => {
   const base = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-jail-'));
@@ -77,7 +77,7 @@ test('a symlink inside the root does not grant access outside it', async () => {
   await fs.rm(base, { recursive: true, force: true });
 });
 
-// ── stopping a run ─────────────────────────────────────────────────────────
+// stopping a run
 
 test('an aborted signal stops a shell command and kills its children', async () => {
   const ac = new AbortController();
@@ -101,7 +101,7 @@ test('a registry whose run was cancelled refuses further tool calls', async () =
   assert.match(res.error, /cancelled/i);
 });
 
-// ── reporting the truth about a result ─────────────────────────────────────
+// reporting the truth about a result
 
 test('a validation-rejected answer is never returned as though it passed', async () => {
   // The rejected summary used to survive in finalAnswer while the run repaired.
@@ -131,7 +131,7 @@ test('a validation-rejected answer is never returned as though it passed', async
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-// ── the wall clock ─────────────────────────────────────────────────────────
+// the wall clock
 
 test('each model call is bounded by the remaining wall clock', async () => {
   // The budget was only consulted at loop boundaries, so a provider that
@@ -181,7 +181,7 @@ test('the salvage wrap-up gets a small fixed deadline, not the spent budget', as
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-// ── defects found by running against a REAL local model ────────────────────
+// defects found by running against a REAL local model
 
 test('search_files is case-insensitive by default', async () => {
   // Observed with gemma3:12b: it searched for "error", the log said "ERROR",

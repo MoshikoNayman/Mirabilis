@@ -103,7 +103,7 @@ test('the remaining-budget line is concrete enough to triage against', () => {
   assert.match(text, /tool call/);
 });
 
-// ── overrides may only ever reduce the budget ───────────────────────────────
+// overrides may only ever reduce the budget
 
 test('overrides can lower a budget but never raise it', () => {
   const lowered = resolveEffort('high', { maxIterations: 2 });

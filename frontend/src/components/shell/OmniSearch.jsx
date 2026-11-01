@@ -4,7 +4,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Kbd, PresenceDot, Spinner } from '../ui/primitives';
+import { Modal, Kbd, PresenceDot, Spinner, SearchIcon, ChatIcon, FolderIcon } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
 import { getJSON, API_BASE } from '../../lib/api';
 import { PROVIDERS } from '../../lib/presence';
@@ -129,7 +129,7 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
     }
   }
 
-  // Flat, ordered view of all results so ↑/↓ can move a single highlight across
+  // Flat, ordered view of all results so the arrow keys can move a single highlight across
   // the Chats / IntelLedger / Providers groups (mirrors CommandPalette).
   const flat = useMemo(() => [
     ...chatResults.map((c) => ({ type: 'chat', item: c })),
@@ -161,14 +161,14 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
     <Modal open={open} onClose={() => appStore.closeSearch()} align="top" className="max-w-[600px]" labelledBy="omni-title">
       <div className="au-chrome au-hairline au-elev-3 overflow-hidden rounded-[var(--r-xl)]">
         <div className="flex items-center gap-2 border-b px-4 py-3" style={{ borderColor: 'var(--hairline)' }}>
-          <span className="text-[color:var(--text-muted)]">🔍</span>
+          <span className="text-[color:var(--text-muted)]"><SearchIcon size={15} /></span>
           <input
             id="omni-title"
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search chats, ledger, and providers…"
+            placeholder="Search chats, ledger, and providers..."
             className="w-full bg-transparent text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
           />
           {loading ? <Spinner /> : <Kbd>Esc</Kbd>}
@@ -177,14 +177,14 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
           {chatResults.length > 0 && (
             <Section title="Chats">
               {chatResults.map((c, i) => (
-                <Row key={c.id} icon="💬" title={c.title} sub={c.preview} active={active === i} onClick={() => openChat(c)} />
+                <Row key={c.id} icon={<ChatIcon size={15} />} title={c.title} sub={c.preview} active={active === i} onClick={() => openChat(c)} />
               ))}
             </Section>
           )}
           {ledger.length > 0 && (
             <Section title="IntelLedger">
               {ledger.map((s, i) => (
-                <Row key={s.id} icon="🗂" title={s.title} sub={s.preview} active={active === chatResults.length + i} onClick={() => openSession(s)} />
+                <Row key={s.id} icon={<FolderIcon size={15} />} title={s.title} sub={s.preview} active={active === chatResults.length + i} onClick={() => openSession(s)} />
               ))}
             </Section>
           )}
@@ -231,7 +231,7 @@ function Row({ icon, leading, title, sub, onClick, active }) {
       onClick={onClick}
       className={`au-focus flex w-full items-center gap-3 rounded-[var(--r-md)] px-3 py-2 text-left transition hover:bg-[color:var(--hairline)] ${active ? 'bg-[color:var(--hairline)]' : ''}`}
     >
-      {leading || <span className="text-[length:var(--text-md)]">{icon}</span>}
+      {leading || <span className="flex w-4 justify-center text-[color:var(--text-muted)]">{icon}</span>}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)]">{title}</span>
         {sub ? <span className="truncate text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{sub}</span> : null}

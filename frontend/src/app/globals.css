@@ -2,13 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─────────────────────────────────────────────────────────────────────────
+/*
    COLOR SCHEMES  (applied via  html[data-color-scheme="x"])
-   Four schemes × light/dark variants.
+   Four schemes x light/dark variants.
    Default = mirabilis (no attribute needed).
-───────────────────────────────────────────────────────────────────────── */
+*/
 
-/* ── Mirabilis (default) ── green accent, modern blue-tinted light bg ── */
+/* Mirabilis (default) green accent, modern blue-tinted light bg */
 :root,
 [data-color-scheme="mirabilis"] {
   color-scheme: light;
@@ -37,7 +37,7 @@
   --code-lang:    #1aa86f;
 }
 
-/* ── Arctic ── icy sky-blue accent, crisp pale bg, Linear-inspired ── */
+/* Arctic icy sky-blue accent, crisp pale bg, Linear-inspired */
 [data-color-scheme="arctic"] {
   color-scheme: light;
   --bg-start: #f0f8ff;
@@ -65,7 +65,7 @@
   --code-lang:    #0ea5e9;
 }
 
-/* ── Ember ── warm parchment, amber accent, editorial feel ── */
+/* Ember warm parchment, amber accent, editorial feel */
 [data-color-scheme="ember"] {
   color-scheme: light;
   --bg-start: #fdf6e8;
@@ -93,7 +93,7 @@
   --code-lang:    #c2710c;
 }
 
-/* ── Summit ── Apple design language: SF-clean neutral, system blue ── */
+/* Summit Apple design language: SF-clean neutral, system blue */
 [data-color-scheme="summit"] {
   color-scheme: light;
   --bg-start: #f5f5f7;
@@ -121,7 +121,7 @@
   --code-lang:    #64b5f6;
 }
 
-/* ───── Dark variants of each scheme ───── */
+/* Dark variants of each scheme */
 .dark:root,
 .dark [data-color-scheme="mirabilis"],
 .dark[data-color-scheme="mirabilis"] {
@@ -218,7 +218,7 @@ body {
   min-height: 100%;
 }
 
-/* ── Font overrides via data-font attribute ───────────────────────────── */
+/* Font overrides via data-font attribute */
 [data-font="system"] body   { font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'Avenir Next', sans-serif; }
 [data-font="tahoma"] body   { font-family: Tahoma, Geneva, Verdana, sans-serif; }
 /* data-font="jakarta" is the default - no override needed */

@@ -48,8 +48,8 @@ function tolerantParse(jsonText) {
   const attempts = [
     (t) => t,
     (t) => t.replace(/,\s*([}\]])/g, '$1'),              // trailing commas
-    (t) => t.replace(/[“”]/g, '"').replace(/[‘’]/g, "'"), // smart quotes
-    (t) => t.replace(/,\s*([}\]])/g, '$1').replace(/[“”]/g, '"')
+    (t) => t.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'"), // smart quotes
+    (t) => t.replace(/,\s*([}\]])/g, '$1').replace(/[\u201C\u201D]/g, '"')
   ];
   for (const fix of attempts) {
     try { return JSON.parse(fix(jsonText)); } catch { /* try the next repair */ }

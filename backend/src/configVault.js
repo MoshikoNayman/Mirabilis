@@ -203,7 +203,7 @@ export function createConfigVault({ recall, vaultStorePath }) {
       startLine: r.startLine,
       endLine: r.endLine,
       citation: `${r.relPath}:${r.startLine}-${r.endLine}`,
-      snippet: r.text.length > 700 ? `${r.text.slice(0, 700)}…` : r.text
+      snippet: r.text.length > 700 ? `${r.text.slice(0, 700)}...` : r.text
     }));
     return { ok: true, root: store.root, embedModel: store.embedModel, results };
   }

@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import ChatApp from './ChatApp';
 import IntelLedgerSession from './IntelLedgerSession';
 import InfoHint from './ui/InfoHint';
+import { CloseIcon } from './ui/primitives';
 import AppErrorBoundary from './ui/AppErrorBoundary';
 import AuroraChrome from './shell/AuroraChrome';
 import TabSwitch from './shell/TabSwitch';
@@ -140,7 +141,7 @@ function sessionInsights(session) {
   }
 
   if (parts.length > 0) {
-    return parts.join(' • ');
+    return parts.join(' | ');
   }
 
   return '';
@@ -263,7 +264,7 @@ export default function MirabilisApp() {
       {activeTab === 'intel' && (
         <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-[color:var(--text-main)]/90">
           {APP_FOOTER_TEXT}
-          <span className="mx-1.5 opacity-40">·</span>
+          <span className="mx-1.5 opacity-40">|</span>
           <span className="opacity-55">{APP_VERSION}</span>
         </footer>
       )}
@@ -1119,7 +1120,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                       <ul className="space-y-1">
                         {auditOverview.trends.top_types_24h.slice(0, 5).map((item) => (
                           <li key={item.event_type} className="flex items-center justify-between gap-2 text-[11px]">
-                            <span className="truncate text-[color:var(--text-main)]">{String(item.event_type || '').replace(/\./g, ' › ')}</span>
+                            <span className="truncate text-[color:var(--text-main)]">{String(item.event_type || '').replace(/\./g, ' > ')}</span>
                             <span className="font-semibold text-[color:var(--text-main)]">{item.count}</span>
                           </li>
                         ))}
@@ -1153,7 +1154,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                                 <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">7d {tenant.count_7d || 0}</span>
                                 {(tenant.top_types || []).slice(0, 2).map((type) => (
                                   <span key={`${tenant.tenant_id}-${type.event_type}`} className="rounded-full border border-[var(--hairline)] px-2 py-0.5">
-                                    {String(type.event_type || '').replace(/\./g, ' › ')} ({type.count || 0})
+                                    {String(type.event_type || '').replace(/\./g, ' > ')} ({type.count || 0})
                                   </span>
                                 ))}
                               </div>
@@ -1384,7 +1385,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                   disabled={crossSynthesis?.loading}
                   className="rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-white shadow-[0_8px_18px_-10px_rgba(26,168,111,0.8)] transition hover:brightness-95 disabled:opacity-50"
                 >
-                  {crossSynthesis?.loading ? 'Analyzing…' : `Synthesize ${selectedSessions.size}`}
+                  {crossSynthesis?.loading ? 'Analyzing...' : `Synthesize ${selectedSessions.size}`}
                 </button>
                 <button
                   type="button"
@@ -1413,7 +1414,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                   onClick={deselectAll}
                   className="ml-auto rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-muted)] transition hover:bg-black/5 dark:border-white/20 dark:text-[color:var(--text-muted)] dark:hover:bg-[var(--material-thin)]"
                 >
-                  ✕
+                  <CloseIcon size={12} />
                 </button>
               </div>
             )}

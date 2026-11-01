@@ -1,11 +1,11 @@
 // frontend/src/components/shell/CommandPalette.jsx
-// ⌘K Spotlight-style command palette. Drives theme/scheme/font/sounds directly
+// Cmd+K Spotlight-style command palette. Drives theme/scheme/font/sounds directly
 // (shared modules) and emits CustomEvents for chat-specific actions so it stays
 // decoupled from the ChatApp monolith.
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Kbd } from '../ui/primitives';
+import { Modal, Kbd, PencilIcon, ChatIcon, FolderIcon, SearchIcon, UsersIcon, MoonIcon, BellIcon, GlobeIcon, PaletteIcon, TypeIcon } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
 import {
   SCHEMES, SCHEME_META, FONTS, FONT_META, setScheme, setFont, cycleMode, getMode
@@ -39,21 +39,21 @@ export default function CommandPalette({ open, onTab }) {
 
   const commands = useMemo(() => {
     const cmds = [
-      { id: 'new-chat', title: 'New chat', hint: 'Start a fresh conversation', icon: '✎', run: () => { onTab?.('chat'); emit('mirabilis:new-chat'); } },
-      { id: 'go-chat', title: 'Go to Chat', icon: '💬', run: () => onTab?.('chat') },
-      { id: 'go-intel', title: 'Go to IntelLedger', icon: '🗂', run: () => onTab?.('intel') },
-      { id: 'search', title: 'Search everything…', hint: 'Chats and providers', icon: '🔍', run: () => appStore.openSearch() },
-      { id: 'buddy', title: 'Open Buddy List', icon: '🌼', run: () => appStore.setBuddyOpen(true) },
-      { id: 'theme', title: `Toggle appearance (now: ${getMode()})`, icon: '◐', run: () => cycleMode() },
-      { id: 'sound', title: isMuted() ? 'Unmute sounds' : 'Mute sounds', icon: '🔔', run: () => { toggleMuted(); } },
-      { id: 'web', title: 'Toggle web search', icon: '🌐', run: () => emit('mirabilis:toggle-web-search') }
+      { id: 'new-chat', title: 'New chat', hint: 'Start a fresh conversation', icon: <PencilIcon size={15} />, run: () => { onTab?.('chat'); emit('mirabilis:new-chat'); } },
+      { id: 'go-chat', title: 'Go to Chat', icon: <ChatIcon size={15} />, run: () => onTab?.('chat') },
+      { id: 'go-intel', title: 'Go to IntelLedger', icon: <FolderIcon size={15} />, run: () => onTab?.('intel') },
+      { id: 'search', title: 'Search everything...', hint: 'Chats and providers', icon: <SearchIcon size={15} />, run: () => appStore.openSearch() },
+      { id: 'buddy', title: 'Open Buddy List', icon: <UsersIcon size={15} />, run: () => appStore.setBuddyOpen(true) },
+      { id: 'theme', title: `Toggle appearance (now: ${getMode()})`, icon: <MoonIcon size={15} />, run: () => cycleMode() },
+      { id: 'sound', title: isMuted() ? 'Unmute sounds' : 'Mute sounds', icon: <BellIcon size={15} />, run: () => { toggleMuted(); } },
+      { id: 'web', title: 'Toggle web search', icon: <GlobeIcon size={15} />, run: () => emit('mirabilis:toggle-web-search') }
     ];
     SCHEMES.forEach((s) => cmds.push({
-      id: `scheme-${s}`, title: `Theme: ${SCHEME_META[s].label}`, icon: '🎨',
+      id: `scheme-${s}`, title: `Theme: ${SCHEME_META[s].label}`, icon: <PaletteIcon size={15} />,
       group: 'Appearance', run: () => setScheme(s)
     }));
     FONTS.forEach((f) => cmds.push({
-      id: `font-${f}`, title: `Font: ${FONT_META[f]}`, icon: '🔤',
+      id: `font-${f}`, title: `Font: ${FONT_META[f]}`, icon: <TypeIcon size={15} />,
       group: 'Appearance', run: () => setFont(f)
     }));
     return cmds;
@@ -106,7 +106,7 @@ export default function CommandPalette({ open, onTab }) {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActive(0); }}
             onKeyDown={onKeyDown}
-            placeholder="Type a command…"
+            placeholder="Type a command..."
             className="w-full bg-transparent text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
           />
           <Kbd>Esc</Kbd>
@@ -125,12 +125,12 @@ export default function CommandPalette({ open, onTab }) {
                   i === active ? 'bg-[color:var(--hairline)]' : ''
                 }`}
               >
-                <span className="text-[length:var(--text-md)]">{cmd.icon}</span>
+                <span className="flex w-4 justify-center text-[color:var(--text-muted)]">{cmd.icon}</span>
                 <span className="flex flex-1 flex-col">
                   <span className="text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)]">{cmd.title}</span>
                   {cmd.hint ? <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{cmd.hint}</span> : null}
                 </span>
-                {i === active ? <Kbd>↵</Kbd> : null}
+                {i === active ? <Kbd>Enter</Kbd> : null}
               </button>
             ))
           )}

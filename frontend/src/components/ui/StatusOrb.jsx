@@ -66,7 +66,7 @@ export default function StatusOrb({ state = 'unknown', size = 34, onClick, label
       type="button"
       onClick={onClick}
       aria-label={label || 'Buddy list and presence'}
-      title={spinning ? 'Searching…' : (label || 'Buddy list')}
+      title={spinning ? 'Searching...' : (label || 'Buddy list')}
       className="au-focus relative inline-flex items-center justify-center rounded-full transition active:scale-95"
       style={{ width: size, height: size }}
     >

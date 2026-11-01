@@ -36,7 +36,7 @@ export default function AuroraChrome({ activeTab, onTab }) {
     return watchSystemTheme();
   }, []);
 
-  // Global keyboard: ⌘K / Ctrl-K command palette, ⌘/ search.
+  // Global keyboard: Cmd+K / Ctrl-K command palette, Cmd+/ search.
   useEffect(() => {
     function onKey(e) {
       const meta = e.metaKey || e.ctrlKey;

@@ -56,7 +56,7 @@ test('saveChat persists across an independent read (cache-invalidation sanity)',
   assert.equal(store.chats.find((c) => c.id === 'x')?.title, 'X');
 });
 
-// ── clearChats / deleteChat: the paths that shipped a data-loss and a privacy bug ──
+// clearChats / deleteChat: the paths that shipped a data-loss and a privacy bug
 
 test('clearChats empties the store, twice in a row, in one process', async () => {
   const p = await tmpStore();
@@ -107,7 +107,7 @@ test('deleteChat returns false for an unknown id and leaves the store intact', a
   assert.equal((await readStore(p)).chats.length, 1);
 });
 
-// ── epoch guard: a save already in flight must not resurrect a cleared store ──
+// epoch guard: a save already in flight must not resurrect a cleared store
 
 test('getEpoch advances on clear, and a save enqueued before the clear is dropped', async () => {
   const p = await tmpStore();
@@ -125,7 +125,7 @@ test('getEpoch advances on clear, and a save enqueued before the clear is droppe
   assert.deepEqual((await readStore(p)).chats, [], 'a save from before the clear must not resurrect data');
 });
 
-// ── Off-the-Record: ephemeral chats must never reach disk ──
+// Off-the-Record: ephemeral chats must never reach disk
 
 test('ephemeral chats stay in memory and never touch the store file', async () => {
   const p = await tmpStore();

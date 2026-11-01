@@ -11,7 +11,7 @@ describe('SSE parsing', () => {
     expect(parseSseBody('data: plain\n\n')).toEqual([{ event: 'message', data: 'plain' }]);
   });
 
-  // ── the three assumptions the inline version got wrong ───────────────────
+  // the three assumptions the inline version got wrong
 
   test('handles CRLF line endings', () => {
     // The \r used to survive into the payload and break JSON.parse.
@@ -37,7 +37,7 @@ describe('SSE parsing', () => {
     expect(parseSseBody('data:  two spaces\n\n')[0].data).toBe(' two spaces');
   });
 
-  // ── streaming behaviour ──────────────────────────────────────────────────
+  // streaming behaviour
 
   test('an event split across chunks is still parsed once', () => {
     const p = createSseParser();
@@ -78,7 +78,7 @@ describe('SSE parsing', () => {
     expect(p.flush()).toEqual([]);
   });
 
-  // ── things that must not become events ───────────────────────────────────
+  // things that must not become events
 
   test('comment and keep-alive lines are ignored', () => {
     const events = parseSseBody(': keep-alive\n\nevent: real\ndata: 1\n\n');
@@ -101,7 +101,7 @@ describe('SSE parsing', () => {
     ]);
   });
 
-  // ── robustness ───────────────────────────────────────────────────────────
+  // robustness
 
   test('a data payload containing blank lines and braces survives intact', () => {
     const json = JSON.stringify({ text: 'para one\n\npara two', nested: { a: [1, 2] } });

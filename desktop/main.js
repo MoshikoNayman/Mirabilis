@@ -4,7 +4,7 @@
 const { app, BrowserWindow, shell, Tray, Menu, nativeImage, dialog } = require('electron');
 app.name = 'Mirabilis AI';
 
-// ── Single-instance lock ───────────────────────────────────────────────────
+// Single-instance lock
 // Prevents a second launch fighting over ports 3000/4000
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -75,7 +75,7 @@ let backendProc = null;
 let frontendProc = null;
 let servicesStarted = false;
 
-// ── Resolve paths ──────────────────────────────────────────────────────────
+// Resolve paths
 const BACKEND_DIR  = path.join(SPAWN_ROOT, 'backend');
 const FRONTEND_DIR = path.join(ROOT_DIR, 'frontend');
 // Next standalone output can be either:
@@ -94,7 +94,7 @@ function resolveStandaloneServer() {
 }
 const LOG_DIR      = app.getPath('logs');
 
-// ── Logging helpers ────────────────────────────────────────────────────────
+// Logging helpers
 function makeLog(name) {
   const logPath = path.join(LOG_DIR, `${name}.log`);
   return fs.createWriteStream(logPath, { flags: 'a' });
@@ -132,7 +132,7 @@ function buildStartupDiagnostics(err) {
   return lines.join('\n');
 }
 
-// ── Port cleanup ───────────────────────────────────────────────────────────
+// Port cleanup
 // Reclaim a port ONLY from a stale Mirabilis server - never from a foreign app.
 // The previous version blindly `kill -9`'d whatever held ports 3000/4000, which
 // would silently kill an unrelated dev server the user had running. We now look
@@ -200,7 +200,7 @@ async function freePort(port) {
   }
 }
 
-// ── Start backend (Express) ────────────────────────────────────────────────
+// Start backend (Express)
 function startBackend() {
   return new Promise((resolve, reject) => {
     const out = makeLog('backend');
@@ -245,7 +245,7 @@ function startBackend() {
   });
 }
 
-// ── Start Next.js frontend ─────────────────────────────────────────────────
+// Start Next.js frontend
 function startFrontend() {
   return new Promise((resolve, reject) => {
     const out = makeLog('frontend');
@@ -331,7 +331,7 @@ function isSafeExternalUrl(url) {
   }
 }
 
-// ── Create the browser window ──────────────────────────────────────────────
+// Create the browser window
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -397,7 +397,7 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-// ── Tray icon ──────────────────────────────────────────────────────────────
+// Tray icon
 function createTray() {
   // Use a blank 16x16 tray icon (replace with actual icon later)
   const icon = nativeImage.createFromPath(path.join(__dirname, 'icons', 'icon.png')).resize({ width: 16, height: 16 });
@@ -414,7 +414,7 @@ function createTray() {
   tray.on('click', () => { mainWindow ? mainWindow.show() : createWindow(); });
 }
 
-// ── App lifecycle ──────────────────────────────────────────────────────────
+// App lifecycle
 app.whenReady().then(async () => {
   // Override the default application menu so nothing says "Electron"
   if (process.platform === 'darwin') {
@@ -510,7 +510,7 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// ── Orphaned process cleanup ───────────────────────────────────────────────
+// Orphaned process cleanup
 // Kill child processes on any exit path including crashes
 function killChildren() {
   try { if (frontendProc) { frontendProc.kill('SIGKILL'); frontendProc = null; } } catch {}

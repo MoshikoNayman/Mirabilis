@@ -9,7 +9,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Panel, IconButton, Button, Badge, FolderIcon, Spinner } from '../ui/primitives';
+import { Panel, IconButton, Button, Badge, FolderIcon, Spinner, CloseIcon } from '../ui/primitives';
 import { appStore, useAppStore } from '../../store/useAppStore';
 import { getJSON, postJSON, apiFetch } from '../../lib/api';
 
@@ -180,7 +180,7 @@ export default function WatchedWorkspace({ open }) {
                 : 'Watch a local folder for live context'}
             </span>
           </div>
-          <IconButton label="Close" onClick={() => appStore.closeWorkspace()}>✕</IconButton>
+          <IconButton label="Close" onClick={() => appStore.closeWorkspace()}><CloseIcon size={14} /></IconButton>
         </div>
 
         {/* Path input + Watch */}

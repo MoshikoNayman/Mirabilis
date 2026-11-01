@@ -80,14 +80,14 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
   const limits = budget?.limits;
   const lastEvent = events.length ? events[events.length - 1].text : '';
 
-  // The one line. Numbers only, no labels: "8m · 3/12 · 7/60" reads at a glance
+  // The one line. Numbers only, no labels: "8m | 3/12 | 7/60" reads at a glance
   // and the popover carries the words for anyone who wants them.
   const summary = limits
     ? [
       live ? fmtShort(limits.maxWallMs - (budget.elapsedMs || 0)) : (stopReason || status),
       `${budget.iterations}/${limits.maxIterations}`,
       `${budget.toolCalls}/${limits.maxToolCalls}`
-    ].join(' · ')
+    ].join(' | ')
     : (stopReason || status);
 
   const headline = live
@@ -122,7 +122,7 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
         <span className="hidden shrink-0 font-mono text-[color:var(--text-muted)] md:inline">{summary}</span>
         {live && lastEvent && (
           <span className="hidden min-w-0 truncate text-[color:var(--text-muted)] opacity-70 lg:inline">
-            · {lastEvent}
+            | {lastEvent}
           </span>
         )}
         <svg viewBox="0 0 20 20" aria-hidden="true" fill="currentColor"
@@ -164,7 +164,7 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
             <div className="min-w-0">
               <p className="truncate text-[11px] font-semibold text-[color:var(--text-main)]">{goal}</p>
               <p className="mt-0.5 text-[10px] text-[color:var(--text-muted)]">
-                {effort}{run.policy ? ` · ${run.policy}` : ''}{stopReason ? ` · ${stopReason}` : ''}
+                {effort}{run.policy ? ` | ${run.policy}` : ''}{stopReason ? ` | ${stopReason}` : ''}
               </p>
             </div>
             {live && onStop && (
@@ -173,7 +173,7 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
                 onClick={onStop}
                 className="shrink-0 rounded-full border border-red-400/50 px-2 py-0.5 text-[10px] font-semibold text-red-600 transition hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
               >
-                {status === 'stopping' ? 'Stopping…' : 'Stop'}
+                {status === 'stopping' ? 'Stopping...' : 'Stop'}
               </button>
             )}
           </div>

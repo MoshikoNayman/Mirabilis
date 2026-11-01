@@ -693,7 +693,7 @@ async function ensureOllamaModel() {
 }
 
 
-// ── Provider binary installation, cross platform ────────────────────────────
+// Provider binary installation, cross platform
 //
 // Pinned by default so an install is reproducible and nobody silently runs
 // whatever upstream published this morning. Override to move to a newer build.

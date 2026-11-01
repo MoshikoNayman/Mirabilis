@@ -88,7 +88,7 @@ const TOOLS = [
       required: []
     }
   },
-  // ── System / OS tools ────────────────────────────────────────────────────
+  // System / OS tools
   {
     name: 'system_info',
     description: 'Get system information about the machine running Mirabilis: OS, platform, architecture, hostname, home directory, working directory.',
@@ -377,7 +377,7 @@ export function createMcpServerHandler({ config, streamWithProvider, getEffectiv
 
     void appendServerAudit(auditLogPath, 'mcp_request', { method, clientIp, sessionId: sessionId || undefined });
 
-    // ── initialize ────────────────────────────────────────────────────────
+    // initialize
     if (method === 'initialize') {
       const newSessionId = randomUUID();
       activeSessions.set(newSessionId, { createdAt: Date.now() });
@@ -394,19 +394,19 @@ export function createMcpServerHandler({ config, streamWithProvider, getEffectiv
       return;
     }
 
-    // ── notifications/initialized ─────────────────────────────────────────
+    // notifications/initialized
     if (method === 'notifications/initialized') {
       res.status(204).end();
       return;
     }
 
-    // ── tools/list ────────────────────────────────────────────────────────
+    // tools/list
     if (method === 'tools/list') {
       res.json(jsonRpcResponse(id, { tools: TOOLS }));
       return;
     }
 
-    // ── tools/call ────────────────────────────────────────────────────────
+    // tools/call
     if (method === 'tools/call') {
       const toolName = String(params?.name || '').trim();
       const args = params?.arguments && typeof params.arguments === 'object' ? params.arguments : {};
@@ -474,7 +474,7 @@ export function createMcpServerHandler({ config, streamWithProvider, getEffectiv
       return;
     }
 
-    // ── unknown method ────────────────────────────────────────────────────
+    // unknown method
     void appendServerAudit(auditLogPath, 'unknown_method', { method, clientIp });
     res.status(404).json(jsonRpcError(id, -32601, `Method not found: ${method}`));
   };

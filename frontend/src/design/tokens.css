@@ -1,16 +1,16 @@
-/* ─────────────────────────────────────────────────────────────────────────
+/*
    AURORA DESIGN TOKENS
    The Fusion: ICQ soul (presence, buddy list, the flower orb) rendered with
    Apple craft (vibrancy materials, SF typography, squircles, restraint).
 
    This layer is ADDITIVE on top of the existing color-scheme variables in
-   globals.css (--accent, --panel, --text-main, …). It introduces the shared
+   globals.css (--accent, --panel, --text-main, ...). It introduces the shared
    scales the new component layer (src/components/ui/*) is built on, so styling
    stops being ad-hoc.
-───────────────────────────────────────────────────────────────────────── */
+*/
 
 :root {
-  /* ── Type stack ── SF Pro first, the existing switchable stacks remain ── */
+  /* Type stack SF Pro first, the existing switchable stacks remain */
   --font-ui:
     'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Inter',
     'Plus Jakarta Sans', 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
@@ -20,7 +20,7 @@
   --font-mono:
     'SF Mono', 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
 
-  /* ── Tightened type scale (replaces the 10/11/12/13px scatter) ── */
+  /* Tightened type scale (replaces the 10/11/12/13px scatter) */
   --text-2xs: 0.6875rem;  /* 11px - meta, badges */
   --text-xs:  0.75rem;    /* 12px - secondary */
   --text-sm:  0.8125rem;  /* 13px - body default */
@@ -31,7 +31,7 @@
   --weight-medium:  550;
   --weight-bold:    680;
 
-  /* ── Squircle radii ── continuous-corner feel: big surfaces round more ── */
+  /* Squircle radii continuous-corner feel: big surfaces round more */
   --r-xs:   6px;
   --r-sm:   9px;
   --r-md:   13px;
@@ -39,7 +39,7 @@
   --r-xl:   24px;
   --r-pill: 999px;
 
-  /* ── Spacing rhythm (4px grid) ── */
+  /* Spacing rhythm (4px grid) */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -47,7 +47,7 @@
   --space-5: 24px;
   --space-6: 32px;
 
-  /* ── Apple-style vibrancy materials (layered translucency) ──
+  /* Apple-style vibrancy materials (layered translucency)
      Built on the per-scheme --panel value so they recolor with the theme.   */
   --material-chrome:  color-mix(in srgb, var(--panel) 96%, transparent);
   --material-thick:   color-mix(in srgb, var(--panel) 90%, transparent);
@@ -56,20 +56,20 @@
   --material-blur:    saturate(180%) blur(22px);
   --hairline: var(--panel-border);
 
-  /* ── Elevation (soft, Apple-like; never heavy) ── */
+  /* Elevation (soft, Apple-like; never heavy) */
   --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
   --shadow-2: 0 6px 18px -8px rgba(15, 23, 42, 0.28);
   --shadow-3: 0 24px 60px -28px rgba(15, 23, 42, 0.45);
   --ring: color-mix(in srgb, var(--accent) 55%, transparent);
 
-  /* ── Presence palette (the ICQ idea, semantic) ── */
+  /* Presence palette (the ICQ idea, semantic) */
   --presence-online:  var(--accent);
   --presence-away:    #f5a623;
   --presence-needkey: #1e65ff;
   --presence-busy:    #a855f7;
   --presence-offline: #94a3b8;
 
-  /* ── Motion (one easing set, honored everywhere) ── */
+  /* Motion (one easing set, honored everywhere) */
   --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 140ms;
@@ -92,9 +92,9 @@
   }
 }
 
-/* ─────────────────────────────────────────────────────────────────────────
+/*
    AURORA UTILITY CLASSES (used by the ui/ primitives)
-───────────────────────────────────────────────────────────────────────── */
+*/
 
 .au-material {
   background: var(--material-regular);
@@ -122,7 +122,7 @@
   box-shadow: 0 0 0 3px var(--ring);
 }
 
-/* ── Presence dot ───────────────────────────────────────────────────────── */
+/* Presence dot */
 .au-dot {
   width: 9px;
   height: 9px;
@@ -147,7 +147,7 @@
   50%      { box-shadow: 0 0 0 2px var(--material-chrome), 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
 }
 
-/* ── Status orb (the living flower ring) ────────────────────────────────── */
+/* Status orb (the living flower ring) */
 .au-orb-ring {
   animation: au-breathe 5.5s var(--ease-out) infinite;
 }
@@ -168,7 +168,7 @@
 @keyframes icq-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .icq-spin { animation: none; } }
 
-/* ── Voice chat talk orb ────────────────────────────────────────────────────
+/* Voice chat talk orb
    The pulsing flower in Voice chat. It beats fast while LISTENING, holds a calm
    swell while SPEAKING, dims gently while THINKING, and rests when idle. Pure
    transform/opacity/filter so it stays GPU-cheap. */
@@ -192,7 +192,7 @@
   .vc-orb, .vc-orb[data-phase] { animation: none; }
 }
 
-/* ── Typing dots ────────────────────────────────────────────────────────── */
+/* Typing dots */
 .au-typing { display: inline-flex; gap: 3px; align-items: center; }
 .au-typing > i {
   width: 5px; height: 5px; border-radius: 999px;
@@ -206,7 +206,7 @@
   30%           { transform: translateY(-3px);  opacity: 1; }
 }
 
-/* ── Entrance / overlay motion ──────────────────────────────────────────── */
+/* Entrance / overlay motion */
 .au-enter { animation: au-enter var(--dur-med) var(--ease-spring); }
 @keyframes au-enter {
   from { opacity: 0; transform: translateY(8px) scale(0.99); }
@@ -220,7 +220,7 @@
 .au-backdrop { animation: au-fade var(--dur-fast) ease; }
 @keyframes au-fade { from { opacity: 0; } to { opacity: 1; } }
 
-/* ── Scrollbar (refined) ────────────────────────────────────────────────── */
+/* Scrollbar (refined) */
 .au-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
 .au-scroll::-webkit-scrollbar-thumb {
   background-color: color-mix(in srgb, var(--text-muted) 35%, transparent);

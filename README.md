@@ -423,7 +423,7 @@ POST http://127.0.0.1:4000/mcp
 | `mirabilis_health` | Check readiness of all configured providers |
 | `system_info` | OS, platform, architecture, hostname, home dir, cwd |
 | `list_dir` | List files and directories at a path |
-| `read_file` | Read a file's text content (≤ 512 KB) |
+| `read_file` | Read a file's text content (<= 512 KB) |
 | `write_file` | Write/overwrite a file - requires `confirmed: true` |
 | `run_command` | Run a shell command (macOS/Linux/Windows) - requires `confirmed: true` |
 

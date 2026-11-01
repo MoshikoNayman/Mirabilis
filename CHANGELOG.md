@@ -199,7 +199,7 @@ Notes on how it behaves:
 
 #### Provider UX Improvements
 - Provider dropdown shows Local/Remote scope labels under each option.
-- Renamed `Custom Endpoint` → `Local/Custom Endpoint` for clarity.
+- Renamed `Custom Endpoint` -> `Local/Custom Endpoint` for clarity.
 - Per-provider info banners in Configure endpoint panel (base URL, key format, link context).
 - API key placeholders show expected key prefix (`sk-...`, `gsk_...`, `sk-or-...`, `AIza...`, `sk-ant-...`).
 - Key required/optional label adapts per provider.
@@ -246,7 +246,7 @@ Notes on how it behaves:
 ### Auto-Install on Startup
 
 - **Zero-touch install**: `node run.js` now auto-installs dependencies if missing, instead of failing with an error.
-- **Seamless UX**: Fresh clone → `node run.js` → instant startup, no intermediate `node run.js install` needed.
+- **Seamless UX**: Fresh clone -> `node run.js` -> instant startup, no intermediate `node run.js install` needed.
 - **Pre-flight check**: Detects missing backend/frontend node_modules or Python venv before startup begins.
 - **Impact**: Reduces friction for new users; fresh clones now "just work."
 
@@ -271,9 +271,9 @@ Notes on how it behaves:
 - **Pure JS cutover**: All operations now exclusively via `node run.js`. No shell dependencies, works cross-platform.
 - **Updated README**: New architecture section documenting 100% pure JavaScript design.
 - **User-facing changes**:
-  - `./install.sh` → `node run.js install`
-  - `./run.sh [provider]` → `node run.js [provider]`
-  - `./run.sh uninstall` → `node run.js uninstall`
+  - `./install.sh` -> `node run.js install`
+  - `./run.sh [provider]` -> `node run.js [provider]`
+  - `./run.sh uninstall` -> `node run.js uninstall`
   - All commands (`stop`, `restart`, `doctor`, `logs`) via `node run.js`
 - **Significance**: Completes pre-cutover strategy. No more shell wrapper fallbacks. Production-ready pure JS launcher.
 
@@ -539,10 +539,10 @@ Notes on how it behaves:
 - **4-scheme palette system** - Mirabilis (green), Dusk (indigo/violet), Ember (warm amber), Summit (Apple blue). Replaces hardcoded accent values with CSS custom properties; Tailwind `accent`/`accentSoft` tokens now resolve from CSS vars, so all components update automatically on scheme switch.
 - **Palette picker** - 4-button pill grid in the Appearance panel; no-flash restore via inline script in `layout.js`.
 - **Syntax highlighting** - `react-syntax-highlighter` (Prism) with a per-scheme 13-var token theme covering comment, keyword, tag, attr, string, number, fn, and lang tokens. Line numbers included.
-- **Streaming phase labels** - typing indicator cycles through Processing → Thinking → Generating → Loading model → Still working… phases during long inference.
-- **Role labels** - "user" → "You", "assistant" → "AI".
+- **Streaming phase labels** - typing indicator cycles through Processing -> Thinking -> Generating -> Loading model -> Still working... phases during long inference.
+- **Role labels** - "user" -> "You", "assistant" -> "AI".
 - **Auto-scroll overhaul** - programmatic vs. user scroll guard via `isProgrammaticScrollRef`; ref checked inside `requestAnimationFrame` (not just at effect entry) to close the RAF-queue race. `lastScrollTopRef` synced after every programmatic scroll so direction detection stays accurate.
-- **"New messages ↓" pill** - centered at bottom of chat, themed to current palette accent color.
+- **"New messages down" pill** - centered at bottom of chat, themed to current palette accent color.
 - **Dusk replaces Flower** - Flower (teal) was too close in hue to Mirabilis (green). Dusk uses deep indigo (`#5046e4`) with a deep-space code block. LocalStorage validation updated; old `flower` value gracefully falls back to Mirabilis.
 - **Bug fix** - duplicate stray `</button>` JSX in palette picker (caused by a prior edit) removed.
 - **Bug fix** - `layout.js` pre-hydration scheme script now validates against whitelist before setting attribute, preventing flash if an obsolete scheme name is in localStorage.
@@ -556,7 +556,7 @@ Notes on how it behaves:
 - **Chat export** - download any conversation as a Markdown `.md` file from the three-dot menu.
 - **Pin / unpin chats** - star icon in the three-dot menu pins chats to the top of the list; persisted in `localStorage`.
 - **Sorted chat list** - pinned chats always appear above unpinned ones.
-- Keyboard shortcut **Ctrl+K / ⌘K** creates a new chat from anywhere.
+- Keyboard shortcut **Ctrl+K / Cmd+K** creates a new chat from anywhere.
 - Creating a new chat clears any active search query so the new chat is immediately visible.
 - Chat three-dot menus now close on outside click or Escape.
 
@@ -579,7 +579,7 @@ Notes on how it behaves:
 
 ### Toolbar Chip Re-order & OpenClaw Redesign
 
-- Toolbar chip order now ends with **Control → MCP → OpenClaw** for logical grouping.
+- Toolbar chip order now ends with **Control -> MCP -> OpenClaw** for logical grouping.
 - Removed the standalone "i" info button next to OpenClaw.
 - OpenClaw chip now shows a **CSS hover tooltip** describing the profile - no click, no state, no extra button.
 

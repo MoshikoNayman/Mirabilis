@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { PROVIDERS } from '../../lib/presence';
-import { Panel, PresenceDot, IconButton } from '../ui/primitives';
+import { Panel, PresenceDot, IconButton, CloseIcon } from '../ui/primitives';
 import ContactRow from '../ui/ContactRow';
 import { appStore } from '../../store/useAppStore';
 
@@ -74,7 +74,7 @@ export default function BuddyList({ open, presence, warm = [] }) {
               {counts.online} of {counts.total} online
             </span>
           </div>
-          <IconButton label="Close" onClick={() => appStore.setBuddyOpen(false)}>✕</IconButton>
+          <IconButton label="Close" onClick={() => appStore.setBuddyOpen(false)}><CloseIcon size={14} /></IconButton>
         </div>
         <div className="au-scroll flex-1 overflow-y-auto p-1.5">
           <Group title="On this Mac" providers={local} presence={presence} warm={warm} />

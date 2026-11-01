@@ -135,4 +135,4 @@ echo ""
 echo "Build complete!"
 find "$SCRIPT_DIR/dist" -name "*.app" -maxdepth 3 | head -1
 
-# trap fires here → cleans up $BUILD_DIR
+# trap fires here -> cleans up $BUILD_DIR

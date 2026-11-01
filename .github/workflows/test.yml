@@ -36,6 +36,9 @@ jobs:
       - name: Version files are in sync
         run: node scripts/sync-version.mjs --check
 
+      - name: Source is ASCII
+        run: node scripts/check-ascii.mjs
+
       - name: Backend install
         working-directory: backend
         run: npm ci --no-audit --no-fund
