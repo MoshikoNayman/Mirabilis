@@ -133,12 +133,33 @@ test('run_command captures output, and a non-zero exit is data rather than a cra
 
   const ok = await r.dispatch('run_command', { command: 'echo agent-works' });
   assert.equal(ok.ok, true);
-  assert.match(ok.result.text, /agent-works/);
+  assert.match(ok.result.stdout, /agent-works/);
   assert.equal(ok.result.exitCode, 0);
 
   const bad = await r.dispatch('run_command', { command: 'exit 3' });
   assert.equal(bad.ok, true, 'the loop needs the failure as an observation');
   assert.equal(bad.result.failed, true);
+  assert.equal(bad.result.exitCode, 3);
+});
+
+test('a failing command keeps stdout, where test runners print the failures', async () => {
+  const dir = await sandboxDir();
+  const r = createToolRegistry({ policy: 'full', fsRoot: dir, workDir: dir });
+  const res = await r.dispatch('run_command', { command: 'echo "test parse::bad_input ... FAILED"; exit 101' });
+  assert.equal(res.result.exitCode, 101);
+  assert.match(res.result.stdout, /bad_input \.\.\. FAILED/);
+});
+
+test('search honours the glob and skips dependency folders', async () => {
+  const dir = await sandboxDir();
+  await fs.mkdir(path.join(dir, 'node_modules', 'x'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'node_modules', 'x', 'a.js'), 'needle');
+  await fs.writeFile(path.join(dir, 'b.rs'), 'needle');
+  await fs.writeFile(path.join(dir, 'c.js'), 'needle');
+  const r = createToolRegistry({ policy: 'read-only', fsRoot: dir, workDir: dir });
+  const res = await r.dispatch('search_files', { pattern: 'needle', path: '.', glob: '*.rs' });
+  assert.equal(res.result.matchCount, 1);
+  assert.match(res.result.matches[0], /b\.rs/);
 });
 
 test('destructive commands are blocked even at the full policy', async () => {

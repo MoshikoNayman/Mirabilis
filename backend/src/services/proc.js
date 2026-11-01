@@ -100,7 +100,11 @@ export async function runCommand(command, args, { cwd, env, timeoutMs = 1000 * 6
         resolve({ stdout, stderr });
         return;
       }
-      reject(new Error(`${command} exited with code ${code}${stderr ? `: ${stderr.trim()}` : ''}`));
+      const error = new Error(`${command} exited with code ${code}${stderr ? `: ${stderr.trim()}` : ''}`);
+      // Callers that run tests need the exit code and stdout too: cargo, npm and
+      // pytest print the failing cases on stdout.
+      Object.assign(error, { exitCode: code, stdout, stderr });
+      reject(error);
     });
   });
 }

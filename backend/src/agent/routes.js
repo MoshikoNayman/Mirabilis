@@ -52,13 +52,14 @@ function liveRunCount(runs) {
  * @param {{aiProvider?:string, [k:string]:any}} deps.config
  * @param {Function} deps.streamWithProvider
  * @param {Function} deps.getEffectiveModel  Resolves 'auto'/absent into a real model id.
+ * @param {Function} [deps.resolveTuning]  Ollama context sizing, same as chat.
  * @param {{get: Function}} [deps.providerKeys]  Server-held API keys.
  * @param {{getChat: Function, saveChat: Function, getEpoch: Function, chatStorePath: string, nowIso: Function, uuid: Function}} [deps.chats]
  *        Optional chat persistence. When supplied and the caller passes a chatId,
  *        the run's goal and result are written into that chat.
  * @param {Function} [deps.guard]  Privileged-route guard, applied to every route here.
  */
-export function createAgentRouter({ config, streamWithProvider, getEffectiveModel, chats, providerKeys, guard }) {
+export function createAgentRouter({ config, streamWithProvider, getEffectiveModel, resolveTuning, chats, providerKeys, guard }) {
   const router = Router();
   // One append-only log per run, beside the other stores.
   const auditDir = join(dirname(config.chatStorePath || '.'), 'agent-runs');
@@ -272,6 +273,12 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
       }
       send('progress', { type: 'model-resolved', at: 0, provider: activeProvider, model: effectiveModel });
 
+      // Same context sizing as chat. Without it Ollama runs use its small stock
+      // window and long tool output pushes the goal out of context.
+      const tuning = typeof resolveTuning === 'function'
+        ? await resolveTuning({ provider: activeProvider, model: effectiveModel, baseUrl: providerBaseUrl || config.ollamaBaseUrl }).catch(() => null)
+        : null;
+
       const callModel = createModelAdapter({
         streamWithProvider,
         config,
@@ -280,6 +287,7 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
           provider: activeProvider,
           model: effectiveModel,
           baseUrl: providerBaseUrl,
+          ollamaOptions: tuning?.options,
           // Same rule as the chat path: use the key the backend holds unless the
           // caller supplied its own.
           apiKey: (typeof providerApiKey === 'string' && providerApiKey.trim())

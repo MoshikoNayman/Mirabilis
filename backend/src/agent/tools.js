@@ -28,6 +28,16 @@ const MAX_MATCHES = 100;
 export const TOOL_POLICIES = /** @type {const} */ (['read-only', 'write', 'full']);
 
 /** @param {string} text @param {number} [limit] */
+/** Keep the end of command output, where test runners print failures and summaries. */
+function tail(text, limit = MAX_RESULT_CHARS) {
+  const s = String(text ?? '');
+  if (s.length <= limit) return s;
+  return `[... ${s.length - limit} earlier characters omitted ...]\n${s.slice(-limit)}`;
+}
+
+/** Directories that are never worth searching. */
+const SEARCH_EXCLUDE_DIRS = ['.git', 'node_modules', 'target', 'dist', 'build', '.next', '.venv', 'venv', '__pycache__', '.cache'];
+
 function clip(text, limit = MAX_RESULT_CHARS) {
   const s = String(text ?? '');
   if (s.length <= limit) return { text: s, truncated: false };
@@ -119,6 +129,8 @@ export function createToolRegistry({
         // confidently reported that the application had no errors. A search
         // tool that silently returns the wrong answer is worse than none.
         const args = ['-rn', '--binary-files=without-match'];
+        for (const dir of SEARCH_EXCLUDE_DIRS) args.push(`--exclude-dir=${dir}`);
+        if (glob) args.push(`--include=${String(glob)}`);
         if (!caseSensitive) args.push('-i');
         args.push('-e', String(pattern), root);
         try {
@@ -132,7 +144,7 @@ export function createToolRegistry({
           };
         } catch (err) {
           // grep exits 1 when nothing matched; that is an answer, not a failure.
-          if (/exited with code 1/.test(String(err?.message))) {
+          if (err?.exitCode === 1 || /exited with code 1/.test(String(err?.message))) {
             return { root, matchCount: 0, matches: [], truncated: false };
           }
           throw err;
@@ -178,11 +190,19 @@ export function createToolRegistry({
           const { stdout, stderr } = await runCommand('/bin/sh', ['-c', cmd], {
             cwd: execCwd, timeoutMs: commandTimeoutMs, signal
           });
-          return { command: cmd, cwd: execCwd, exitCode: 0, ...clip(stdout), stderr: clip(stderr).text };
+          return { command: cmd, cwd: execCwd, exitCode: 0, stdout: tail(stdout), stderr: tail(stderr, 4000) };
         } catch (err) {
           // A non-zero exit is information the agent needs, not a crash.
-          const msg = String(err?.message || err);
-          return { command: cmd, cwd: execCwd, exitCode: 1, failed: true, ...clip(msg) };
+          const exitCode = typeof err?.exitCode === 'number' ? err.exitCode : null;
+          return {
+            command: cmd,
+            cwd: execCwd,
+            exitCode,
+            failed: true,
+            error: exitCode === null ? String(err?.message || err) : undefined,
+            stdout: tail(err?.stdout),
+            stderr: tail(err?.stderr, 4000)
+          };
         }
       }
     }

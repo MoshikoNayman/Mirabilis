@@ -3601,6 +3601,7 @@ app.use('/api/agent', createAgentRouter({
   config,
   streamWithProvider,
   getEffectiveModel,
+  resolveTuning: ({ provider, model, baseUrl }) => resolveOllamaTuning({ provider, model, baseUrl }),
   chats: { getChat, saveChat, getEpoch, chatStorePath: config.chatStorePath, nowIso, uuid: uuidv4 },
   providerKeys,
   guard: makePrivilegedGuard(mcpToken, 'agent runs')
