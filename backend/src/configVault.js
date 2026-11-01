@@ -11,6 +11,7 @@ import { stat, readdir, readFile } from 'node:fs/promises';
 import { resolve, normalize, sep, relative, join } from 'node:path';
 import { cosine } from './recall.js';
 import { readVault, writeVault, clearVault } from './storage/configVaultStore.js';
+import { expandHome } from './paths.js';
 
 const MAX_FILE_BYTES = 512 * 1024;   // skip any single file larger than this
 const MAX_FILES = 600;               // cap the corpus so indexing can never run away
@@ -86,7 +87,7 @@ function chunkByLines(content, maxChars = CHUNK_CHARS) {
 export function createConfigVault({ recall, vaultStorePath }) {
   // Jail an absolute path to the chosen root; reject anything that escapes it.
   function jailRoot(inputRoot) {
-    const cleaned = normalize(String(inputRoot || '').replace(/\0/g, ''));
+    const cleaned = normalize(expandHome(String(inputRoot || '').replace(/\0/g, '')));
     const root = resolve(cleaned);
     return root;
   }

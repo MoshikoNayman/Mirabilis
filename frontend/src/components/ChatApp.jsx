@@ -5139,6 +5139,8 @@ export default function ChatApp() {
           providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
           providerApiKey: undefined, // held by the backend; never sent from the page
           toolPolicy: policyForRun,
+          // The watched workspace folder is the run's project folder.
+          fsRoot: appStore.getWorkspaceRoot?.() || undefined,
           acknowledgeFullPolicy: policyForRun === 'full' ? acknowledged : undefined,
           localOnly: appStore.getGoDark(),
           systemPrompt

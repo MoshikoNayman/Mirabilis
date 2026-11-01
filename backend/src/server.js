@@ -62,6 +62,7 @@ import { selectHistoryWindow } from './historyWindow.js';
 import { createAgentRouter } from './agent/routes.js';
 import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
 import { shouldSuppressReminder, buildReminderWebhookHeaders } from './intelLedgerReminderUtils.js';
+import { expandHome } from './paths.js';
 
 const app = express();
 const upload = multer({
@@ -1973,7 +1974,7 @@ app.post('/api/remote/connect', guardRemote, async (req, res) => {
     } else if (authType === 'key') {
       if (!privateKeyPath) return res.status(400).json({ error: 'privateKeyPath is required' });
       try {
-        connConfig.privateKey = await readFile(privateKeyPath.trim(), 'utf8');
+        connConfig.privateKey = await readFile(expandHome(privateKeyPath), 'utf8');
       } catch {
         return res.status(400).json({ error: `Cannot read key file: ${privateKeyPath}` });
       }

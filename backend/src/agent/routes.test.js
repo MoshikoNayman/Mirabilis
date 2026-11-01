@@ -251,7 +251,7 @@ test('the full policy runs once acknowledged', async () => {
   replyIndex = 0;
   const { frames } = await startRun({
     goal: 'x', effort: 'high', provider: 'ollama',
-    toolPolicy: 'full', acknowledgeFullPolicy: true
+    toolPolicy: 'full', acknowledgeFullPolicy: true, fsRoot: dataDir
   });
   const result = frames.find((f) => f.event === 'result');
   assert.ok(result, 'an acknowledged run should proceed');
@@ -261,8 +261,33 @@ test('the full policy runs once acknowledged', async () => {
 test('read-only and write need no acknowledgement', async () => {
   for (const policy of ['read-only', 'write']) {
     replyIndex = 0;
-    const { frames } = await startRun({ goal: 'x', effort: 'high', provider: 'ollama', toolPolicy: policy });
+    const { frames } = await startRun({ goal: 'x', effort: 'high', provider: 'ollama', toolPolicy: policy, fsRoot: dataDir });
     assert.ok(frames.find((f) => f.event === 'result'), `${policy} should not be gated`);
+  }
+});
+
+test('write and full runs are refused without a project folder', async () => {
+  for (const extra of [{ toolPolicy: 'write' }, { toolPolicy: 'full', acknowledgeFullPolicy: true }]) {
+    const res = await fetch(`${baseUrl}/api/agent/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
+      body: JSON.stringify({ goal: 'x', effort: 'high', provider: 'ollama', ...extra })
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.requiresFolder, true);
+    assert.match(body.error, /project folder/i);
+  }
+});
+
+test('a project folder may not be the disk root or a missing path', async () => {
+  for (const fsRoot of ['/', '/definitely/not/here']) {
+    const res = await fetch(`${baseUrl}/api/agent/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
+      body: JSON.stringify({ goal: 'x', effort: 'high', provider: 'ollama', toolPolicy: 'write', fsRoot })
+    });
+    assert.equal(res.status, 400, fsRoot);
   }
 });
 

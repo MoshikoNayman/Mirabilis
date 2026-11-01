@@ -19,6 +19,9 @@ import { createRunAuditor, pruneRunAudits, readRunAudit } from './auditLog.js';
 import { createRunStore } from './runStore.js';
 import { getFsRoot, safeResolvePath } from './sandbox.js';
 import { dirname, join } from 'node:path';
+import path from 'node:path';
+import { stat } from 'node:fs/promises';
+import { resolveUserPath } from '../paths.js';
 
 /** Live runs, so a client that reconnects can still stop one. */
 const runs = new Map();
@@ -181,6 +184,29 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
       });
       return;
     }
+    // Write and full runs change files, so they need a folder to work in.
+    // Without one, relative paths resolved against the backend's own directory
+    // and absolute paths could reach anything in the home directory.
+    const requestedRoot = typeof fsRoot === 'string' && fsRoot.trim() ? resolveUserPath(fsRoot) : '';
+    if ((toolPolicy === 'write' || toolPolicy === 'full') && !requestedRoot && !getFsRoot()) {
+      res.status(400).json({
+        error: 'Pick a project folder first. Open Workspace and choose the folder this run may change.',
+        requiresFolder: true
+      });
+      return;
+    }
+    if (requestedRoot && path.parse(requestedRoot).root === requestedRoot) {
+      res.status(400).json({ error: 'The project folder cannot be the root of the disk.' });
+      return;
+    }
+    if (requestedRoot) {
+      const st = await stat(requestedRoot).catch(() => null);
+      if (!st || !st.isDirectory()) {
+        res.status(400).json({ error: `Project folder not found: ${requestedRoot}` });
+        return;
+      }
+    }
+
     if (!isAgenticEffort(effort)) {
       res.status(400).json({
         error: `Effort "${effort}" is not an autonomous tier. Use one of: `
@@ -238,10 +264,10 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
       // discard MIRABILIS_MCP_FS_ROOT, which is the one setting an operator uses
       // to contain these runs.
       const operatorRoot = getFsRoot();
-      let effectiveRoot = fsRoot || operatorRoot || undefined;
-      if (fsRoot && operatorRoot) {
+      let effectiveRoot = requestedRoot || operatorRoot || undefined;
+      if (requestedRoot && operatorRoot) {
         try {
-          effectiveRoot = safeResolvePath(fsRoot, operatorRoot);
+          effectiveRoot = safeResolvePath(requestedRoot, operatorRoot);
         } catch {
           send('error', { error: `fsRoot must be inside the configured filesystem root (${operatorRoot}).` });
           record.status = 'failed';
@@ -253,7 +279,8 @@ export function createAgentRouter({ config, streamWithProvider, getEffectiveMode
       const buildRegistry = () => createToolRegistry({
         policy: TOOL_POLICIES.includes(toolPolicy) ? toolPolicy : 'read-only',
         fsRoot: effectiveRoot,
-        workDir: workDir || undefined,
+        // Relative paths and commands start in the project, not the backend.
+        workDir: workDir ? resolveUserPath(workDir) : effectiveRoot,
         signal: abort.signal
       });
       const registry = buildRegistry();

@@ -9,6 +9,7 @@
 import { watch } from 'node:fs';
 import { stat, readdir, readFile as fsReadFile } from 'node:fs/promises';
 import { resolve, normalize, sep, join, relative } from 'node:path';
+import { expandHome } from './paths.js';
 
 // Skip files bigger than this in the listing (they are almost never useful as
 // chat context and keep the tree cheap to scan).
@@ -80,7 +81,7 @@ function jailResolve(relPath) {
 // Point the watcher at a folder. Validates it exists and is a directory, stores
 // the absolute path, and starts a debounced recursive watch. Returns the root.
 export async function setRoot(dir) {
-  const abs = resolve(String(dir || '').replace(/\0/g, ''));
+  const abs = resolve(expandHome(String(dir || '').replace(/\0/g, '')));
   let info;
   try {
     info = await stat(abs);
