@@ -5907,20 +5907,6 @@ export default function ChatApp() {
                     {isCommittingToLedger ? 'Committing...' : 'To Ledger'}
                   </button>
                 )}
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setIsSystemPromptVisible((v) => !v)}
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition ${
-                      isSystemPromptVisible
-                        ? 'border-accent/60 bg-accentSoft text-ink dark:border-accent/40 dark:bg-accent/20 dark:text-green-300'
-                        : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                    }`}
-                    title="Toggle instructions visibility"
-                  >
-                    <span>Prompt</span>
-                  </button>
-                </div>
                 <div data-menu-container="true" className="relative">
                   <button
                     type="button"
@@ -7260,6 +7246,20 @@ export default function ChatApp() {
                   {isOptionsMenuOpen && (
                     <div data-menu-panel="options" role="group" aria-label="Tools, training, modes and voice" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="px-1 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Tools</div>
+                      <button
+                        type="button"
+                        onClick={() => { setIsSystemPromptVisible((v) => !v); setIsOptionsMenuOpen(false); }}
+                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
+                          isSystemPromptVisible
+                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                        }`}
+                      >
+                        <span>Instructions</span>
+                        <span className="max-w-[9rem] truncate text-[10px] opacity-70">
+                          {selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? 'custom' : (selectedPromptProfile?.label || 'default')}
+                        </span>
+                      </button>
                       <button
                         type="button"
                         onClick={handleCreateImageTool}
