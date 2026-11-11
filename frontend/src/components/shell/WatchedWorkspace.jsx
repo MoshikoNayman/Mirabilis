@@ -158,20 +158,13 @@ export default function WatchedWorkspace({ open }) {
         material="chrome"
         className="au-enter absolute right-3 top-16 flex max-h-[80vh] w-[380px] flex-col overflow-hidden"
         role="dialog"
-        aria-label="Watched Workspace"
+        aria-label="Workspace"
       >
         <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--hairline)' }}>
-          <div className="flex min-w-0 flex-col">
-            <span className="flex items-center gap-1.5 text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">
-              <FolderIcon size={15} className="text-[color:var(--text-muted)]" />
-              Workspace
-            </span>
-            <span className="truncate text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
-              {root
-                ? `${pinnedCount ? `${pinnedCount} pinned as live context` : 'Pin files as live context'}`
-                : 'Watch a local folder for live context'}
-            </span>
-          </div>
+          <span className="flex items-center gap-1.5 text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">
+            <FolderIcon size={15} className="text-[color:var(--text-muted)]" />
+            Workspace
+          </span>
           <IconButton label="Close" onClick={() => appStore.closeWorkspace()}><CloseIcon size={14} /></IconButton>
         </div>
 
@@ -182,7 +175,7 @@ export default function WatchedWorkspace({ open }) {
               autoFocus
               aria-label="Folder to watch"
               className={fieldClass}
-              placeholder="/absolute/path/to/folder"
+              placeholder="~/Projects"
               value={pathInput}
               onChange={(e) => setPathInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') watchPath(); }}
@@ -197,7 +190,7 @@ export default function WatchedWorkspace({ open }) {
               <span className="truncate text-[length:var(--text-2xs)] text-[color:var(--text-muted)]" title={root}>
                 Watching {root}
               </span>
-              <Badge tone="neutral" className="ml-auto shrink-0">{files.length} files</Badge>
+              <Badge tone="neutral" className="ml-auto shrink-0">{files.length} {files.length === 1 ? 'file' : 'files'}</Badge>
             </div>
           ) : null}
           {error ? <div className="text-[length:var(--text-2xs)] text-rose-500">{error}</div> : null}
@@ -207,7 +200,7 @@ export default function WatchedWorkspace({ open }) {
           <div className="border-b px-4 py-2" style={{ borderColor: 'var(--hairline)' }}>
             <input
               className={fieldClass}
-              placeholder="Filter files..."
+              placeholder="Filter"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               spellCheck={false}
@@ -218,16 +211,15 @@ export default function WatchedWorkspace({ open }) {
         <div className="au-scroll flex-1 overflow-y-auto p-1.5">
           {loading ? (
             <div className="flex items-center justify-center gap-2 px-3 py-8 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
-              <Spinner /> Scanning folder...
+              <Spinner /> Scanning...
             </div>
           ) : !root ? (
             <div className="px-3 py-8 text-center text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
-              Point Mirabilis at a folder above. Pinned files are read fresh from
-              disk each time you send - something a cloud chat app cannot do.
+              No folder
             </div>
           ) : shown.length === 0 ? (
             <div className="px-3 py-8 text-center text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
-              {files.length === 0 ? 'No text files found in this folder.' : 'No files match that filter.'}
+              {files.length === 0 ? 'No text files' : 'No matches'}
             </div>
           ) : (
             <div className="flex flex-col">
@@ -241,7 +233,7 @@ export default function WatchedWorkspace({ open }) {
         {root ? (
           <div className="flex items-center gap-2 border-t px-4 py-2.5" style={{ borderColor: 'var(--hairline)' }}>
             <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
-              {pinnedCount ? `${pinnedCount} file${pinnedCount === 1 ? '' : 's'} active` : 'No files pinned'}
+              {pinnedCount ? `${pinnedCount} pinned` : 'None pinned'}
             </span>
             <div className="ml-auto flex items-center gap-1.5">
               <Button size="sm" variant="ghost" onClick={() => appStore.setWorkspacePins([])} disabled={!pinnedCount}>

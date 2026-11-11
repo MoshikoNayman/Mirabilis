@@ -55,6 +55,7 @@ test('read denies writes; ask asks then can be made to allow', () => {
   assert.equal(ask.request.kind, 'write');
   assert.equal(ask.request.reasonCode, 'changes-files');
   assert.deepEqual(ask.request.alwaysRule, { type: 'writes' });
+  assert.equal(ask.request.alwaysLabel, 'Allow for this run');
   assert.match(ask.request.detail, /a\.txt/);
   assert.match(ask.request.detail, /hello/);
 
@@ -83,7 +84,7 @@ test('read allows read-only commands and denies the rest', () => {
   assert.equal(call({ level: 'read', tool: 'run_command', args: { command: 'ls -la' }, info: { kind: 'command' } }).action, 'allow');
   const deny = call({ level: 'read', tool: 'run_command', args: { command: 'rm x' }, info: { kind: 'command' } });
   assert.equal(deny.action, 'deny');
-  assert.match(deny.reason, /cannot change anything/);
+  assert.match(deny.reason, /may change things/);
 });
 
 test('ask auto-allows read-only, asks on a write, and offers an always rule', () => {
@@ -117,6 +118,7 @@ test('Go Dark pauses network commands even when they are read-only', () => {
   const askNet = call({ level: 'ask', tool: 'run_command', args: { command: 'ping -c 1 host' }, info: { kind: 'command' }, goDark: true });
   assert.equal(askNet.action, 'ask');
   assert.equal(askNet.request.reasonCode, 'network-go-dark');
+  assert.match(askNet.request.reason, /Go Dark is on/);
   assert.equal(askNet.request.alwaysRule, null, 'no always rule for a network command under Go Dark');
   assert.equal(askNet.request.alwaysLabel, null);
   assert.equal(askNet.request.network, true);

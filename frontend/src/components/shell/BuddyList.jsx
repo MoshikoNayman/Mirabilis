@@ -1,9 +1,9 @@
-// ICQ-style provider list on a vibrancy sheet, grouped Local/Remote with live presence.
+// ICQ-style provider list on a vibrancy sheet, grouped Local/Cloud with live presence.
 'use client';
 
 import { useEffect, useMemo } from 'react';
 import { PROVIDERS } from '../../lib/presence';
-import { Panel, PresenceDot, IconButton, CloseIcon } from '../ui/primitives';
+import { Panel, IconButton, CloseIcon } from '../ui/primitives';
 import ContactRow from '../ui/ContactRow';
 import { appStore } from '../../store/useAppStore';
 
@@ -67,7 +67,7 @@ export default function BuddyList({ open, presence, warm = [] }) {
       >
         <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--hairline)' }}>
           <div className="flex flex-col">
-            <span className="text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">Buddies</span>
+            <span className="text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">Buddy list</span>
             <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
               {counts.online} of {counts.total} online
             </span>
@@ -75,13 +75,8 @@ export default function BuddyList({ open, presence, warm = [] }) {
           <IconButton label="Close" onClick={() => appStore.setBuddyOpen(false)}><CloseIcon size={14} /></IconButton>
         </div>
         <div className="au-scroll flex-1 overflow-y-auto p-1.5">
-          <Group title="On this Mac" providers={local} presence={presence} warm={warm} />
-          <Group title="Cloud providers" providers={remote} presence={presence} />
-        </div>
-        <div className="flex items-center gap-2 border-t px-4 py-2 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]" style={{ borderColor: 'var(--hairline)' }}>
-          <span className="flex items-center gap-1"><PresenceDot presence="online" /> online</span>
-          <span className="flex items-center gap-1"><PresenceDot presence="needkey" /> needs key</span>
-          <span className="flex items-center gap-1"><PresenceDot presence="offline" /> offline</span>
+          <Group title="Local" providers={local} presence={presence} warm={warm} />
+          <Group title="Cloud" providers={remote} presence={presence} />
         </div>
       </Panel>
     </div>

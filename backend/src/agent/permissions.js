@@ -7,11 +7,12 @@ import { classifyCommand, matchesAllowRules, ruleForCommand } from './commandPol
 /** @type {Array<'chat'|'read'|'ask'|'bypass'>} */
 export const ACCESS_LEVELS = ['chat', 'read', 'ask', 'bypass'];
 
+// Summaries match the composer Access menu hints in frontend/src/lib/access.js.
 export const ACCESS_META = {
-  chat: { label: 'Chat only', summary: 'No tools. Plain chat. The assistant cannot touch your computer.' },
-  read: { label: 'Read only', summary: 'Reads files and inspects the system with read-only commands. Never changes anything, never asks.' },
-  ask: { label: 'Ask first', summary: 'Reads freely. Asks before anything that changes something or that it cannot prove is read-only.' },
-  bypass: { label: 'Bypass', summary: 'Everything runs with no approvals, no command blocklist, no folder jail.' }
+  chat: { label: 'Chat only', summary: 'No computer access' },
+  read: { label: 'Read only', summary: 'Reads, never changes' },
+  ask: { label: 'Ask first', summary: 'Asks before changes' },
+  bypass: { label: 'Bypass', summary: 'Runs anything, never asks' }
 };
 
 /** @param {any} x @returns {'chat'|'read'|'ask'|'bypass'} */
@@ -26,7 +27,10 @@ export function lowerLevel(a, b) {
   return ACCESS_LEVELS[Math.min(ia, ib)];
 }
 
-const GO_DARK_REASON = 'Go Dark is on, so commands that use the network are paused. Turn off Go Dark or use Bypass.';
+// Returned to the model on a denial.
+const GO_DARK_REASON = 'Go Dark is on, so network commands are paused. Turn off Go Dark or use Bypass.';
+// Shown on the approval card, beside its "Uses network" badge.
+const GO_DARK_ASK_REASON = 'Go Dark is on.';
 
 /**
  * @typedef {object} ApprovalRequest
@@ -96,7 +100,7 @@ export function decide(p) {
 
   // Connector 'off' is never offered, at any level.
   if (kind === 'connector' && info.permission === 'off') {
-    return { action: 'deny', reason: 'This connector tool is turned off. Turn it on in Connectors to use it.' };
+    return { action: 'deny', reason: 'This connector tool is off. Turn it on in Connectors.' };
   }
 
   if (level === 'bypass') {
@@ -123,7 +127,7 @@ export function decide(p) {
         detail: writeDetail(p.tool, p.args || {}),
         reasonCode: 'changes-files',
         reason: 'This changes a file on disk.',
-        alwaysLabel: 'Allow file changes for the rest of this run',
+        alwaysLabel: 'Allow for this run',
         alwaysRule: { type: 'writes' },
         network: false
       }
@@ -140,7 +144,7 @@ export function decide(p) {
     if (level === 'read') {
       if (c.readOnly && !networkBlocked) return { action: 'allow', reason: 'Read-only command.' };
       const reason = !c.readOnly
-        ? 'Read only allows only commands that cannot change anything.'
+        ? 'Read only: this command may change things. Switch Access to Ask first.'
         : GO_DARK_REASON;
       return { action: 'deny', reason };
     }
@@ -150,7 +154,7 @@ export function decide(p) {
       return { action: 'allow', reason: c.readOnly ? 'Read-only command.' : 'Matches an allowed command.' };
     }
     const reasonCode = networkBlocked ? 'network-go-dark' : 'not-read-only';
-    const reason = networkBlocked ? GO_DARK_REASON : 'This command is not known to be read-only.';
+    const reason = networkBlocked ? GO_DARK_ASK_REASON : 'This command is not known to be read-only.';
     const offerAlways = !networkBlocked;
     const rule = offerAlways ? ruleForCommand(command, { platform }) : '';
     return {
@@ -173,7 +177,7 @@ export function decide(p) {
     const tool = p.tool;
     if (level === 'read') {
       if (info.readOnly === true) return { action: 'allow', reason: 'Read-only connector tool.' };
-      return { action: 'deny', reason: 'Read only: this connector tool can change things, so it is off here. Switch Access to Ask first.' };
+      return { action: 'deny', reason: 'Read only: this connector tool can change things. Switch Access to Ask first.' };
     }
     // ask
     if (info.permission === 'allow' || (runRules.connectorTools || []).includes(tool)) {
@@ -197,7 +201,7 @@ export function decide(p) {
   }
 
   // Unknown kind: safest is to ask in ask, deny in read.
-  if (level === 'read') return { action: 'deny', reason: 'Read only: this action is not known to be read-only.' };
+  if (level === 'read') return { action: 'deny', reason: 'Read only: this action may change things. Switch Access to Ask first.' };
   return {
     action: 'ask',
     reason: 'This action needs your approval.',

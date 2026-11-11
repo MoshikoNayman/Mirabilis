@@ -33,8 +33,8 @@ function sectionIcon(icon, size) {
   return null;
 }
 
-/** Titled block of settings, with an optional control on the right of the title. */
-export function SettingsGroup({ title, description, action, children, className }) {
+/** Titled block of settings, with an optional control on the right of the title. Title only, no subtitle. */
+export function SettingsGroup({ title, action, children, className }) {
   return (
     <section className={cx('mb-8 last:mb-0', className)}>
       {title || action ? (
@@ -42,9 +42,6 @@ export function SettingsGroup({ title, description, action, children, className 
           <div className="min-w-0">
             {title ? (
               <h4 className="text-[length:var(--text-sm)] font-semibold text-[color:var(--text-main)]">{title}</h4>
-            ) : null}
-            {description ? (
-              <p className="mt-1 text-[length:var(--text-xs)] leading-relaxed text-[color:var(--text-muted)]">{description}</p>
             ) : null}
           </div>
           {action ? <div className="flex shrink-0 items-center gap-2">{action}</div> : null}
@@ -343,11 +340,6 @@ export default function SettingsSheet({ open, section, onSection, onClose, secti
                 style={{ borderColor: 'var(--hairline)' }}
               >
                 <h3 className="text-[length:var(--text-lg)] font-semibold leading-tight">{active.label}</h3>
-                {active.description ? (
-                  <p className="mt-1 text-[length:var(--text-xs)] leading-relaxed text-[color:var(--text-muted)]">
-                    {active.description}
-                  </p>
-                ) : null}
               </header>
               {/* relative: absolutely positioned content (sr-only labels) scrolls and clips here, not in the dialog. */}
               <div
@@ -360,7 +352,7 @@ export default function SettingsSheet({ open, section, onSection, onClose, secti
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center p-6 text-[length:var(--text-sm)] text-[color:var(--text-muted)]">
-              Nothing to set here yet.
+              No settings
             </div>
           )}
         </section>

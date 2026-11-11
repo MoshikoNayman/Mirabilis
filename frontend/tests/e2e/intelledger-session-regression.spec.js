@@ -10,8 +10,8 @@ async function openIntelLedger(page) {
 }
 
 async function createSession(page, title) {
-  await page.getByRole('button', { name: 'New Session', exact: true }).click();
-  await page.getByPlaceholder('Leave blank for Untitled').fill(title);
+  await page.getByRole('button', { name: 'New session', exact: true }).click();
+  await page.getByPlaceholder('Untitled', { exact: true }).fill(title);
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Back', exact: true }).click();

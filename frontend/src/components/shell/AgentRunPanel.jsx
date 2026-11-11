@@ -5,6 +5,7 @@
 
 import { memo, useEffect, useRef, useState } from 'react';
 import { accessMeta } from '../../lib/access';
+import { EFFORT_LABELS } from '../../lib/effort';
 
 const fmtMs = (ms) => {
   const s = Math.max(0, Math.floor((ms || 0) / 1000));
@@ -45,6 +46,21 @@ const PHASE_LABEL = {
   plan: 'Planning', validate: 'Validating', 'wrap-up': 'Wrapping up'
 };
 
+// Stop reasons from backend/src/agent/budget.js and runStore.js.
+const STOP_LABEL = {
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  failed: 'Failed',
+  'wall-clock-exhausted': 'Time limit',
+  'iterations-exhausted': 'Step limit',
+  'tool-calls-exhausted': 'Tool limit',
+  'token-budget-exhausted': 'Token limit',
+  'backend-restarted': 'Backend restarted'
+};
+// The strip headline already says Done, Stopped or Failed for these.
+const HEADLINE_STOPS = new Set(['completed', 'cancelled', 'failed']);
+
+// Matches EFFORT_LABELS in ChatApp.jsx.
 function AgentRunPanelInner({ run, onStop, onDismiss }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -74,20 +90,29 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
   // accessNow is set when Access was lowered mid-run, which the backend applies at once.
   const access = run.access ? accessMeta(run.accessNow || run.access) : null;
 
+  const failed = status === 'failed' || stopReason === 'failed';
+  const stopLabel = !live && stopReason ? (STOP_LABEL[stopReason] || stopReason) : '';
+
   // Short form, e.g. "8m left | 3/12 | 7/60"; the popover carries the labels.
-  const summary = limits
-    ? [
-      live ? `${fmtShort(limits.maxWallMs - (budget.elapsedMs || 0))} left` : (stopReason || status),
-      `${budget.iterations}/${limits.maxIterations}`,
-      `${budget.toolCalls}/${limits.maxToolCalls}`
-    ].join(' | ')
-    : (stopReason || status);
+  const summary = [
+    live
+      ? (limits ? `${fmtShort(limits.maxWallMs - (budget.elapsedMs || 0))} left` : '')
+      : (HEADLINE_STOPS.has(stopReason) ? '' : stopLabel),
+    limits ? `${budget.iterations}/${limits.maxIterations}` : '',
+    limits ? `${budget.toolCalls}/${limits.maxToolCalls}` : ''
+  ].filter(Boolean).join(' | ');
 
   const headline = waiting
-    ? 'Waiting for approval'
+    ? 'Needs approval'
     : live
       ? (PHASE_LABEL[run.phase] || 'Working')
-      : status === 'completed' ? 'Done' : 'Stopped';
+      : status === 'completed' ? 'Done' : failed ? 'Failed' : 'Stopped';
+
+  const details = [
+    effort ? `Effort: ${EFFORT_LABELS[effort] || effort}` : '',
+    access ? `Access: ${access.label}` : '',
+    stopLabel
+  ].filter(Boolean).join(' | ');
 
   return (
     <div ref={wrapRef} className="relative mx-1 flex min-w-0 flex-1 items-center justify-center sm:mx-2">
@@ -95,7 +120,7 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label={`Run: ${headline}. ${summary}. Click for details.`}
+        aria-label={summary ? `Run: ${headline}. ${summary}` : `Run: ${headline}`}
         title={goal}
         className={`au-focus flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] transition ${
           waiting
@@ -110,12 +135,12 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
           : (
             <span
               aria-hidden="true"
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${error || status === 'failed' ? 'bg-red-500' : 'bg-[color:var(--text-muted)]'}`}
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${error || failed ? 'bg-red-500' : 'bg-[color:var(--text-muted)]'}`}
             />
           )}
         {/* Parts appear by width so the strip never pushes Send off screen. */}
         <span className={`hidden shrink-0 font-medium sm:inline ${waiting ? 'text-amber-700 dark:text-amber-300' : 'text-[color:var(--text-main)]'}`}>{headline}</span>
-        <span className="hidden shrink-0 font-mono text-[color:var(--text-muted)] md:inline">{summary}</span>
+        {summary ? <span className="hidden shrink-0 font-mono text-[color:var(--text-muted)] md:inline">{summary}</span> : null}
         {live && !waiting && lastEvent && (
           <span className="hidden min-w-0 truncate text-[color:var(--text-muted)] opacity-70 lg:inline">
             | {lastEvent}
@@ -152,10 +177,8 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
         >
           <div className="mb-2 flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate text-[11px] font-semibold text-[color:var(--text-main)]">{goal}</p>
-              <p className="mt-0.5 text-[10px] text-[color:var(--text-muted)]">
-                {effort}{access ? ` | Access: ${access.label}` : ''}{stopReason ? ` | ${stopReason}` : ''}
-              </p>
+              <p className="truncate text-[11px] font-semibold text-[color:var(--text-main)]" title={goal}>{goal}</p>
+              {details ? <p className="mt-0.5 text-[10px] text-[color:var(--text-muted)]">{details}</p> : null}
             </div>
             {live && onStop && (
               <button
@@ -170,8 +193,8 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
 
           {waiting && (
             <p className="mb-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-800 dark:text-amber-200">
-              Needs your approval: {pending[0].title || 'an action'}.
-              {pending.length > 1 ? ` ${pending.length - 1} more waiting.` : ''} Answer it above the message box.
+              {pending[0].title ? `Needs approval: ${pending[0].title}` : 'Needs approval'}
+              {pending.length > 1 ? ` | ${pending.length - 1} more` : ''}
             </p>
           )}
 

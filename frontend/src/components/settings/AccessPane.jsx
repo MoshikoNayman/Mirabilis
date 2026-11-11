@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
-  Badge, Button, IconButton, Spinner, AlertIcon, ChevronRightIcon, FolderIcon, MoonIcon, PlusIcon, TrashIcon
+  Badge, Button, IconButton, Spinner, AlertIcon, ChevronRightIcon, FolderIcon, PlusIcon, TrashIcon
 } from '../ui/primitives';
 import { appStore, useAppStore } from '../../store/useAppStore';
 import {
@@ -13,7 +13,7 @@ import {
 import { SettingsGroup, SettingsList, SettingsRow, SettingsNotice } from './SettingsSheet';
 
 const DANGER = '#f43f5e';
-const FEATURE = 'Access settings';
+const FEATURE = 'Access';
 
 const inputClass =
   'au-hairline au-focus h-8 w-full min-w-0 rounded-[var(--r-sm)] bg-transparent px-3 font-mono text-[length:var(--text-xs)] text-[color:var(--text-main)] placeholder:font-sans placeholder:text-[color:var(--text-muted)] placeholder:opacity-60 disabled:opacity-50';
@@ -52,7 +52,7 @@ function LevelCard({ level, checked, pending, disabled, onSelect, buttonRef, idB
       aria-checked={checked}
       aria-disabled={disabled || undefined}
       aria-labelledby={`${idBase}-label`}
-      aria-describedby={`${idBase}-desc ${idBase}-facts`}
+      aria-describedby={danger ? `${idBase}-facts ${idBase}-warn` : `${idBase}-facts`}
       tabIndex={checked ? 0 : -1}
       onClick={() => { if (!disabled) onSelect(level.id); }}
       className={`au-focus flex w-full items-start gap-3 rounded-[var(--r-md)] border px-4 py-3 text-left transition-colors ${
@@ -72,23 +72,26 @@ function LevelCard({ level, checked, pending, disabled, onSelect, buttonRef, idB
           {level.id === 'chat' ? <Badge>Default</Badge> : null}
           {pending ? <Spinner size={12} /> : null}
         </span>
-        <span id={`${idBase}-desc`} className="mt-1 text-[length:var(--text-xs)] leading-snug text-[color:var(--text-muted)]">
-          {level.description}
-        </span>
         <span id={`${idBase}-facts`} className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--text-2xs)]">
           <Fact label="Can read" value={level.canRead ? 'Yes' : 'No'} />
           <Fact label="Can change" value={CHANGE_TEXT[level.canChange] || 'No'} />
           <Fact label="Asks" value={level.asks ? 'Yes' : 'No'} />
         </span>
         {danger ? (
-          <span className="mt-2 flex items-center gap-1.5 text-[length:var(--text-2xs)] font-medium text-rose-600 dark:text-rose-300">
+          <span id={`${idBase}-warn`} className="mt-2 flex items-center gap-1.5 text-[length:var(--text-2xs)] font-medium text-rose-600 dark:text-rose-300">
             <AlertIcon size={12} />
-            Go Dark does not filter commands in Bypass.
+            Go Dark does not filter commands
           </span>
         ) : null}
       </span>
     </button>
   );
+}
+
+// Run logs live in <dataDir>/agent-runs (backend/src/agent/routes.js).
+function runLogDir(dataDir) {
+  const sep = dataDir.includes('\\') && !dataDir.includes('/') ? '\\' : '/';
+  return `${dataDir.replace(/[\\/]+$/, '')}${sep}agent-runs`;
 }
 
 function PathText({ path }) {
@@ -102,7 +105,6 @@ function PathText({ path }) {
 export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
   const uid = useId();
   const storeLevel = useAppStore((s) => s.access);
-  const goDarkOn = useAppStore((s) => s.goDark);
   const workspaceOpen = useAppStore((s) => s.workspaceOpen);
   const openedPicker = useRef(false);
 
@@ -142,6 +144,8 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
   }, [load]);
 
   const ready = loadState === 'ready' && settings != null;
+  // Lists show this until settings arrive.
+  const pendingText = loadState === 'loading' ? 'Loading...' : 'Not loaded';
   const savedLevel = settings ? settings.level : storeLevel;
   const shownLevel = pendingLevel || savedLevel;
   const rules = settings ? settings.allowCommands : [];
@@ -230,8 +234,6 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
     document.getElementById(`${uid}-choose`)?.focus();
   }, [workspaceOpen, uid]);
 
-  const goDark = goDarkOn || settings?.goDark === true;
-
   return (
     <div>
       {loadState === 'error' ? (
@@ -250,7 +252,7 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
         action={
           loadState === 'loading' ? (
             <span className="flex items-center gap-2 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
-              <Spinner size={12} /> Loading
+              <Spinner size={12} /> Loading...
             </span>
           ) : pendingLevel ? (
             <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">Saving...</span>
@@ -282,24 +284,17 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
             Not saved. {levelError}
           </p>
         ) : null}
-        {goDark ? (
-          <SettingsNotice tone="info" icon={<MoonIcon size={13} />} className="mt-3">
-            Go Dark is on. Read only blocks commands that use the network, Ask first asks before each one,
-            and Bypass does not filter them.
-          </SettingsNotice>
-        ) : null}
       </SettingsGroup>
 
       <SettingsGroup title="Where it works">
         <SettingsList>
           <SettingsRow
             label="Project folder"
-            description="The folder you watch in Workspace. Commands start there and relative paths resolve there. With none set, Mirabilis uses your home folder."
             detail={workspaceRoot ? <PathText path={workspaceRoot} /> : (
-              <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">Not set</span>
+              <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">Home folder</span>
             )}
           >
-            <Button id={`${uid}-choose`} size="sm" variant="soft" onClick={chooseFolder} title="Opens Workspace">
+            <Button id={`${uid}-choose`} size="sm" variant="soft" onClick={chooseFolder}>
               <FolderIcon size={13} />
               Choose
             </Button>
@@ -309,8 +304,7 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
 
       <SettingsGroup
         title="Always allowed commands"
-        description="In Ask first, commands that start with one of these run without asking. Read only never uses this list."
-        action={<Badge>Ask first</Badge>}
+        action={<Badge>Ask first only</Badge>}
       >
         {rules.length > 0 ? (
           <SettingsList className="mb-3">
@@ -332,7 +326,7 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
           </SettingsList>
         ) : (
           <p className="mb-3 text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
-            {ready ? 'None yet. Choose Always allow on an approval, or add one here.' : 'Loads with your settings.'}
+            {ready ? 'None' : pendingText}
           </p>
         )}
         <form
@@ -351,7 +345,7 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
             autoCapitalize="off"
             autoCorrect="off"
             aria-invalid={ruleError ? true : undefined}
-            aria-describedby={ruleError ? `${uid}-rule-error` : undefined}
+            aria-describedby={ruleError ? `${uid}-rule-hint ${uid}-rule-error` : `${uid}-rule-hint`}
           />
           {/* r-sm to match the field; it sorts after the size's r-md. */}
           <Button
@@ -366,6 +360,10 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
             Add
           </Button>
         </form>
+        {/* Rules match on leading words (commandPolicy segmentMatchesRule): "git" also allows "git push". */}
+        <p id={`${uid}-rule-hint`} className="mt-1 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
+          Matches commands that start with an entry
+        </p>
         {ruleError ? (
           <p id={`${uid}-rule-error`} role="alert" className="mt-2 text-[length:var(--text-xs)] text-rose-600 dark:text-rose-300">
             {ruleError}
@@ -385,11 +383,6 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
           </button>
           {showBuiltIn ? (
             <div id={`${uid}-builtin`} className="mt-2">
-              <p className="mb-2 text-[length:var(--text-xs)] leading-relaxed text-[color:var(--text-muted)]">
-                Read only and Ask first run these without asking when the arguments cannot change anything,
-                for example <code className="whitespace-nowrap font-mono">ps aux | grep node</code>. Redirects
-                into files, sudo and command substitution never count as read-only.
-              </p>
               {builtIn.length ? (
                 <div className="flex flex-wrap gap-1">
                   {builtIn.map((name) => (
@@ -403,7 +396,7 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
                 </div>
               ) : (
                 <p className="text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
-                  {ready ? 'The backend did not list them.' : 'Loads with your settings.'}
+                  {ready ? 'None' : pendingText}
                 </p>
               )}
             </div>
@@ -411,22 +404,24 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
         </div>
       </SettingsGroup>
 
-      <SettingsGroup title="Records">
-        <SettingsList>
-          <SettingsRow
-            label="Run log"
-            description="Every action is written to the run log in your data folder."
-            detail={settings?.dataDir ? <PathText path={settings.dataDir} /> : null}
-          />
-          {settings?.sourceRoot ? (
-            <SettingsRow
-              label="Mirabilis source"
-              description="Ask how Mirabilis works and it reads its own code here."
-              detail={<PathText path={settings.sourceRoot} />}
-            />
-          ) : null}
-        </SettingsList>
-      </SettingsGroup>
+      {settings?.dataDir || settings?.sourceRoot ? (
+        <SettingsGroup title="Locations">
+          <SettingsList>
+            {settings.dataDir ? (
+              <SettingsRow
+                label="Run logs"
+                detail={<PathText path={runLogDir(settings.dataDir)} />}
+              />
+            ) : null}
+            {settings.sourceRoot ? (
+              <SettingsRow
+                label="Source code"
+                detail={<PathText path={settings.sourceRoot} />}
+              />
+            ) : null}
+          </SettingsList>
+        </SettingsGroup>
+      ) : null}
     </div>
   );
 }

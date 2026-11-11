@@ -400,7 +400,7 @@ test('Ask first: a write waits for approval, then runs once allowed', async () =
   assert.equal(req.title, 'Write a file');
   assert.equal(req.tool, 'write_file');
   assert.equal(req.reasonCode, 'changes-files');
-  assert.equal(req.alwaysLabel, 'Allow file changes for the rest of this run');
+  assert.equal(req.alwaysLabel, 'Allow for this run');
   assert.ok(req.detail.startsWith(`${target}\n`), req.detail);
   assert.match(req.detail, /Creates a new file of 4 bytes/);
   assert.equal(pendingSeen.pending.length, 1);

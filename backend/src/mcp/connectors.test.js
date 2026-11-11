@@ -546,7 +546,7 @@ test('catalog: availability follows the launchers on PATH', { skip: process.plat
   assert.equal(byId.junos.docsUrl, 'https://github.com/Juniper/junos-mcp-server');
   assert.deepEqual(byId.junos.args, ['{script}', '-f', '{devices}', '-t', 'stdio']);
   assert.equal(byId.everything.category, 'Developer');
-  assert.equal(byId.everything.note, 'Reference server for testing');
+  assert.equal(byId.everything.note, '');
 
   const { manager } = await newManager({ env: { PATH: bin, HOME: os.homedir() } });
   const fromManager = manager.catalog();

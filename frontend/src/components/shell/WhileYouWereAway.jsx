@@ -3,7 +3,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Panel, Badge, Button, IconButton, Spinner, BellIcon } from '../ui/primitives';
+import { Panel, Badge, Button, IconButton, Spinner, BellIcon, CloseIcon } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
 import { getJSON, patchJSON } from '../../lib/api';
 
@@ -123,7 +123,7 @@ function Row({ row, onResolve, onSnooze, onJump }) {
             {row.sessionTitle}
           </span>
         </span>
-        <Badge tone={overdue ? 'danger' : 'warn'}>{overdue ? 'overdue' : 'due today'}</Badge>
+        <Badge tone={overdue ? 'danger' : 'warn'}>{overdue ? 'Overdue' : 'Due today'}</Badge>
       </div>
       <div className="flex items-center gap-1.5">
         <Button size="sm" variant="soft" onClick={() => onResolve(row)}>Resolve</Button>
@@ -172,7 +172,7 @@ export default function WhileYouWereAway({ open }) {
       .catch((err) => {
         if (cancelled) return;
         setRows([]);
-        setError(err?.message || 'Could not load your pending items.');
+        setError(err?.message || 'Could not load pending items');
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -204,7 +204,7 @@ export default function WhileYouWereAway({ open }) {
         `/api/intelledger/sessions/${encodeURIComponent(row.sessionId)}/actions/${encodeURIComponent(row.id)}`,
         { status: 'done' }
       );
-      appStore.toast('Marked done', { kind: 'success' });
+      appStore.toast('Resolved', { kind: 'success' });
     } catch {
       appStore.toast('Could not resolve that item', { kind: 'error' });
       reload();
@@ -237,15 +237,15 @@ export default function WhileYouWereAway({ open }) {
 
   if (!open) return null;
 
+  // Counts only; the body already shows the loading and empty states.
   const overdueCount = rows.filter((r) => r.kind === 'overdue').length;
   const dueCount = rows.length - overdueCount;
-  let subtitle = 'Nothing needs your attention';
-  if (loading) subtitle = 'Checking your ledger...';
-  else if (rows.length) {
+  let subtitle = '';
+  if (!loading && rows.length) {
     const parts = [];
     if (overdueCount) parts.push(`${overdueCount} overdue`);
     if (dueCount) parts.push(`${dueCount} due today`);
-    subtitle = parts.join(' - ');
+    subtitle = parts.join(', ');
   }
 
   return (
@@ -262,16 +262,16 @@ export default function WhileYouWereAway({ open }) {
             <BellIcon size={17} className="text-[color:var(--text-muted)]" />
             <div className="flex flex-col">
               <span className="text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">While you were away</span>
-              <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{subtitle}</span>
+              {subtitle ? <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{subtitle}</span> : null}
             </div>
           </div>
-          <IconButton label="Close" onClick={() => appStore.closeWywa()}>&#10005;</IconButton>
+          <IconButton label="Close" onClick={() => appStore.closeWywa()}><CloseIcon size={14} /></IconButton>
         </div>
 
         <div className="au-scroll flex-1 overflow-y-auto p-1.5">
           {loading && (
             <div className="flex items-center justify-center gap-2 px-3 py-8 text-[length:var(--text-sm)] text-[color:var(--text-muted)]">
-              <Spinner /> Checking your ledger...
+              <Spinner /> Loading...
             </div>
           )}
 
@@ -283,7 +283,7 @@ export default function WhileYouWereAway({ open }) {
 
           {!loading && !error && rows.length === 0 && (
             <div className="px-3 py-8 text-center text-[length:var(--text-sm)] text-[color:var(--text-muted)]">
-              Nothing needs your attention right now.
+              Nothing due
             </div>
           )}
 
@@ -296,11 +296,6 @@ export default function WhileYouWereAway({ open }) {
               onJump={handleJump}
             />
           ))}
-        </div>
-
-        <div className="flex items-center gap-3 border-t px-4 py-2 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]" style={{ borderColor: 'var(--hairline)' }}>
-          <span className="flex items-center gap-1.5"><Badge tone="danger">overdue</Badge></span>
-          <span className="flex items-center gap-1.5"><Badge tone="warn">due today</Badge></span>
         </div>
       </Panel>
     </div>

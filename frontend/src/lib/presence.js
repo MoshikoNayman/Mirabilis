@@ -11,7 +11,7 @@ import { API_BASE } from './api';
 /** @type {ProviderMeta[]} */
 export const PROVIDERS = [
   { id: 'ollama', label: 'Ollama', scope: 'local', needsKey: false, requiresBinary: false, baseUrl: 'http://127.0.0.1:11434' },
-  { id: 'openai-compatible', label: 'Local / Custom', scope: 'local', needsKey: false, requiresBinary: true, baseUrl: 'http://127.0.0.1:8080/v1' },
+  { id: 'openai-compatible', label: 'Custom endpoint', scope: 'local', needsKey: false, requiresBinary: true, baseUrl: 'http://127.0.0.1:8080/v1' },
   { id: 'koboldcpp', label: 'KoboldCpp', scope: 'local', needsKey: false, requiresBinary: true, baseUrl: 'http://127.0.0.1:5001/v1' },
   { id: 'openai', label: 'OpenAI', scope: 'remote', needsKey: true, baseUrl: 'https://api.openai.com/v1' },
   { id: 'claude', label: 'Claude', scope: 'remote', needsKey: true, baseUrl: 'https://api.anthropic.com' },

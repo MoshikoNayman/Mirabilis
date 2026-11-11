@@ -42,7 +42,7 @@ export const PRESETS = [
   {
     id: 'filesystem',
     name: 'Filesystem',
-    description: 'Read, search and edit files in the folders you choose.',
+    description: 'Read, search and edit files in chosen folders',
     category: 'Files',
     transport: 'stdio',
     command: 'npx',
@@ -53,12 +53,12 @@ export const PRESETS = [
     requires: 'npx',
     network: false,
     docsUrl: `${SERVERS}/filesystem`,
-    note: 'It can reach only the folders listed here, one per line.'
+    note: ''
   },
   {
     id: 'memory',
     name: 'Memory',
-    description: 'A local knowledge graph the assistant can save facts to and recall later.',
+    description: 'Knowledge graph that persists across chats',
     category: 'Knowledge',
     transport: 'stdio',
     command: 'npx',
@@ -68,12 +68,12 @@ export const PRESETS = [
     requires: 'npx',
     network: false,
     docsUrl: `${SERVERS}/memory`,
-    note: 'Saved in connector-memory.jsonl in the Mirabilis data folder.'
+    note: 'Saved to connector-memory.jsonl in the data folder'
   },
   {
     id: 'sequential-thinking',
     name: 'Sequential Thinking',
-    description: 'Lets the assistant work through a hard problem step by step and revise its steps.',
+    description: 'Step-by-step reasoning for hard problems',
     category: 'Utilities',
     transport: 'stdio',
     command: 'npx',
@@ -87,13 +87,13 @@ export const PRESETS = [
   {
     id: 'git',
     name: 'Git',
-    description: 'Status, diffs, history, branches and commits for one local repository.',
+    description: 'Status, diffs, history and commits for one repository',
     category: 'Developer',
     transport: 'stdio',
     command: 'uvx',
     args: ['mcp-server-git', '--repository', '{repo}'],
     fields: [
-      { key: 'repo', label: 'Repository folder', kind: 'path', placeholder: '~/Projects/my-repo', required: true, expect: 'git' }
+      { key: 'repo', label: 'Repository', kind: 'path', placeholder: '~/Projects/my-repo', required: true, expect: 'git' }
     ],
     requires: 'uvx',
     network: false,
@@ -103,7 +103,7 @@ export const PRESETS = [
   {
     id: 'fetch',
     name: 'Fetch',
-    description: 'Fetches web pages and turns them into text the assistant can read.',
+    description: 'Web pages as text',
     category: 'Network',
     transport: 'stdio',
     command: 'uvx',
@@ -112,12 +112,12 @@ export const PRESETS = [
     requires: 'uvx',
     network: true,
     docsUrl: `${SERVERS}/fetch`,
-    note: 'It reaches the internet itself, so Go Dark does not filter it.'
+    note: 'Not filtered by Go Dark'
   },
   {
     id: 'time',
     name: 'Time',
-    description: 'Current time and time zone conversions.',
+    description: 'Current time and time zone conversions',
     category: 'Utilities',
     transport: 'stdio',
     command: 'uvx',
@@ -131,25 +131,25 @@ export const PRESETS = [
   {
     id: 'junos',
     name: 'Junos',
-    description: 'Run operational commands and read or change configuration on Juniper devices.',
+    description: 'Operational commands and configuration on Juniper devices',
     category: 'Network',
     transport: 'stdio',
     command: 'python3',
     args: ['{script}', '-f', '{devices}', '-t', 'stdio'],
     cwdFrom: 'script',
     fields: [
-      { key: 'script', label: 'Server script (jmcp.py)', kind: 'path', placeholder: '~/junos-mcp-server/jmcp.py', required: true, expect: 'file' },
+      { key: 'script', label: 'Server script', kind: 'path', placeholder: '~/junos-mcp-server/jmcp.py', required: true, expect: 'file' },
       { key: 'devices', label: 'Devices file', kind: 'path', placeholder: '~/junos-mcp-server/devices.json', required: true, expect: 'file' }
     ],
     requires: 'python3',
     network: true,
     docsUrl: 'https://github.com/Juniper/junos-mcp-server',
-    note: 'Clone the repository and run pip install -r requirements.txt first. The devices file lists each device and how to log in to it.'
+    note: 'Clone the repo, then pip install -r requirements.txt'
   },
   {
     id: 'everything',
     name: 'Everything',
-    description: 'The MCP reference server, with sample tools, prompts and resources.',
+    description: 'MCP reference server for testing',
     category: 'Developer',
     transport: 'stdio',
     command: 'npx',
@@ -158,7 +158,7 @@ export const PRESETS = [
     requires: 'npx',
     network: false,
     docsUrl: `${SERVERS}/everything`,
-    note: 'Reference server for testing'
+    note: ''
   }
 ];
 
@@ -168,13 +168,9 @@ export const PRESETS = [
  */
 function installHint(requires, platform) {
   const mac = platform === 'darwin';
-  if (requires === 'uvx') {
-    return mac
-      ? 'Needs uv. Install it with: brew install uv'
-      : 'Needs uv. See https://docs.astral.sh/uv/getting-started/installation/';
-  }
-  if (requires === 'python3') return mac ? 'Needs Python 3. Install it with: brew install python' : 'Needs Python 3.';
-  return 'Needs Node.js, which includes npx. Get it from https://nodejs.org';
+  if (requires === 'uvx') return mac ? 'Needs uv: brew install uv' : 'Needs uv';
+  if (requires === 'python3') return mac ? 'Needs Python 3: brew install python' : 'Needs Python 3';
+  return mac ? 'Needs Node.js: brew install node' : 'Needs Node.js';
 }
 
 /**

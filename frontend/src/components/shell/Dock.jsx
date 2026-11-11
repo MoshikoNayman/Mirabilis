@@ -99,7 +99,7 @@ function ControlMenu({ onClose }) {
         label="Go Dark"
         onClick={() => {
           const on = appStore.toggleGoDark();
-          appStore.toast(on ? 'Go Dark on - local models only, nothing leaves this machine' : 'Go Dark off - cloud providers allowed again', { kind: on ? 'success' : 'info' });
+          appStore.toast(on ? 'Go Dark on' : 'Go Dark off', { kind: on ? 'success' : 'info' });
         }}
         right={(
           <span

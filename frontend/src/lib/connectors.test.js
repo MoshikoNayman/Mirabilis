@@ -41,7 +41,8 @@ describe('connectorStatus', () => {
     expect(connectorStatus(make('ready', { toolCount: 1 })).label).toBe('Connected, 1 tool');
     expect(connectorStatus(make('starting')).label).toBe('Starting');
     expect(connectorStatus(make('error')).tone).toBe('danger');
-    expect(connectorStatus(make('off')).label).toBe('Off');
+    expect(connectorStatus(make('off')).label).toBe('Stopped');
+    expect(connectorStatus(normalizeConnector({ enabled: false, status: { state: 'ready' } })).label).toBe('Off');
   });
 });
 

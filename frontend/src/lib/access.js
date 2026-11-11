@@ -12,7 +12,7 @@ import { apiFetch } from './api.js';
  * @property {AccessLevelId} id
  * @property {string} label        full name, e.g. "Ask first"
  * @property {string} short        composer chip text, e.g. "Access: Ask"
- * @property {string} description
+ * @property {string} hint         one line for the composer menu
  * @property {AccessTone} tone
  * @property {boolean} canRead     reads files and system state
  * @property {'no'|'approval'|'yes'} canChange
@@ -39,7 +39,7 @@ export const ACCESS_LEVELS = Object.freeze([
     id: 'chat',
     label: 'Chat only',
     short: 'Chat',
-    description: 'Plain chat. The assistant cannot see or touch your computer.',
+    hint: 'No computer access',
     tone: 'neutral',
     canRead: false,
     canChange: 'no',
@@ -49,7 +49,7 @@ export const ACCESS_LEVELS = Object.freeze([
     id: 'read',
     label: 'Read only',
     short: 'Read',
-    description: 'Looks at files, settings and system state, and runs read-only commands. Never changes anything.',
+    hint: 'Reads, never changes',
     tone: 'info',
     canRead: true,
     canChange: 'no',
@@ -59,7 +59,7 @@ export const ACCESS_LEVELS = Object.freeze([
     id: 'ask',
     label: 'Ask first',
     short: 'Ask',
-    description: 'Looks freely. Asks you before every change or any command it cannot prove is read-only.',
+    hint: 'Asks before changes',
     tone: 'accent',
     canRead: true,
     canChange: 'approval',
@@ -69,7 +69,7 @@ export const ACCESS_LEVELS = Object.freeze([
     id: 'bypass',
     label: 'Bypass',
     short: 'Bypass',
-    description: 'Runs every command and edits any file without asking. Nothing is blocked.',
+    hint: 'Runs anything, never asks',
     tone: 'danger',
     canRead: true,
     canChange: 'yes',
@@ -183,11 +183,11 @@ export function normalizeAllowRule(text) {
  * @returns {string}
  */
 export function allowRuleError(rule, existing = []) {
-  if (!rule) return 'Type a command first, for example git status.';
-  if (rule.length > MAX_ALLOW_RULE_LENGTH) return `Keep it to ${MAX_ALLOW_RULE_LENGTH} characters or fewer.`;
-  if (/[|;&<>`\n]|\$\(/.test(rule)) return 'Use a plain command such as git status, without |, ;, &, <, > or backticks.';
-  if (existing.includes(rule)) return 'That command is already on the list.';
-  if (existing.length >= MAX_ALLOW_RULES) return `The list holds up to ${MAX_ALLOW_RULES} commands.`;
+  if (!rule) return 'Enter a command.';
+  if (rule.length > MAX_ALLOW_RULE_LENGTH) return `Too long. Use ${MAX_ALLOW_RULE_LENGTH} characters or fewer.`;
+  if (/[|;&<>`\n]|\$\(/.test(rule)) return 'Remove shell operators (|, ;, &, <, >, backticks).';
+  if (existing.includes(rule)) return 'Already on the list.';
+  if (existing.length >= MAX_ALLOW_RULES) return `List is full (${MAX_ALLOW_RULES} max). Remove one first.`;
   return '';
 }
 
@@ -196,20 +196,20 @@ export function allowRuleError(rule, existing = []) {
  * apiFetch reports a missing route as a non-JSON 404, which means the backend
  * predates the feature.
  * @param {unknown} err
- * @param {string} [feature] what the request was for, e.g. "Access settings"
+ * @param {string} [feature] what the request was for, e.g. "Connectors"
  * @returns {string}
  */
 export function describeApiError(err, feature = 'this feature') {
   const e = /** @type {any} */ (err);
   const name = typeof e?.name === 'string' ? e.name : '';
   const message = typeof e?.message === 'string' ? e.message.trim() : '';
-  if (name === 'AbortError') return 'Mirabilis did not answer in time. Try again.';
+  if (name === 'AbortError') return 'Timed out. Try again.';
   if (name === 'TypeError' && /failed to fetch|load failed|networkerror/i.test(message)) {
-    return 'Cannot reach the Mirabilis backend. Check that it is running.';
+    return 'Backend unreachable. Check that it is running.';
   }
   if (/^(Mirabilis returned a non-JSON response|Request failed) \(404\)/.test(message)) {
-    return `This backend does not support ${feature} yet. Restart Mirabilis to load the latest version.`;
+    return `Backend does not support ${feature}. Restart Mirabilis.`;
   }
-  if (/^Unauthorized/.test(message)) return 'The backend did not accept the session token. Reload the app and try again.';
-  return message || 'Something went wrong. Try again.';
+  if (/^Unauthorized/.test(message)) return 'Session token rejected. Reload the app.';
+  return message || 'Request failed. Try again.';
 }

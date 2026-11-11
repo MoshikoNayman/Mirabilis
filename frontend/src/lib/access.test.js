@@ -11,14 +11,15 @@ describe('ACCESS_LEVELS', () => {
     expect(ACCESS_LEVELS.map((l) => l.id)).toEqual(['chat', 'read', 'ask', 'bypass']);
   });
 
-  it('carries the exact descriptions the product promises', () => {
-    const byId = Object.fromEntries(ACCESS_LEVELS.map((l) => [l.id, l.description]));
+  it('keeps each menu hint to a few words', () => {
+    const byId = Object.fromEntries(ACCESS_LEVELS.map((l) => [l.id, l.hint]));
     expect(byId).toEqual({
-      chat: 'Plain chat. The assistant cannot see or touch your computer.',
-      read: 'Looks at files, settings and system state, and runs read-only commands. Never changes anything.',
-      ask: 'Looks freely. Asks you before every change or any command it cannot prove is read-only.',
-      bypass: 'Runs every command and edits any file without asking. Nothing is blocked.'
+      chat: 'No computer access',
+      read: 'Reads, never changes',
+      ask: 'Asks before changes',
+      bypass: 'Runs anything, never asks'
     });
+    for (const hint of Object.values(byId)) expect(hint.split(' ').length).toBeLessThanOrEqual(4);
   });
 
   it('gives every level a label, a short chip label and a known tone', () => {
@@ -54,7 +55,7 @@ describe('ACCESS_LEVELS', () => {
 
   it('keeps UI text plain ASCII', () => {
     for (const level of ACCESS_LEVELS) {
-      for (const text of [level.label, level.short, level.description]) {
+      for (const text of [level.label, level.short, level.hint]) {
         expect(/^[\x20-\x7e]*$/.test(text)).toBe(true);
       }
     }
@@ -174,7 +175,7 @@ describe('allow rules', () => {
     expect(allowRuleError('')).not.toBe('');
     expect(allowRuleError('x'.repeat(MAX_ALLOW_RULE_LENGTH + 1))).toMatch(/120/);
     expect(allowRuleError('x'.repeat(MAX_ALLOW_RULE_LENGTH))).toBe('');
-    expect(allowRuleError('git status', ['git status'])).toMatch(/already/);
+    expect(allowRuleError('git status', ['git status'])).toMatch(/Already on the list/);
     for (const bad of ['ls | sh', 'ls; rm x', 'a && b', 'echo > f', 'cat < f', 'ls `x`', 'ls $(x)']) {
       expect(allowRuleError(bad), bad).not.toBe('');
     }
@@ -194,9 +195,9 @@ describe('describeApiError', () => {
 
   it('explains an unreachable backend and a timeout', () => {
     const net = new TypeError('Failed to fetch');
-    expect(describeApiError(net)).toMatch(/Cannot reach/);
+    expect(describeApiError(net)).toMatch(/Backend unreachable/);
     const abort = Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' });
-    expect(describeApiError(abort)).toMatch(/did not answer/);
+    expect(describeApiError(abort)).toMatch(/Timed out/);
   });
 
   it('keeps the server sentence otherwise', () => {

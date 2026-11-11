@@ -165,7 +165,7 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Search chats, ledger, and providers..."
+            placeholder="Search"
             className="w-full bg-transparent text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
           />
           {loading ? <Spinner /> : <Kbd>Esc</Kbd>}
@@ -192,7 +192,7 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
                   key={p.id}
                   leading={<PresenceDot presence={(presence?.[p.id] === 'unknown' ? 'offline' : presence?.[p.id]) || 'offline'} />}
                   title={p.label}
-                  sub={`${p.scope} provider`}
+                  sub={p.scope === 'local' ? 'Local' : 'Cloud'}
                   active={active === chatResults.length + ledger.length + i}
                   onClick={() => openProvider(p)}
                 />
@@ -201,7 +201,7 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
           )}
           {!loading && chatResults.length === 0 && ledger.length === 0 && providerResults.length === 0 && (
             <div className="px-3 py-8 text-center text-[length:var(--text-sm)] text-[color:var(--text-muted)]">
-              {q ? 'No matches' : 'Start typing to search'}
+              {q ? 'No matches' : 'No chats yet'}
             </div>
           )}
         </div>

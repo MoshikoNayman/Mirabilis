@@ -72,16 +72,16 @@ describe('image prompts', () => {
 
 describe('accessChangeNotice', () => {
   it('says a lower level applies to the live run at once', () => {
-    expect(accessChangeNotice('bypass', 'read')).toBe('Read only applies to the run in progress right away.');
-    expect(accessChangeNotice('ask', 'chat')).toBe('Chat only applies to the run in progress right away.');
+    expect(accessChangeNotice('bypass', 'read')).toBe('Read only applies now');
+    expect(accessChangeNotice('ask', 'chat')).toBe('Chat only applies now');
   });
 
   it('says a higher level waits for the next message', () => {
-    expect(accessChangeNotice('read', 'bypass')).toBe('The run in progress keeps Read only. Bypass applies from your next message.');
+    expect(accessChangeNotice('read', 'bypass')).toBe('Bypass applies from next message');
   });
 
   it('treats a return to the run level as applying at once', () => {
-    expect(accessChangeNotice('ask', 'ask')).toBe('Ask first applies to the run in progress right away.');
+    expect(accessChangeNotice('ask', 'ask')).toBe('Ask first applies now');
   });
 });
 

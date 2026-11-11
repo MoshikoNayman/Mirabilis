@@ -25,9 +25,9 @@ const POLL_MS = 3000;
 
 // Same shape as SegmentedControl, but the active fill says what the choice means.
 const PERMISSION_OPTIONS = [
-  { value: 'allow', label: 'Allow', hint: 'Runs without asking', fill: 'var(--accent)' },
-  { value: 'ask', label: 'Ask', hint: 'Waits for your approval', fill: '#b45309' },
-  { value: 'off', label: 'Off', hint: 'Hidden from the assistant', fill: '#64748b' }
+  { value: 'allow', label: 'Allow', fill: 'var(--accent)' },
+  { value: 'ask', label: 'Ask', fill: '#b45309' },
+  { value: 'off', label: 'Off', fill: '#64748b' }
 ];
 
 // Fields go read-only, not disabled, while a connector is being added, so focus stays in the form.
@@ -83,7 +83,7 @@ function CopyButton({ text, label = 'Copy', disabled }) {
       clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 1600);
     } else {
-      appStore.toast('Could not copy. Select the text and copy it by hand.', { kind: 'error' });
+      appStore.toast('Could not copy. Copy the text manually.', { kind: 'error' });
     }
   }
 
@@ -155,16 +155,17 @@ function formatTime(iso) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function statusSentence(c) {
+// The line under the status pill: only what the pill does not already say.
+function statusLine(c) {
   const state = c.enabled ? c.status.state : 'off';
   if (state === 'ready') {
     const server = [c.status.serverName, c.status.serverVersion].filter(Boolean).join(' ');
     const since = formatTime(c.status.startedAt);
-    return `Connected${server ? ` to ${server}` : ''}${since ? `, running since ${since}` : ''}.`;
+    if (!server) return since ? `Running since ${since}` : '';
+    return since ? `${server}, running since ${since}` : server;
   }
-  if (state === 'starting') return 'Starting. A first start can take a minute.';
-  if (c.enabled) return 'Not running. Restart it to connect.';
-  return 'Turned off. The assistant cannot use its tools until you turn it on.';
+  if (state === 'starting') return 'First start can take a minute';
+  return '';
 }
 
 /* List view */
@@ -211,11 +212,9 @@ function ConnectorRow({ connector, busy, onOpen, onToggle }) {
 }
 
 function ListView({ connectors, loadState, loadError, busy, onRetry, onOpen, onToggle, onAdd }) {
-  const connected = connectors.filter((c) => c.enabled && c.status.state === 'ready').length;
   return (
     <SettingsGroup
       title="Your connectors"
-      description={connectors.length ? `${connectors.length} added, ${connected} connected.` : undefined}
       action={
         <span data-pane-add="">
           <Button size="sm" variant="primary" onClick={() => onAdd('catalog')}>
@@ -227,7 +226,7 @@ function ListView({ connectors, loadState, loadError, busy, onRetry, onOpen, onT
     >
       {loadState === 'loading' && connectors.length === 0 ? (
         <div className={`flex items-center justify-center gap-2 rounded-[var(--r-md)] px-4 py-8 au-hairline ${mutedXs}`}>
-          <Spinner size={14} /> Loading connectors...
+          <Spinner size={14} /> Loading...
         </div>
       ) : loadState === 'error' && connectors.length === 0 ? (
         <SettingsNotice
@@ -242,14 +241,8 @@ function ListView({ connectors, loadState, loadError, busy, onRetry, onOpen, onT
           <span className="au-hairline flex h-10 w-10 items-center justify-center rounded-full text-[color:var(--text-muted)]">
             <PlugIcon size={18} />
           </span>
-          <div>
-            <p className="text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)]">No connectors yet.</p>
-            <p className={`mx-auto mt-1 max-w-[380px] leading-relaxed ${mutedXs}`}>
-              Connectors give the assistant tools from MCP servers, such as folders on this computer, git
-              repositories or network devices.
-            </p>
-          </div>
-          <Button size="sm" variant="soft" onClick={() => onAdd('catalog')}>Browse the catalog</Button>
+          <p className="text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)]">No connectors</p>
+          <Button size="sm" variant="soft" onClick={() => onAdd('catalog')}>Browse catalog</Button>
         </div>
       ) : (
         <SettingsList className="overflow-hidden">
@@ -271,13 +264,8 @@ function TryTool({ id, connector, tool }) {
   const [error, setError] = useState('');
   const ready = connector.enabled && connector.status.state === 'ready';
   const canRun = ready && tool.permission !== 'off';
-  const why = !connector.enabled
-    ? 'Turn the connector on to try this tool.'
-    : !ready
-      ? 'Available once the connector is connected.'
-      : tool.permission === 'off'
-        ? 'This tool is Off.'
-        : 'Runs now. Your click counts as the approval.';
+  // Why the button is disabled is already on the pill and the Allow / Ask / Off control.
+  const note = canRun && tool.permission === 'ask' ? 'Your click counts as approval' : '';
 
   async function run() {
     if (running || !canRun) return;
@@ -285,11 +273,11 @@ function TryTool({ id, connector, tool }) {
     try {
       args = argsText.trim() ? JSON.parse(argsText) : {};
     } catch {
-      setError('Arguments must be valid JSON, for example {"path": "~/notes.txt"}.');
+      setError('Arguments must be valid JSON.');
       return;
     }
     if (!args || typeof args !== 'object' || Array.isArray(args)) {
-      setError('Arguments must be a JSON object, for example {}.');
+      setError('Arguments must be a JSON object.');
       return;
     }
     setRunning(true);
@@ -306,7 +294,7 @@ function TryTool({ id, connector, tool }) {
 
   return (
     <div id={id} className="mt-3 pl-5">
-      <Field id={`${id}-args`} label="Try it: arguments as JSON">
+      <Field id={`${id}-args`} label="Arguments (JSON)">
         <textarea
           id={`${id}-args`}
           rows={3}
@@ -322,16 +310,16 @@ function TryTool({ id, connector, tool }) {
           {running ? <Spinner size={12} /> : <PlayIcon size={12} />}
           {running ? 'Running...' : 'Run tool'}
         </Button>
-        <span className={muted2xs}>{why}</span>
+        {note ? <span className={muted2xs}>{note}</span> : null}
       </div>
       {error ? <p role="alert" className={`mt-2 ${errorText}`}>{error}</p> : null}
       {result ? (
         <div className="mt-3">
           <p className={`mb-1 text-[length:var(--text-2xs)] font-medium ${result.isError ? 'text-rose-600 dark:text-rose-300' : 'text-[color:var(--text-muted)]'}`}>
-            {result.isError ? 'The tool reported an error' : 'Result'}
+            {result.isError ? 'Tool error' : 'Result'}
           </p>
           <pre tabIndex={0} className={`${monoBlockClass} max-h-60 whitespace-pre-wrap break-words`} style={monoBg}>
-            {result.text || '(no text output)'}
+            {result.text || 'No output'}
           </pre>
         </div>
       ) : null}
@@ -350,7 +338,6 @@ function PermissionControl({ value, onChange, label }) {
             type="button"
             onClick={() => { if (!active) onChange(opt.value); }}
             aria-pressed={active}
-            title={opt.hint}
             className={`au-focus inline-flex h-7 items-center rounded-[var(--r-pill)] px-2.5 text-[length:var(--text-2xs)] font-medium transition ${
               active ? 'text-white shadow-[var(--shadow-1)]' : 'text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]'
             }`}
@@ -387,10 +374,14 @@ function ToolRow({ connector, tool, open, onToggleOpen, onPermission }) {
                 {tool.name}
               </span>
               {tool.title && tool.title !== tool.name ? <span className={muted2xs}>{tool.title}</span> : null}
-              {tool.readOnly ? <Badge>read-only</Badge> : null}
+              {tool.readOnly ? <Badge>Read-only</Badge> : null}
             </span>
+            {/* Server-written and often long: two lines until opened, the rest on hover. */}
             {tool.description ? (
-              <span className={`mt-0.5 block leading-snug ${muted2xs} ${open ? 'whitespace-pre-wrap' : 'line-clamp-2'}`}>
+              <span
+                className={`mt-0.5 block leading-snug ${muted2xs} ${open ? 'whitespace-pre-wrap' : 'line-clamp-2'}`}
+                title={open ? undefined : tool.description}
+              >
                 {tool.description}
               </span>
             ) : null}
@@ -426,6 +417,7 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
   const isHttp = c.transport === 'http';
   const target = isHttp ? c.url : commandLine(c.command, c.args);
   const secretKeys = [...c.envKeys, ...c.headerKeys];
+  const statusText = state === 'error' ? '' : statusLine(c);
 
   async function loadLogs() {
     setLogsState('loading');
@@ -472,7 +464,6 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
             </div>
           </div>
           <div className="flex items-center gap-2 pt-1">
-            <span className={muted2xs}>{c.enabled ? 'On' : 'Off'}</span>
             <Switch
               checked={c.enabled}
               onChange={(on) => onToggle(c, on)}
@@ -482,24 +473,23 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
           </div>
         </div>
 
-        <div className="mt-4">
-          {state === 'error' ? (
-            <SettingsNotice tone="danger" icon={<AlertIcon size={14} />}>
-              <p className="font-medium">Could not connect.</p>
-              {c.status.error ? (
-                <p className="mt-1 whitespace-pre-wrap break-words font-mono text-[length:var(--text-2xs)]">{c.status.error}</p>
-              ) : null}
-              <p className="mt-1">
-                {isHttp ? 'Check the URL and token, then restart.' : 'Check the command and its logs, then restart.'}
-              </p>
-            </SettingsNotice>
-          ) : (
-            <p className={`flex items-center gap-2 ${mutedXs}`}>
-              {state === 'starting' ? <Spinner size={12} /> : null}
-              {statusSentence(c)}
-            </p>
-          )}
-        </div>
+        {state === 'error' || statusText ? (
+          <div className="mt-4">
+            {state === 'error' ? (
+              <SettingsNotice tone="danger" icon={<AlertIcon size={14} />}>
+                <p className="font-medium">Could not connect.</p>
+                {c.status.error ? (
+                  <p className="mt-1 whitespace-pre-wrap break-words font-mono text-[length:var(--text-2xs)]">{c.status.error}</p>
+                ) : null}
+                <p className="mt-1">
+                  {isHttp ? 'Check the URL and token, then restart.' : 'Check the command and logs, then restart.'}
+                </p>
+              </SettingsNotice>
+            ) : (
+              <p className={mutedXs}>{statusText}</p>
+            )}
+          </div>
+        ) : null}
 
         <SettingsList className="mt-4">
           <SettingsRow
@@ -517,7 +507,7 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
           {c.hasSecrets || secretKeys.length ? (
             <SettingsRow
               label="Secrets"
-              description="Stored on this computer. Values are never shown here."
+              description="Values hidden"
               detail={secretKeys.length ? (
                 <code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
                   {secretKeys.join(', ')}
@@ -556,7 +546,7 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
             className="mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-md)] border border-rose-400/40 bg-rose-500/10 px-3 py-2"
           >
             <p className="min-w-0 flex-1 text-[length:var(--text-xs)] text-rose-700 dark:text-rose-200">
-              Remove {c.name}? It stops now and its settings are deleted.
+              Remove {c.name} and delete its settings?
             </p>
             <Button
               size="sm"
@@ -576,7 +566,7 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
           <div id={`${uid}-logs`} className="mt-3">
             <div className="mb-1 flex items-center justify-between gap-2">
               <span className={`font-medium ${muted2xs}`}>
-                Output and connection events{logs.length ? `, last ${logs.length} lines` : ''}
+                {logs.length ? `Last ${logs.length} line${logs.length === 1 ? '' : 's'}` : ''}
               </span>
               <Button size="sm" variant="ghost" onClick={loadLogs} disabled={logsState === 'loading'}>
                 <RefreshIcon size={12} />
@@ -593,17 +583,14 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
                 className={`${monoBlockClass} max-h-60 whitespace-pre-wrap break-all`}
                 style={monoBg}
               >
-                {logsState === 'loading' && logs.length === 0 ? 'Loading...' : logs.length ? logs.join('\n') : 'No output yet.'}
+                {logsState === 'loading' && logs.length === 0 ? 'Loading...' : logs.length ? logs.join('\n') : 'No output'}
               </pre>
             )}
           </div>
         ) : null}
       </div>
 
-      <SettingsGroup
-        title={`Tools${c.tools.length ? ` (${c.tools.length})` : ''}`}
-        description="Allow runs without asking. Ask waits for your approval. Off hides the tool from the assistant. In Read only, only read-only tools run; Bypass runs every tool that is not Off."
-      >
+      <SettingsGroup title={`Tools${c.tools.length ? ` (${c.tools.length})` : ''}`}>
         {c.tools.length ? (
           <SettingsList>
             {c.tools.map((t) => (
@@ -619,7 +606,7 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
           </SettingsList>
         ) : (
           <p className={mutedXs}>
-            {state === 'ready' ? 'This server offers no tools.' : 'Its tools appear here once it connects.'}
+            {state === 'ready' ? 'No tools' : 'Not connected'}
           </p>
         )}
       </SettingsGroup>
@@ -636,7 +623,7 @@ function PresetField({ id, field, value, onChange, disabled }) {
       id={id}
       label={field.label}
       optional={!field.required}
-      hint={many ? 'One per line. ~ means your home folder.' : field.kind === 'path' ? '~ means your home folder.' : ''}
+      hint={many ? 'One per line' : ''}
     >
       {many ? (
         <textarea
@@ -700,7 +687,7 @@ function PresetRow({ preset, added, expanded, onExpand, onCollapse, onCreate }) 
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)]">{preset.name}</span>
             {added ? <Badge tone="success">Added</Badge> : null}
-            {preset.network ? <Badge>uses the network</Badge> : null}
+            {preset.network ? <Badge>Uses network</Badge> : null}
           </div>
           {preset.description ? <p className={`mt-0.5 leading-snug ${mutedXs}`}>{preset.description}</p> : null}
           <div className={`mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 ${muted2xs}`}>
@@ -721,7 +708,7 @@ function PresetRow({ preset, added, expanded, onExpand, onCollapse, onCreate }) 
           {!preset.available ? (
             <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[length:var(--text-2xs)] font-medium leading-snug text-amber-700 dark:text-amber-300">
               <AlertIcon size={11} className="shrink-0" />
-              <span>{preset.installHint || `Needs ${need.label}.`}</span>
+              <span>{preset.installHint || `Needs ${need.label}`}</span>
               {need.url ? (
                 <a
                   href={need.url}
@@ -773,13 +760,8 @@ function PresetRow({ preset, added, expanded, onExpand, onCollapse, onCreate }) 
           <div className={muted2xs}>
             Runs <code className="break-all font-mono text-[color:var(--text-main)]">{presetCommandPreview(preset, values)}</code>
           </div>
-          {!preset.available ? (
-            <SettingsNotice tone="warn" icon={<AlertIcon size={13} />}>
-              {need.label} was not found on this computer, so this connector cannot start until it is installed.
-            </SettingsNotice>
-          ) : null}
           {error ? <p role="alert" className={errorText}>{error}</p> : null}
-          {creating ? <p className={mutedXs}>Starting it now. A first start can take a minute.</p> : null}
+          {creating ? <p className={mutedXs}>First start can take a minute</p> : null}
           <div className="flex items-center gap-2">
             <Button type="submit" size="sm" variant="primary" aria-disabled={creating || undefined}>
               {creating ? <Spinner size={12} /> : null}
@@ -791,7 +773,7 @@ function PresetRow({ preset, added, expanded, onExpand, onCollapse, onCreate }) 
       ) : (
         <>
           {error ? <p role="alert" className={`mt-2 pl-11 ${errorText}`}>{error}</p> : null}
-          {creating ? <p className={`mt-2 pl-11 ${mutedXs}`}>Starting it now. A first start can take a minute.</p> : null}
+          {creating ? <p className={`mt-2 pl-11 ${mutedXs}`}>First start can take a minute</p> : null}
         </>
       )}
     </div>
@@ -815,12 +797,12 @@ function CatalogView({ catalog, catalogState, catalogError, connectors, onRetry,
   if (!catalog) {
     return (
       <div className={`flex items-center justify-center gap-2 py-8 ${mutedXs}`}>
-        <Spinner size={14} /> Loading the catalog...
+        <Spinner size={14} /> Loading...
       </div>
     );
   }
   if (catalog.length === 0) {
-    return <p className={mutedXs}>The catalog is empty. Use Custom to add any MCP server.</p>;
+    return <p className={mutedXs}>Catalog is empty</p>;
   }
 
   return (
@@ -882,16 +864,13 @@ function CustomForm({ goDark, onCreate }) {
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-      <div className="flex flex-wrap items-center gap-3">
+      <div>
         <SegmentedControl
           size="sm"
           value={form.transport}
           onChange={(v) => set('transport', v)}
           options={[{ value: 'stdio', label: 'Local command' }, { value: 'http', label: 'Remote URL' }]}
         />
-        <span className={mutedXs}>
-          {isHttp ? 'An MCP server reached over HTTP.' : 'A program on this computer that speaks MCP over stdin and stdout.'}
-        </span>
       </div>
 
       <Field id={id('name')} label="Name">
@@ -924,15 +903,10 @@ function CustomForm({ goDark, onCreate }) {
           </Field>
           {remoteBlocked ? (
             <SettingsNotice tone="warn" icon={<MoonIcon size={13} />}>
-              Go Dark is on and this server is outside your network, so it cannot connect until Go Dark is off.
+              Go Dark blocks servers outside your network.
             </SettingsNotice>
           ) : null}
-          <Field
-            id={id('token')}
-            label="Bearer token"
-            optional
-            hint={'Sent as Authorization: Bearer <token>. Stored on this computer and never shown again.'}
-          >
+          <Field id={id('token')} label="Bearer token" optional hint="Hidden after saving">
             <input
               id={id('token')}
               type="password"
@@ -947,7 +921,7 @@ function CustomForm({ goDark, onCreate }) {
         </>
       ) : (
         <>
-          <Field id={id('command')} label="Command" hint="The program to run, for example npx, uvx, python3 or a full path.">
+          <Field id={id('command')} label="Command">
             <input
               id={id('command')}
               className={`${inputClass} font-mono placeholder:font-sans`}
@@ -960,7 +934,7 @@ function CustomForm({ goDark, onCreate }) {
               autoCorrect="off"
             />
           </Field>
-          <Field id={id('args')} label="Arguments" optional hint="One per line.">
+          <Field id={id('args')} label="Arguments" optional hint="One per line">
             <textarea
               id={id('args')}
               rows={3}
@@ -972,17 +946,12 @@ function CustomForm({ goDark, onCreate }) {
               spellCheck={false}
             />
           </Field>
-          <Field
-            id={id('env')}
-            label="Environment"
-            optional
-            hint="KEY=value, one per line. Values are stored on this computer and never shown again."
-          >
+          <Field id={id('env')} label="Environment" optional hint="One KEY=value per line, hidden after saving">
             <textarea
               id={id('env')}
               rows={2}
               className={textareaClass}
-              placeholder="API_KEY=..."
+              placeholder="API_KEY=abc123"
               value={form.env}
               onChange={(e) => set('env', e.target.value)}
               readOnly={creating}
@@ -1006,7 +975,7 @@ function CustomForm({ goDark, onCreate }) {
       )}
 
       {error ? <p role="alert" className={errorText}>{error}</p> : null}
-      {creating ? <p className={mutedXs}>Starting it now. A first start can take a minute.</p> : null}
+      {creating ? <p className={mutedXs}>First start can take a minute</p> : null}
       <div>
         <Button type="submit" size="sm" variant="primary" aria-disabled={creating || undefined}>
           {creating ? <Spinner size={12} /> : <PlusIcon size={13} />}
@@ -1022,7 +991,7 @@ function AddView({ tab, onTab, onBack, catalog, catalogState, catalogError, onRe
     <div>
       <BackButton onClick={onBack} />
       <div className="mb-6 mt-4 flex flex-wrap items-center justify-between gap-3">
-        <h4 className="text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">Add a connector</h4>
+        <h4 className="text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">Add connector</h4>
         <SegmentedControl
           size="sm"
           value={tab}
@@ -1072,10 +1041,7 @@ function UseFromOtherApps() {
     : token ? shownToken : 'Not available. Start the backend, then reopen Settings.';
 
   return (
-    <SettingsGroup
-      title="Use Mirabilis from other apps"
-      description="MCP clients such as Claude Code, Cursor and VS Code can call Mirabilis tools at this address."
-    >
+    <SettingsGroup title="Use Mirabilis from other apps">
       <SettingsList>
         <SettingsRow
           label="Endpoint"
@@ -1087,7 +1053,7 @@ function UseFromOtherApps() {
           label="Token"
           detail={<code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{tokenText}</code>}
         >
-          <Button size="sm" variant="ghost" onClick={() => setReveal((v) => !v)} disabled={!token} aria-pressed={reveal}>
+          <Button size="sm" variant="ghost" onClick={() => setReveal((v) => !v)} disabled={!token}>
             {reveal ? 'Hide' : 'Show'}
           </Button>
           <CopyButton text={token} label="Copy token" />
@@ -1095,7 +1061,7 @@ function UseFromOtherApps() {
       </SettingsList>
       <p className={`mt-2 flex items-start gap-1.5 leading-snug ${muted2xs}`}>
         <ShieldIcon size={12} className="mt-px shrink-0" />
-        Anyone with this token can run commands on this computer through Mirabilis. Keep it private.
+        Keep this token private.
       </p>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
@@ -1107,13 +1073,10 @@ function UseFromOtherApps() {
         />
         <CopyButton text={clientSnippet(client, url, token || '<token>')} label="Copy setup" />
       </div>
-      <pre tabIndex={0} className={`${monoBlockClass} mt-2 whitespace-pre-wrap break-words`} style={monoBg} aria-label="Setup for the selected app">
+      <pre tabIndex={0} className={`${monoBlockClass} mt-2 whitespace-pre-wrap break-words`} style={monoBg} aria-label="Setup snippet">
         {clientSnippet(client, url, shownToken)}
       </pre>
-      <p className={`mt-1 ${muted2xs}`}>
-        {hint}
-        {token && !reveal ? ' Copy includes the full token.' : ''}
-      </p>
+      <p className={`mt-1 ${muted2xs}`}>{hint}</p>
     </SettingsGroup>
   );
 }
@@ -1287,7 +1250,8 @@ export default function ConnectorsPane() {
       if (settled(c.id)) {
         setConnectors((list) => list.map((x) => (x.id === c.id ? { ...x, tools: withPermission(x.tools, before.permission) } : x)));
       }
-      appStore.toast(`Could not change ${toolName}. ${describeApiError(err, FEATURE)}`, { kind: 'error' });
+      const choice = PERMISSION_OPTIONS.find((o) => o.value === permission)?.label || permission;
+      appStore.toast(`Could not set ${toolName} to ${choice}. ${describeApiError(err, FEATURE)}`, { kind: 'error' });
     }
   }
 
@@ -1338,7 +1302,7 @@ export default function ConnectorsPane() {
       lastOpened.current = c.id;
       setView({ name: 'detail', id: c.id });
       const failed = c.status.state === 'error';
-      appStore.toast(failed ? `Added ${c.name}, but it did not start` : `Added ${c.name}`, { kind: failed ? 'warn' : 'success' });
+      appStore.toast(failed ? `Added ${c.name}, failed to start` : `Added ${c.name}`, { kind: failed ? 'warn' : 'success' });
       return '';
     } catch (err) {
       return describeApiError(err, FEATURE);
@@ -1388,13 +1352,12 @@ export default function ConnectorsPane() {
             className="mb-6"
             action={<Button size="sm" variant="outline" onClick={() => appStore.openSettings('access')}>Change Access</Button>}
           >
-            Access is Chat only, so the assistant does not use connector tools. Read only, Ask first and Bypass turn them on.
+            Connector tools are off in Chat only.
           </SettingsNotice>
         ) : null}
         {goDark ? (
           <SettingsNotice tone="info" icon={<MoonIcon size={13} />} className="mb-6">
-            Go Dark is on. Remote connectors outside your network cannot connect. Local commands run as programs on this
-            computer, and Go Dark does not filter what they do.
+            Go Dark does not filter local connectors.
           </SettingsNotice>
         ) : null}
         <ListView

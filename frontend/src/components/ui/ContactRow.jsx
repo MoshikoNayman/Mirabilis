@@ -1,7 +1,7 @@
 // One provider row in the Buddy List: name, presence, model count.
 'use client';
 
-import { PresenceDot, Badge } from './primitives';
+import { PresenceDot } from './primitives';
 import { PRESENCE_LABELS } from '../../lib/presence';
 
 export default function ContactRow({ provider, presence = 'unknown', modelCount, warmLabel, onClick }) {
@@ -17,17 +17,12 @@ export default function ContactRow({ provider, presence = 'unknown', modelCount,
     >
       <PresenceDot presence={presence === 'unknown' ? 'offline' : presence} />
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)]">
-            {provider.label}
-          </span>
-          <Badge tone="neutral" className="opacity-70">
-            {provider.scope}
-          </Badge>
+        <span className="truncate text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)]">
+          {provider.label}
         </span>
         <span className="truncate text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
           {PRESENCE_LABELS[presence] || 'Checking...'}
-          {typeof modelCount === 'number' && modelCount > 0 ? ` | ${modelCount} models` : ''}
+          {typeof modelCount === 'number' && modelCount > 0 ? ` | ${modelCount} ${modelCount === 1 ? 'model' : 'models'}` : ''}
           {warmLabel ? (
             <span className="text-emerald-600 dark:text-emerald-300">{` | ${warmLabel}`}</span>
           ) : null}

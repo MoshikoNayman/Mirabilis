@@ -191,7 +191,7 @@ test('Read only runs read-only commands and refuses the rest without asking', as
 
   const touch = await r.dispatch('run_command', { command: 'touch made.txt' });
   assert.equal(touch.ok, false);
-  assert.match(touch.error, /Read only allows only commands that cannot change anything/);
+  assert.match(touch.error, /Read only: this command may change things/);
 
   const write = await r.dispatch('write_file', { path: 'new.txt', content: 'x' });
   assert.equal(write.ok, false);
@@ -330,7 +330,7 @@ test('the approval shows the real path, the sizes and the first lines', async ()
   assert.match(requests[0].detail, /Overwrites the existing file \(24 bytes\) with 12 bytes\./);
   assert.match(requests[0].detail, /replacement/);
   assert.equal(requests[0].kind, 'write');
-  assert.equal(requests[0].alwaysLabel, 'Allow file changes for the rest of this run');
+  assert.equal(requests[0].alwaysLabel, 'Allow for this run');
 
   const long = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n');
   await r.dispatch('write_file', { path: 'fresh.txt', content: long });

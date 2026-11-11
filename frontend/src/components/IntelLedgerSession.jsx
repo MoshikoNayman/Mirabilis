@@ -2,7 +2,6 @@
 
 import { ChevronRightIcon } from './ui/primitives';
 import { useState, useEffect, useMemo } from 'react';
-import InfoHint from './ui/InfoHint';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
 const SIGNAL_TYPE_ORDER = ['decision', 'risk', 'ask', 'commitment', 'opportunity'];
@@ -68,6 +67,16 @@ function confidenceBadgeTone(confidence) {
   return 'border-rose-300/70 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-900/20 dark:text-rose-300';
 }
 
+// Same profile label as the session cards and cross-session modal in MirabilisApp.
+function humanizePromptProfile(profileId) {
+  const raw = String(profileId || '').trim();
+  if (!raw) return 'Default';
+  return raw
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function humanizePromptVersion(versionId) {
   const raw = String(versionId || '').trim();
   if (!raw) return 'Custom';
@@ -76,6 +85,10 @@ function humanizePromptVersion(versionId) {
     return `Revision ${revMatch[1]}`;
   }
   return 'Custom';
+}
+
+function countLabel(count, noun) {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
 export default function IntelLedgerSession({ sessionId, userId, initialSession = null, localMode = false, onSessionUpdate = () => {}, onBack }) {
@@ -274,7 +287,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  const focusInteractionAt = (interactionId, startMs = null) => {
+  const focusInteractionAt = (interactionId) => {
     if (!interactionId) return;
     setActiveTab('interactions');
     setHighlightedInteractionId(interactionId);
@@ -282,10 +295,6 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
       const card = document.getElementById(`interaction-card-${interactionId}`);
       card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 0);
-    if (typeof startMs === 'number') {
-      setError(`Evidence @ ${formatMs(startMs)} in source interaction.`);
-      setTimeout(() => setError(''), 2200);
-    }
   };
 
   const loadMediaJobs = async () => {
@@ -477,7 +486,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
       await loadSessionBrief();
       setUsingLocalMode(false);
     } catch (err) {
-      setError(err.message || 'Failed to queue media upload.');
+      setError(err.message || 'Failed to queue media transcription.');
     } finally {
       setMediaUploading(false);
     }
@@ -490,7 +499,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
     }
 
     if (!(candidate.type || '').startsWith('video/') && !(candidate.type || '').startsWith('audio/')) {
-      setError('Only video/audio files are supported.');
+      setError('Only audio or video files are supported.');
       return;
     }
 
@@ -583,61 +592,40 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                   Back
                 </button>
               )}
-              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-main)]">
-                Mirabilis Workspace Memory
-              </span>
             </div>
             <h1 className="text-lg font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">{session.title}</h1>
             <p className="text-sm text-[color:var(--text-muted)]">
-              {interactions.length} interactions | {signals.length} signals extracted | {actions.length} actions
+              {countLabel(interactions.length, 'interaction')} | {countLabel(signals.length, 'signal')} | {countLabel(actions.length, 'action')}
             </p>
             <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-[10px] text-[color:var(--text-muted)]">
               <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Open {actionStatusCounts.open || 0}</span>
-              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">In Progress {actionStatusCounts.in_progress || 0}</span>
+              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">In progress {actionStatusCounts.in_progress || 0}</span>
               <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Done {actionStatusCounts.done || 0}</span>
               <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Blocked {actionStatusCounts.blocked || 0}</span>
               {sessionBrief && (
                 <>
                   <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Due today {sessionBrief.due_today_actions || 0}</span>
                   <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Overdue {sessionBrief.overdue_actions || 0}</span>
-                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">New notes (24h) {sessionBrief.new_interactions_24h || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">New interactions (24h) {sessionBrief.new_interactions_24h || 0}</span>
                   <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">New signals (24h) {sessionBrief.new_signals_24h || 0}</span>
                 </>
               )}
             </div>
-            {sessionBrief && (
-              <div className="space-y-1 text-[10px] text-[color:var(--text-muted)]">
-                {Array.isArray(sessionBrief.overdue_titles) && sessionBrief.overdue_titles.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1">
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--text-muted)]">Overdue items</span>
-                    {sessionBrief.overdue_titles.map((title) => (
-                      <button
-                        key={title}
-                        type="button"
-                        onClick={() => focusActionByTitle(title)}
-                        className="rounded-full border border-amber-300/60 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition hover:brightness-95 dark:border-amber-500/30 dark:bg-amber-900/20 dark:text-amber-300"
-                      >
-                        {title}
-                      </button>
-                    ))}
-                  </div>
-                )}
+            {Array.isArray(sessionBrief?.overdue_titles) && sessionBrief.overdue_titles.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--text-muted)]">Overdue</span>
+                {sessionBrief.overdue_titles.map((title) => (
+                  <button
+                    key={title}
+                    type="button"
+                    onClick={() => focusActionByTitle(title)}
+                    className="rounded-full border border-amber-300/60 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 transition hover:brightness-95 dark:border-amber-500/30 dark:bg-amber-900/20 dark:text-amber-300"
+                  >
+                    {title}
+                  </button>
+                ))}
               </div>
             )}
-            <div className="flex items-center gap-1 overflow-x-auto pt-1 text-[10px] text-[color:var(--text-muted)]">
-              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5" title="One piece of source text you added.">Interaction</span>
-              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5" title="Extracted insight such as risk/decision/commitment.">Signal</span>
-              <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5" title="AI summary over all interactions and signals.">Synthesis</span>
-              <InfoHint
-                title="How it works"
-                description="Ingest raw context, review extracted signals, then synthesize for a concise action snapshot."
-                points={[
-                  'Ingest: add text or file notes',
-                  'Extract: tag structured signals automatically',
-                  'Synthesis: ask AI what matters now'
-                ]}
-              />
-            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -668,42 +656,37 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
           {activeTab === 'interactions' && (
             <div className="space-y-4">
               <div className="bg-[var(--material-thick)] p-4 rounded-[var(--r-lg)] border border-[var(--hairline)] shadow-sm">
-                <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">Add Interaction</h3>
+                <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">Add interaction</h3>
                 <div className="grid items-stretch gap-3 lg:grid-cols-2">
                   <form onSubmit={handleIngestText} className="flex h-full flex-col gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Text Note</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Text</div>
                       <button
                         type="submit"
                         disabled={ingesting}
                         className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-95 disabled:opacity-50"
                       >
                         {ingesting && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/35 border-t-white" />}
-                        {ingesting ? 'Extracting...' : 'Ingest & Extract'}
+                        {ingesting ? 'Extracting...' : 'Extract'}
                       </button>
                     </div>
                     <textarea
                       className="min-h-[168px] flex-1 resize-none rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] p-3 text-[color:var(--text-main)] placeholder-slate-500 focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white dark:placeholder-slate-400"
                       rows="7"
-                      placeholder="Paste notes, meeting recap, or decisions..."
+                      aria-label="Text"
                     />
-                    {ingesting && (
-                      <div className="text-xs text-[color:var(--text-muted)]">
-                        Running AI extraction and action generation. This can take a few seconds.
-                      </div>
-                    )}
                   </form>
 
                   <form onSubmit={handleIngestMedia} className="flex h-full flex-col gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Upload Video / Audio</div>
+                      <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Media</div>
                       <button
                         type="submit"
                         disabled={!mediaFile || mediaUploading}
                         className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:brightness-95 disabled:opacity-50"
                       >
                         {mediaUploading && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/35 border-t-white" />}
-                        {mediaUploading ? 'Queuing...' : 'Upload & Transcribe'}
+                        {mediaUploading ? 'Uploading...' : 'Transcribe'}
                       </button>
                     </div>
                     <input
@@ -727,10 +710,12 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                           : 'border-black/20 bg-[var(--material-thin)] text-[color:var(--text-main)] hover:border-accent/60 hover:bg-accent/5 dark:border-white/20'
                       }`}
                     >
-                      <div className="text-xs font-semibold">Drag and drop video/audio here</div>
-                      <div className="mt-1 text-[11px]">or click to browse</div>
+                      <div className="text-xs font-semibold">Drop audio or video</div>
                       {mediaFile ? (
-                        <div className="mt-2 rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] dark:border-white/20">
+                        <div
+                          className="mt-2 max-w-full truncate rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] dark:border-white/20"
+                          title={mediaFile.name}
+                        >
                           {mediaFile.name}
                         </div>
                       ) : null}
@@ -741,7 +726,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
 
               {mediaJobs.length > 0 && (
                 <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Media Jobs</div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Media jobs</div>
                   <div className="space-y-2">
                     {mediaJobs.slice(0, 8).map((job) => (
                       <div key={job.id} className="rounded-lg border border-[var(--hairline)] px-3 py-2">
@@ -784,7 +769,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                           <button
                             key={`${int.id}-${idx}`}
                             type="button"
-                            onClick={() => focusInteractionAt(int.id, Number(seg.start_ms || 0))}
+                            onClick={() => focusInteractionAt(int.id)}
                             className="block w-full text-left text-[11px] text-[color:var(--text-main)] transition hover:text-accent dark:hover:text-accent"
                           >
                             <span className="font-semibold">[{formatMs(seg.start_ms)}]</span> {seg.speaker || 'Speaker'}: {seg.text}
@@ -812,7 +797,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       onChange={(e) => setSignalTypeFilter(e.target.value)}
                       className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-xs text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                     >
-                      <option value="all">All types</option>
+                      <option value="all">All</option>
                       {SIGNAL_TYPE_ORDER.map((type) => (
                         <option key={type} value={type}>{titleCaseSignalType(type)}</option>
                       ))}
@@ -830,7 +815,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       onChange={(e) => setSignalConfidenceFilter(e.target.value)}
                       className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-xs text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                     >
-                      <option value="all">Any confidence</option>
+                      <option value="all">All</option>
                       <option value="0.8">80% and up</option>
                       <option value="0.6">60% and up</option>
                       <option value="0.4">40% and up</option>
@@ -843,7 +828,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       onChange={(e) => setSignalOwnerFilter(e.target.value)}
                       className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-xs text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                     >
-                      <option value="all">Any owner</option>
+                      <option value="all">All</option>
                       {ownerOptions.map((owner) => (
                         <option key={owner} value={owner}>{owner}</option>
                       ))}
@@ -853,12 +838,12 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
               </div>
               {signals.length === 0 && (
                 <div className="rounded-lg border border-dashed border-black/10 bg-[var(--material-thin)] px-4 py-3 text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
-                  No signals extracted yet. Ingest text in the Interactions tab to populate structured signals.
+                  No signals
                 </div>
               )}
               {signals.length > 0 && filteredSignals.length === 0 && (
                 <div className="rounded-lg border border-dashed border-black/10 bg-[var(--material-thin)] px-4 py-3 text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
-                  No signals match the current filters.
+                  No matches
                 </div>
               )}
               {orderedSignalTypes.map((type) => {
@@ -883,7 +868,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                           )}
                           {sig.prompt_profile && (
                             <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
-                              Prompt {sig.prompt_profile}
+                              Prompt {humanizePromptProfile(sig.prompt_profile)}
                             </span>
                           )}
                           {sig.prompt_version && (
@@ -896,10 +881,10 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                         {Number.isFinite(Number(sig.start_ms)) && (
                           <button
                             type="button"
-                            onClick={() => focusInteractionAt(sig.interaction_id, Number(sig.start_ms || 0))}
+                            onClick={() => focusInteractionAt(sig.interaction_id)}
                             className="mt-1 rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-muted)] transition hover:text-accent dark:text-[color:var(--text-muted)] dark:hover:text-accent"
                           >
-                            Source timestamp {formatMs(sig.start_ms)}
+                            Source {formatMs(sig.start_ms)}
                           </button>
                         )}
                         {sig.quote && (
@@ -907,12 +892,11 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                             "{sig.quote}"
                           </div>
                         )}
-                        <div className="text-xs text-[color:var(--text-muted)] mt-2">
-                          Confidence: {(sig.confidence * 100).toFixed(0)}%
-                          {sig.extracted_at && (
-                            <span className="ml-2">| {new Date(sig.extracted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                          )}
-                        </div>
+                        {sig.extracted_at && (
+                          <div className="text-xs text-[color:var(--text-muted)] mt-2">
+                            {new Date(sig.extracted_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -926,7 +910,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
             <div className="space-y-4">
               {reminderStatus?.worker && (
                 <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Reminder Worker</div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Reminder worker</div>
                   <div className="grid gap-2 text-[11px] sm:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                       Enabled <span className="font-semibold">{reminderStatus.worker.enabled ? 'Yes' : 'No'}</span>
@@ -938,19 +922,19 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                       Min gap <span className="font-semibold">{Math.round(Number(reminderStatus.worker.min_interval_ms || 0) / 1000)}s</span>
                     </div>
                     <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
-                      Signing <span className="font-semibold">{reminderStatus.worker.webhook_signing_enabled ? 'On' : 'Off'}</span>
+                      Webhook signing <span className="font-semibold">{reminderStatus.worker.webhook_signing_enabled ? 'On' : 'Off'}</span>
                     </div>
                     <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
-                      Due preview <span className="font-semibold">{Number(reminderStatus.due_preview_count || 0)}</span>
+                      Due now <span className="font-semibold">{Number(reminderStatus.due_preview_count || 0)}</span>
                     </div>
                     <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
-                      Processed cycle <span className="font-semibold">{Number(reminderStatus.worker.last_cycle_processed_count || 0)}</span>
+                      Last processed <span className="font-semibold">{Number(reminderStatus.worker.last_cycle_processed_count || 0)}</span>
                     </div>
                     <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
-                      Suppressed cycle <span className="font-semibold">{Number(reminderStatus.worker.last_cycle_suppressed_count || 0)}</span>
+                      Last suppressed <span className="font-semibold">{Number(reminderStatus.worker.last_cycle_suppressed_count || 0)}</span>
                     </div>
                     <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
-                      Dispatch history <span className="font-semibold">{Array.isArray(reminderStatus.worker.dispatches) ? reminderStatus.worker.dispatches.length : 0}</span>
+                      Dispatches <span className="font-semibold">{Array.isArray(reminderStatus.worker.dispatches) ? reminderStatus.worker.dispatches.length : 0}</span>
                     </div>
                   </div>
                   {reminderStatus.worker.last_error && (
@@ -962,17 +946,17 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
               )}
               <div className="bg-[var(--material-thick)] p-6 rounded-xl border border-[var(--hairline)] shadow-sm">
                 <h3 className="mb-4 text-sm font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">
-                  Action Queue ({actions.length})
+                  Actions ({actions.length})
                 </h3>
                 {actions.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-black/10 bg-[var(--material-thin)] px-4 py-3 text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
-                    No actions yet. Ingest more context to generate a queue.
+                    No actions
                   </div>
                 ) : (
                   <div className="space-y-3">
                     <div className="grid gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2 text-[11px] sm:grid-cols-4">
                       <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
-                        Urgent open <span className="font-semibold">{actionInsights.urgent}</span>
+                        Urgent <span className="font-semibold">{actionInsights.urgent}</span>
                       </div>
                       <div className="rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[color:var(--text-main)]">
                         Overdue <span className="font-semibold">{actionInsights.overdue}</span>
@@ -1009,10 +993,11 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                           <select
                             value={action.status || 'open'}
                             onChange={(e) => updateAction(action.id, { status: e.target.value })}
+                            aria-label="Status"
                             className="rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                           >
                             <option value="open">Open</option>
-                            <option value="in_progress">In Progress</option>
+                            <option value="in_progress">In progress</option>
                             <option value="done">Done</option>
                             <option value="blocked">Blocked</option>
                           </select>
@@ -1030,6 +1015,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                             type="date"
                             value={action.due_date || ''}
                             onChange={(e) => updateAction(action.id, { due_date: e.target.value })}
+                            aria-label="Due date"
                             className="rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1 text-xs text-[color:var(--text-main)] focus:outline-none focus:border-accent dark:border-white/20"
                           />
                         </div>
@@ -1069,7 +1055,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                                   {Number.isFinite(Number(src?.start_ms)) && (
                                     <button
                                       type="button"
-                                      onClick={() => focusInteractionAt(src.interaction_id, Number(src.start_ms || 0))}
+                                      onClick={() => focusInteractionAt(src.interaction_id)}
                                       className="ml-2 not-italic rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-muted)] transition hover:text-accent dark:text-[color:var(--text-muted)] dark:hover:text-accent"
                                     >
                                       {formatMs(src.start_ms)}
@@ -1091,23 +1077,22 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
           {activeTab === 'audit' && (
             <div className="space-y-6">
               {auditLoading && (
-                <div className="text-sm text-[color:var(--text-muted)]">Loading audit data...</div>
+                <div className="text-sm text-[color:var(--text-muted)]">Loading...</div>
               )}
               {!auditLoading && !auditSummary && !auditTrends && (
                 <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-5 py-8 text-center text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
-                  No audit data available. Activity is recorded as you use IntelLedger.
+                  No audit data
                 </div>
               )}
 
               {auditSummary && (
                 <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-4">
-                  <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">7-Day Activity Summary</div>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Last 7 days</div>
+                  <div className="grid grid-cols-3 gap-3">
                     {[
                       { label: 'Events', value: auditSummary.event_count },
                       { label: 'Sessions', value: auditSummary.unique_sessions },
-                      { label: 'Sampled', value: auditSummary.sampled_events },
-                      { label: 'Window (h)', value: auditSummary.since_hours }
+                      { label: 'Sampled', value: auditSummary.sampled_events }
                     ].map(({ label, value }) => (
                       <div key={label} className="rounded-lg border border-black/8 bg-[var(--material-thin)] px-3 py-2">
                         <div className="text-[18px] font-bold text-[color:var(--text-main)]">{value ?? '-'}</div>
@@ -1118,14 +1103,14 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
 
                   {Array.isArray(auditSummary.event_types) && auditSummary.event_types.length > 0 && (
                     <div className="mt-4">
-                      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Top Event Types</div>
+                      <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Top types</div>
                       <div className="space-y-1.5">
                         {auditSummary.event_types.slice(0, 8).map((item) => {
                           const maxCount = auditSummary.event_types[0]?.count || 1;
                           const pct = Math.round((item.count / maxCount) * 100);
                           return (
                             <div key={item.event_type} className="flex items-center gap-2">
-                              <div className="w-44 shrink-0 truncate text-[11px] text-[color:var(--text-main)]">{item.event_type}</div>
+                              <div className="w-44 shrink-0 truncate text-[11px] text-[color:var(--text-main)]">{String(item.event_type || '').replace(/\./g, ' > ')}</div>
                               <div className="relative flex-1 overflow-hidden rounded-full bg-black/5 dark:bg-white/8" style={{ height: 6 }}>
                                 <div className="absolute inset-y-0 left-0 rounded-full bg-accent/60" style={{ width: `${pct}%` }} />
                               </div>
@@ -1147,7 +1132,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                     return (
                       <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-4">
                         <div className="mb-3 flex items-center justify-between">
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">30-Day Daily Events</div>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Last 30 days</div>
                           <div className="text-[11px] text-[color:var(--text-muted)]">{auditTrends.event_count_30d} total</div>
                         </div>
                         <div className="flex h-16 items-end gap-px">
@@ -1161,7 +1146,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                         </div>
                         <div className="mt-1 flex justify-between text-[10px] text-[color:var(--text-muted)]">
                           <span>{auditTrends.daily_30[0]?.date?.slice(5)}</span>
-                          <span>today</span>
+                          <span>Today</span>
                         </div>
                       </div>
                     );
@@ -1172,7 +1157,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                     {[['24h', auditTrends.top_types_24h, auditTrends.event_count_24h], ['7d', auditTrends.top_types_7d, auditTrends.event_count_7d], ['30d', auditTrends.top_types_30d, auditTrends.event_count_30d]].map(([label, types, total]) => (
                       <div key={label} className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                         <div className="mb-2 flex items-center justify-between">
-                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Top types - {label}</div>
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">Top types ({label})</div>
                           <div className="text-[11px] font-medium text-[color:var(--text-main)]">{total}</div>
                         </div>
                         {Array.isArray(types) && types.length > 0 ? (
@@ -1202,7 +1187,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                 disabled={synthesizing}
                 className="rounded-full bg-accent px-4 py-1.5 text-[11px] font-semibold text-white shadow-[0_8px_18px_-10px_rgba(26,168,111,0.8)] transition hover:brightness-95 disabled:opacity-50"
               >
-                {synthesizing ? 'Analyzing...' : synthesis ? 'Re-analyze' : 'Generate Analysis'}
+                {synthesizing ? 'Synthesizing...' : 'Synthesize'}
               </button>
 
               {synthesis && (() => {
@@ -1227,7 +1212,7 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                     <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
                       {synthesis.prompt_profile && (
                         <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">
-                          Prompt {synthesis.prompt_profile}
+                          Prompt {humanizePromptProfile(synthesis.prompt_profile)}
                         </span>
                       )}
                       {synthesis.prompt_version && (
@@ -1246,12 +1231,12 @@ export default function IntelLedgerSession({ sessionId, userId, initialSession =
                         {r.summary}
                       </div>
                     )}
-                    <SynthSection label="Key Decisions" items={r.key_decisions} />
+                    <SynthSection label="Key decisions" items={r.key_decisions} />
                     <SynthSection label="Risks" items={r.risks} />
                     <SynthSection label="Commitments" items={r.commitments} />
                     <SynthSection label="Opportunities" items={r.opportunities} />
-                    <SynthSection label="Next Actions" items={r.next_actions} />
-                    <SynthSection label="Open Questions" items={r.open_questions} />
+                    <SynthSection label="Next actions" items={r.next_actions} />
+                    <SynthSection label="Open questions" items={r.open_questions} />
                   </div>
                 );
               })()}

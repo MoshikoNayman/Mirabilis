@@ -33,8 +33,9 @@ import {
   contextMessages, conversationContext, buildRunContext, isTextAttachment
 } from '../lib/agentRunPolicy';
 import { ACCESS_LEVELS, ACCESS_TONE_COLOR, accessMeta, lowerAccess, fetchAccess, saveAccess, describeApiError } from '../lib/access';
-import { hasUsableKey, providerNeedsKey, missingKeyMessage, providerLabel } from '../lib/providerKeys';
+import { hasUsableKey, providerNeedsKey, missingKeyMessage } from '../lib/providerKeys';
 import { needsServerModelSwitch } from '../lib/providerCapabilities';
+import { EFFORT_LABELS } from '../lib/effort';
 import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -50,18 +51,13 @@ const BROWSER_VOICE_HINTS = {
 
 // The first five are prompt hints on a single request. The `agentic` ones run
 // the backend loop with a hard budget via /api/agent/runs.
-const EFFORT_LABELS = {
-  instant: 'Instant', fast: 'Fast', balanced: 'Balanced', thorough: 'Thorough', deep: 'Deep',
-  high: 'High effort', hour: '1 hour', session: '5 hours'
-};
-
 const EFFORT_OPTIONS = [
   { value: 'instant',  label: 'Instant',     hint: 'one line' },
   { value: 'fast',     label: 'Fast',        hint: 'concise' },
   { value: 'balanced', label: 'Balanced',    hint: 'default' },
   { value: 'thorough', label: 'Thorough',    hint: 'complete' },
   { value: 'deep',     label: 'Deep',        hint: 'reason first' },
-  { value: 'high',     label: 'High effort', hint: 'plan, act, validate', agentic: true },
+  { value: 'high',     label: 'High',        hint: 'plan, act, validate', agentic: true },
   { value: 'hour',     label: '1 hour',      hint: 'keeps working', agentic: true },
   { value: 'session',  label: '5 hours',     hint: 'long session', agentic: true }
 ];
@@ -131,31 +127,26 @@ const BUILTIN_PROMPT_PROFILES = [
   {
     id: 'mirabilis-default',
     label: 'Default',
-    description: 'Balanced general assistant',
     getPrompt: (providerId) => buildDefaultSystemPrompt(providerId)
   },
   {
     id: 'network-engineer',
     label: 'Network',
-    description: 'Operational troubleshooting and change review',
     getPrompt: () => 'You are Mirabilis AI acting as a senior network engineer. Be precise, operationally conservative, and explicit about assumptions. When analyzing configs, logs, or CLI output, prioritize root cause, blast radius, rollback considerations, and concrete next commands.'
   },
   {
     id: 'research-analyst',
     label: 'Analyst',
-    description: 'Structured research and synthesis',
     getPrompt: () => 'You are Mirabilis AI acting as a research analyst. Structure answers clearly, distinguish facts from inference, call out uncertainty, and synthesize findings into concise conclusions with practical implications.'
   },
   {
     id: 'guided-tutor',
     label: 'Tutor',
-    description: 'Teach step by step without hand-waving',
     getPrompt: () => 'You are Mirabilis AI acting as a guided tutor. Teach in clear steps, adapt to the user\'s apparent level, and explain why each step matters. Prefer examples and checkpoints over long monologues.'
   },
   {
     id: 'remote-operator',
     label: 'Operator',
-    description: 'Action plans for MCP and remote control',
     getPrompt: () => 'You are Mirabilis AI acting as a remote operations assistant. Before suggesting commands or tool use, think in terms of verification, safe sequencing, explicit targets, and reversible actions. Prefer short plans with command-by-command intent.'
   }
 ];
@@ -223,12 +214,12 @@ const PROVIDER_OPTIONS = [
   { id: 'ollama', label: 'Ollama', scope: 'Local', group: 'Local' },
   // Managed llama.cpp server; runs GGUFs directly, no Ollama daemon at inference.
   { id: 'llamacpp', label: 'llama.cpp', scope: 'Local', group: 'Local' },
-  { id: 'openai-compatible', label: 'Local/Custom Endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server', group: 'Local' },
+  { id: 'openai-compatible', label: 'Custom endpoint', scope: 'Local/Remote', requiresBinary: 'llama-server', group: 'Local' },
   { id: 'koboldcpp', label: 'KoboldCpp', scope: 'Local', requiresBinary: 'koboldcpp', group: 'Local' },
   // vLLM runs as a managed local server on an NVIDIA/CUDA machine, or connects to
   // a remote vLLM server by URL. On Apple Silicon only the remote path is offered.
   { id: 'vllm', label: 'vLLM', scope: 'Local/Remote', group: 'Remote' },
-  { id: 'gpuaas', label: 'GPUaaS Endpoint', scope: 'Remote', group: 'Remote' },
+  { id: 'gpuaas', label: 'GPUaaS endpoint', scope: 'Remote', group: 'Remote' },
   { id: 'openai', label: 'OpenAI', scope: 'Remote', group: 'Cloud APIs' },
   { id: 'claude', label: 'Claude', scope: 'Remote', group: 'Cloud APIs' },
   { id: 'gemini', label: 'Gemini', scope: 'Remote', group: 'Cloud APIs' },
@@ -467,7 +458,7 @@ async function api(path, options = {}) {
 
 // api() throws the raw response text; show the server's sentence when it sent
 // JSON, short plain text as is, and the fallback for pages or payloads.
-function plainError(message, fallback = 'Something went wrong.') {
+function plainError(message, fallback = 'Request failed') {
   const raw = String(message || '').trim();
   try {
     const parsed = JSON.parse(raw);
@@ -515,7 +506,7 @@ function formatTime(value) {
   const diffMin = Math.floor(diffSec / 60);
   const diffHr = Math.floor(diffMin / 60);
   const diffDays = Math.floor(diffHr / 24);
-  if (diffSec < 60) return 'Just now';
+  if (diffSec < 60) return 'Now';
   if (diffMin < 60) return `${diffMin}m ago`;
   if (diffHr < 24) return `${diffHr}h ago`;
   if (diffDays === 1) return 'Yesterday';
@@ -557,10 +548,10 @@ function computeModelFit(item, ramGb) {
   if (!Number.isFinite(weightsGb) || weightsGb <= 0) return null;
   // Runtime footprint runs above raw weights (KV cache, activations, overhead).
   const required = weightsGb * 1.2;
-  const detail = `${weightsGb.toFixed(1)} GB weights vs ${ramGb} GB memory (estimate; excludes long-context KV cache)`;
-  if (required <= ramGb * 0.6) return { tier: 'fits', label: 'Fits', title: `Comfortable fit: ${detail}` };
-  if (required <= ramGb * 0.82) return { tier: 'tight', label: 'Tight', title: `Tight fit, close other apps: ${detail}` };
-  return { tier: 'swap', label: 'Will swap', title: `Likely too large, expect swapping or slow load: ${detail}` };
+  const title = `${weightsGb.toFixed(1)} GB weights, ${ramGb} GB memory`;
+  if (required <= ramGb * 0.6) return { tier: 'fits', label: 'Fits', title };
+  if (required <= ramGb * 0.82) return { tier: 'tight', label: 'Tight', title };
+  return { tier: 'swap', label: 'Will swap', title };
 }
 
 function formatFileSize(bytes) {
@@ -625,10 +616,9 @@ function CopyButton({ text }) {
   return (
     <button
       onClick={handleCopy}
-      title="Copy code"
       className="ml-auto rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)] transition hover:bg-[var(--material-thin)] hover:text-white"
     >
-      {copied ? 'Copied!' : 'Copy'}
+      {copied ? 'Copied' : 'Copy'}
     </button>
   );
 }
@@ -645,7 +635,7 @@ function CopyMessageButton({ text, className }) {
     <button
       type="button"
       onClick={handleCopy}
-      title={copied ? 'Copied!' : 'Copy message'}
+      title={copied ? 'Copied' : 'Copy message'}
       className={className || 'rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200'}
     >
       {copied ? (
@@ -940,6 +930,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
               autoFocus
               value={renameValue}
               onChange={(e) => setRenameValue(e.target.value)}
+              aria-label="Chat name"
               onBlur={commitRename}
               onKeyDown={(e) => {
                 if (e.key === 'Escape') { setIsRenaming(false); e.stopPropagation(); }
@@ -953,7 +944,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
             <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
               <span>{formatTime(chat.updatedAt)}</span>
               {chat.parentChatId ? <span className="rounded-full border border-[var(--hairline)] px-1.5 py-0">branch</span> : null}
-              {chat.snapshotCount > 0 ? <span className="rounded-full border border-[var(--hairline)] px-1.5 py-0">{chat.snapshotCount} snap</span> : null}
+              {chat.snapshotCount > 0 ? <span className="rounded-full border border-[var(--hairline)] px-1.5 py-0">{chat.snapshotCount} {chat.snapshotCount === 1 ? 'snapshot' : 'snapshots'}</span> : null}
             </div>
           </button>
         )}
@@ -961,7 +952,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
           <button
             type="button"
             aria-label={confirmDelete ? `Confirm delete ${chat.title}` : `Delete ${chat.title}`}
-            title={confirmDelete ? 'Click again to delete' : 'Delete chat'}
+            title={confirmDelete ? 'Confirm delete' : 'Delete chat'}
             className={`mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition focus:opacity-100 ${
               confirmDelete
                 ? 'bg-red-500 text-white opacity-100'
@@ -1025,7 +1016,7 @@ const ChatItem = memo(function ChatItem({ chat, isActive, isMenuOpen, isPinned, 
                 <path d="M9 18h6" />
                 <path d="M6 12c0 3.314 2.686 6 6 6" />
               </svg>
-              <span>Branch Chat</span>
+              <span>Branch</span>
             </button>
             <button
               type="button"
@@ -1149,22 +1140,22 @@ const MessageRow = memo(function MessageRow({
               <>
                 {(message.effectiveProvider || message.provider) ? (() => {
                   const prov = message.effectiveProvider || message.provider;
-                  const onDevice = ['ollama', 'koboldcpp', 'openai-compatible'].includes(prov);
+                  const onDevice = ['ollama', 'llamacpp', 'koboldcpp', 'openai-compatible'].includes(prov);
                   const provLabel = {
                     openai: 'OpenAI', grok: 'Grok', groq: 'Groq', openrouter: 'OpenRouter',
                     gemini: 'Gemini', cerebras: 'Cerebras', claude: 'Claude', gpuaas: 'GPUaaS',
-                    'openai-compatible': 'Custom', koboldcpp: 'KoboldCpp', ollama: 'Ollama'
+                    'openai-compatible': 'Custom', koboldcpp: 'KoboldCpp', ollama: 'Ollama',
+                    llamacpp: 'llama.cpp', vllm: 'vLLM'
                   }[prov] || prov;
                   const rawModel = message.effectiveModel || message.model || '';
                   const shortModel = rawModel
                     ? (rawModel.length > 22 ? rawModel.slice(0, 22) + '...' : rawModel)
                     : '';
                   // Privacy Receipt: green on-device, or amber naming the cloud provider.
+                  // The tooltip names what the pill hides: the local engine or a cut model id.
                   return (
                     <span
-                      title={onDevice
-                        ? `On-device: generated locally by ${provLabel}. Nothing left your machine.`
-                        : `Left your machine: this prompt was sent to ${provLabel}, a remote cloud provider.`}
+                      title={onDevice || rawModel.length > 22 ? `${provLabel} ${rawModel}`.trim() : undefined}
                       className={`mr-1.5 inline-flex items-center gap-1 rounded-[var(--r-pill)] px-1.5 py-[2px] align-middle text-[9px] font-semibold normal-case tracking-normal ${
                         onDevice
                           ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
@@ -1187,8 +1178,8 @@ const MessageRow = memo(function MessageRow({
                   const perf = message.performance;
                   const exact = perf.source === 'ollama' && !perf.isEstimate;
                   const parts = [];
-                  parts.push(`${exact ? '' : 'approx '}${perf.tokensPerSec} tokens/sec${exact ? ' (exact, from Ollama)' : ' (estimated)'}`);
-                  if (perf.ttftMs != null) parts.push(`first token in ${perf.ttftMs >= 1000 ? (perf.ttftMs / 1000).toFixed(1) + 's' : perf.ttftMs + 'ms'}`);
+                  parts.push(`${exact ? '' : '~'}${perf.tokensPerSec} tok/s`);
+                  if (perf.ttftMs != null) parts.push(`First token ${perf.ttftMs >= 1000 ? (perf.ttftMs / 1000).toFixed(1) + 's' : perf.ttftMs + 'ms'}`);
                   if (perf.promptTokens != null) parts.push(`${perf.promptTokens.toLocaleString()} prompt tokens`);
                   if (perf.wallMs != null) parts.push(`${(perf.wallMs / 1000).toFixed(1)}s total`);
                   return (
@@ -1204,7 +1195,7 @@ const MessageRow = memo(function MessageRow({
                   );
                 })() : null}
               </>
-            ) : 'AI'}
+            ) : null}
           </span>
           <div className="flex items-center">
             <button
@@ -1214,7 +1205,7 @@ const MessageRow = memo(function MessageRow({
                 else speakText(message.content || '', message.id);
               }}
               disabled={(voiceEngine === 'browser' && !voiceSupported) || !String(message.content || '').trim()}
-              title={speakingMessageId === message.id && isSpeaking ? 'Stop speaking' : 'Speak response'}
+              title={speakingMessageId === message.id && isSpeaking ? 'Stop reading' : 'Read aloud'}
               className={`rounded p-1 transition disabled:opacity-40 ${
                 speakingMessageId === message.id && isSpeaking
                   ? 'text-accent'
@@ -1233,7 +1224,7 @@ const MessageRow = memo(function MessageRow({
               <button
                 onClick={regenerate}
                 disabled={busy}
-                title="Regenerate response"
+                title="Regenerate"
                 className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:opacity-40 dark:text-[color:var(--text-muted)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
               >
                 <svg viewBox="0 0 20 20" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1315,56 +1306,45 @@ function ChatToolsSettings({
     <>
       <SettingsGroup title="Answers">
         <SettingsList>
-          <SettingsRow
-            label="Instructions"
-            description={`Shows the instruction editor in the sidebar. Profile: ${instructionsLabel}.`}
-          >
+          <SettingsRow label="Show instructions" description={`Profile: ${instructionsLabel}`}>
             <Switch checked={instructionsVisible} onChange={onInstructionsChange} label="Show instructions" />
           </SettingsRow>
           <SettingsRow
             label="Web search"
-            description="Adds web results when a question needs current facts. Same switch as www in the message bar."
             detail={goDark ? (
-              <span className="text-[length:var(--text-2xs)] text-amber-700 dark:text-amber-300">
-                Go Dark is on, so no search leaves this computer.
-              </span>
+              <span className="text-[length:var(--text-2xs)] text-amber-700 dark:text-amber-300">Blocked by Go Dark</span>
             ) : webSearchStatus === 'error' ? (
-              <span className="text-[length:var(--text-2xs)] text-rose-600 dark:text-rose-300">The last search failed.</span>
+              <span className="text-[length:var(--text-2xs)] text-rose-600 dark:text-rose-300">Last search failed</span>
             ) : null}
           >
             <Switch checked={webSearch} onChange={onWebSearchChange} label="Web search" />
           </SettingsRow>
           <SettingsRow
             label="Create image"
-            description="Starts an image prompt in the message box. Images are made on this computer."
             detail={
               <Badge tone={imageReady ? 'success' : 'neutral'}>
-                {imageReady ? `Ready${imageDevice ? ` on ${imageDevice}` : ''}` : 'Image service offline'}
+                {imageReady ? `Ready${imageDevice ? ` on ${imageDevice}` : ''}` : 'Offline'}
               </Badge>
             }
           >
-            <Button size="sm" variant="soft" onClick={onCreateImage}>Start a prompt</Button>
+            <Button size="sm" variant="soft" onClick={onCreateImage}>New prompt</Button>
           </SettingsRow>
         </SettingsList>
       </SettingsGroup>
 
-      <SettingsGroup
-        title="Config Vault"
-        description="Cited answers from your own config files. Indexing and search run on this computer, so it works under Go Dark."
-      >
+      <SettingsGroup title="Config Vault">
         <SettingsList>
           <SettingsRow
             label="Use Config Vault"
             description={indexed
-              ? `${vaultStatus.fileCount} files, ${vaultStatus.chunkCount} chunks indexed with ${vaultStatus.embedModel || 'a local model'}.`
-              : 'Nothing is indexed yet. Index a folder below first.'}
+              ? `${vaultStatus.fileCount} files, ${vaultStatus.chunkCount} chunks${vaultStatus.embedModel ? `, ${vaultStatus.embedModel}` : ''}`
+              : 'Not indexed'}
           >
             <Switch checked={vaultEnabled} onChange={onVaultEnabledChange} label="Use Config Vault" />
           </SettingsRow>
           <SettingsRow
             label="Folder"
             htmlFor={`${uid}-vault`}
-            description="Embeds the files with a local Ollama model. Pull nomic-embed-text for sharper retrieval."
             detail={
               <>
                 <form
@@ -1376,7 +1356,7 @@ function ChatToolsSettings({
                     type="text"
                     value={vaultFolder}
                     onChange={(e) => onVaultFolderChange(e.target.value)}
-                    placeholder="/path/to/your/configs"
+                    placeholder="~/configs"
                     spellCheck={false}
                     autoCapitalize="off"
                     autoCorrect="off"
@@ -1416,11 +1396,11 @@ function VoiceSettings({
   const catalog = Array.isArray(piperModels) ? piperModels : [];
   const installed = catalog.filter((m) => m.installed);
   const sttText = stt?.ready
-    ? (stt.whisperCpp ? 'Local whisper.cpp, fully offline.' : stt.openai ? 'Uses OpenAI transcription.' : 'Local Whisper command line tool.')
-    : 'Install whisper.cpp to talk hands-free. A one-time download of about 150 MB that then runs offline.';
+    ? (stt.whisperCpp ? 'whisper.cpp' : stt.openai ? 'OpenAI transcription' : 'Whisper CLI')
+    : 'whisper.cpp, about 150 MB';
   return (
     <>
-      <SettingsGroup title="Talking" description="Dictation and voice chat turn your speech into text.">
+      <SettingsGroup title="Dictation">
         <SettingsList>
           <SettingsRow label="Speech to text" description={sttText}>
             {stt?.ready ? (
@@ -1436,13 +1416,10 @@ function VoiceSettings({
 
       <SettingsGroup title="Spoken replies">
         <SettingsList>
-          <SettingsRow label="Read replies aloud" description="Speaks each new answer when it finishes.">
+          <SettingsRow label="Read replies aloud">
             <Switch checked={autoSpeak} onChange={onAutoSpeakChange} label="Read replies aloud" />
           </SettingsRow>
-          <SettingsRow
-            label="Voice engine"
-            description="Browser voices work at once. Piper neural voices sound more natural and run offline."
-          >
+          <SettingsRow label="Voice engine">
             <SegmentedControl
               size="sm"
               value={engine}
@@ -1456,8 +1433,8 @@ function VoiceSettings({
                 label="Voice"
                 htmlFor={`${uid}-voice`}
                 description={voiceTools?.platform === 'darwin'
-                  ? 'More voices: System Settings, Accessibility, Spoken Content, Manage Voices.'
-                  : 'Voices come from your system.'}
+                  ? 'More voices: System Settings > Accessibility > Spoken Content'
+                  : undefined}
               >
                 <select
                   id={`${uid}-voice`}
@@ -1470,23 +1447,23 @@ function VoiceSettings({
                   ))}
                 </select>
               </SettingsRow>
-              <SettingsRow label="Rate">
-                <RangeControl label="Speaking rate" value={rate} min={0.8} max={1.5} step={0.05} onChange={onRateChange} />
+              <SettingsRow label="Speed">
+                <RangeControl label="Speaking speed" value={rate} min={0.8} max={1.5} step={0.05} onChange={onRateChange} />
               </SettingsRow>
               <SettingsRow label="Pitch">
                 <RangeControl label="Voice pitch" value={pitch} min={0.8} max={1.4} step={0.05} onChange={onPitchChange} />
               </SettingsRow>
             </>
           ) : !piperReady ? (
-            <SettingsRow label="Piper" description="Free, high quality voices that run on this computer.">
+            <SettingsRow label="Piper">
               <Button size="sm" variant="primary" onClick={onSetupPiper} disabled={settingUpPiper}>
-                <BusyLabel busy={settingUpPiper} busyText="Installing">Install Piper</BusyLabel>
+                <BusyLabel busy={settingUpPiper} busyText="Installing">Install</BusyLabel>
               </Button>
             </SettingsRow>
           ) : (
             <>
               {installed.length > 0 ? (
-                <SettingsRow label="Active voice" htmlFor={`${uid}-piper`}>
+                <SettingsRow label="Voice" htmlFor={`${uid}-piper`}>
                   <select
                     id={`${uid}-piper`}
                     value={piperModelId}
@@ -1504,19 +1481,17 @@ function VoiceSettings({
           )}
           <SettingsRow
             label="Preview"
-            description={voiceSupported || engine === 'piper'
-              ? 'Plays a short sample with these settings.'
-              : 'This browser cannot speak. Choose Piper neural instead.'}
+            description={voiceSupported || engine === 'piper' ? undefined : 'Unavailable in this browser'}
           >
             <Button size="sm" variant="soft" onClick={onPreview} disabled={!voiceSupported && engine === 'browser'}>
-              {speaking ? 'Stop' : 'Preview'}
+              {speaking ? 'Stop' : 'Play'}
             </Button>
           </SettingsRow>
         </SettingsList>
       </SettingsGroup>
 
       {engine === 'piper' && piperReady && catalog.length > 0 ? (
-        <SettingsGroup title="Piper voices" description="Free voices. Each one downloads once and then works offline.">
+        <SettingsGroup title="Piper voices">
           <SettingsList>
             {catalog.map((m) => (
               <SettingsRow key={m.id} label={m.label}>
@@ -1543,12 +1518,6 @@ function VoiceSettings({
   );
 }
 
-const SSH_AUTH_HINT = {
-  agent: 'Uses the keys loaded in your SSH agent.',
-  key: 'Uses a private key file on this computer.',
-  password: 'Typed each time you connect.'
-};
-
 function RemoteSettings({
   connected, target, error,
   type, onTypeChange, host, onHostChange, user, onUserChange, port, onPortChange,
@@ -1562,7 +1531,6 @@ function RemoteSettings({
         <SettingsList>
           <SettingsRow
             label="Connected"
-            description="Shell code blocks in answers have a Run button for this target. Nothing runs until you click it."
             detail={<span className="block truncate font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]" title={target}>{target}</span>}
           >
             <Button size="sm" variant="danger" onClick={onDisconnect}>Disconnect</Button>
@@ -1574,17 +1542,14 @@ function RemoteSettings({
   const ssh = type === 'ssh';
   const ready = !connecting && (!ssh || (host.trim() && user.trim()));
   return (
-    <SettingsGroup
-      title="Connection"
-      description="Once connected, shell code blocks in answers get a Run button. Nothing runs until you click it."
-    >
+    <SettingsGroup title="Connection">
       {error ? (
         <SettingsNotice tone="danger" icon={<AlertIcon size={13} />} className="mb-3">
           Could not connect. {error}
         </SettingsNotice>
       ) : null}
       <SettingsList>
-        <SettingsRow label="Target" description={ssh ? 'A server you reach over SSH.' : 'This computer.'}>
+        <SettingsRow label="Target">
           <SegmentedControl
             size="sm"
             value={type}
@@ -1595,30 +1560,30 @@ function RemoteSettings({
         {ssh ? (
           <>
             <SettingsRow label="Host" htmlFor={`${uid}-host`}>
-              <input id={`${uid}-host`} type="text" value={host} onChange={(e) => onHostChange(e.target.value)} placeholder="hostname or IP" spellCheck={false} autoCapitalize="off" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH}`} />
+              <input id={`${uid}-host`} type="text" value={host} onChange={(e) => onHostChange(e.target.value)} placeholder="192.168.1.10" spellCheck={false} autoCapitalize="off" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH}`} />
             </SettingsRow>
             <SettingsRow label="User" htmlFor={`${uid}-user`}>
-              <input id={`${uid}-user`} type="text" value={user} onChange={(e) => onUserChange(e.target.value)} placeholder="username" spellCheck={false} autoCapitalize="off" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH}`} />
+              <input id={`${uid}-user`} type="text" value={user} onChange={(e) => onUserChange(e.target.value)} placeholder="admin" spellCheck={false} autoCapitalize="off" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH}`} />
             </SettingsRow>
             <SettingsRow label="Port" htmlFor={`${uid}-port`}>
               <input id={`${uid}-port`} type="text" inputMode="numeric" value={port} onChange={(e) => onPortChange(e.target.value)} placeholder="22" className={`${SETTINGS_FIELD} w-20`} />
             </SettingsRow>
-            <SettingsRow label="Sign in with" description={SSH_AUTH_HINT[authType]}>
+            <SettingsRow label="Sign in with">
               <SegmentedControl
                 size="sm"
                 value={authType}
                 onChange={onAuthTypeChange}
-                options={[{ value: 'agent', label: 'Agent' }, { value: 'key', label: 'Key' }, { value: 'password', label: 'Password' }]}
+                options={[{ value: 'agent', label: 'SSH agent' }, { value: 'key', label: 'Key' }, { value: 'password', label: 'Password' }]}
               />
             </SettingsRow>
             {authType === 'key' ? (
               <SettingsRow label="Key file" htmlFor={`${uid}-key`}>
-                <input id={`${uid}-key`} type="text" value={keyPath} onChange={(e) => onKeyPathChange(e.target.value)} placeholder="/path/to/id_rsa" spellCheck={false} autoCapitalize="off" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH} font-mono`} />
+                <input id={`${uid}-key`} type="text" value={keyPath} onChange={(e) => onKeyPathChange(e.target.value)} placeholder="~/.ssh/id_ed25519" spellCheck={false} autoCapitalize="off" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH} font-mono`} />
               </SettingsRow>
             ) : null}
             {authType === 'password' ? (
               <SettingsRow label="Password" htmlFor={`${uid}-password`}>
-                <input id={`${uid}-password`} type="password" value={password} onChange={(e) => onPasswordChange(e.target.value)} placeholder="password" autoComplete="new-password" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH}`} />
+                <input id={`${uid}-password`} type="password" value={password} onChange={(e) => onPasswordChange(e.target.value)} autoComplete="new-password" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH}`} />
               </SettingsRow>
             ) : null}
           </>
@@ -1626,7 +1591,7 @@ function RemoteSettings({
       </SettingsList>
       <div className="mt-3 flex justify-end">
         <Button variant="primary" onClick={onConnect} disabled={!ready}>
-          <BusyLabel busy={connecting} busyText="Connecting">{ssh ? 'Connect over SSH' : 'Connect to this computer'}</BusyLabel>
+          <BusyLabel busy={connecting} busyText="Connecting">Connect</BusyLabel>
         </Button>
       </div>
     </SettingsGroup>
@@ -1639,10 +1604,10 @@ const TRAINING_OPTIONS = [
   { value: 'full-training', label: 'Deep' }
 ];
 
+// Off needs no line; Deep only plans, so it says so.
 const TRAINING_HINT = {
-  off: 'Chats are not used for learning.',
-  'fine-tuning': 'Quick Learning captures your exchanges as learning examples.',
-  'full-training': 'Deep Training is plan only: export the examples and train a LoRA offline.'
+  'fine-tuning': 'Saves chats as learning examples',
+  'full-training': 'Plan only: export and train a LoRA offline'
 };
 
 function LabsSettings({
@@ -1653,18 +1618,18 @@ function LabsSettings({
 }) {
   return (
     <>
-      <SettingsGroup title="Answer modes" description="Each mode changes how answers are written.">
+      <SettingsGroup title="Answer modes">
         <SettingsList>
-          <SettingsRow label="Canvas" description="A notes pad above the chat. Its text goes with every message as working context.">
+          <SettingsRow label="Canvas">
             <Switch checked={canvas} onChange={onCanvasChange} label="Canvas" />
           </SettingsRow>
-          <SettingsRow label="Guided Learning" description="Teaches step by step, with examples and a short recap.">
+          <SettingsRow label="Guided Learning">
             <Switch checked={guided} onChange={onGuidedChange} label="Guided Learning" />
           </SettingsRow>
-          <SettingsRow label="Deep Thinking" description="Weighs alternatives and trade-offs, then leads with a short answer.">
+          <SettingsRow label="Deep Thinking">
             <Switch checked={deepThinking} onChange={onDeepThinkingChange} label="Deep Thinking" />
           </SettingsRow>
-          <SettingsRow label="OpenClaw" description="Uncensored, no personal memory and no app instructions. Turning it off restores them.">
+          <SettingsRow label="OpenClaw" description="Uncensored, no memory or instructions">
             <Switch checked={openClaw} onChange={onOpenClawChange} label="OpenClaw" />
           </SettingsRow>
         </SettingsList>
@@ -1672,13 +1637,10 @@ function LabsSettings({
 
       <SettingsGroup title="Training">
         <SettingsList>
-          <SettingsRow label="Learning mode" description={TRAINING_HINT[trainingMode] || TRAINING_HINT.off}>
+          <SettingsRow label="Learning mode" description={TRAINING_HINT[trainingMode]}>
             <SegmentedControl size="sm" value={trainingMode} onChange={onTrainingModeChange} options={TRAINING_OPTIONS} />
           </SettingsRow>
-          <SettingsRow
-            label="Learning examples"
-            description={`${examples} captured. Export them as JSONL for fine-tuning.`}
-          >
+          <SettingsRow label="Learning examples" description={`${examples} captured`}>
             <Button size="sm" variant="soft" onClick={onExportExamples}>Export</Button>
           </SettingsRow>
         </SettingsList>
@@ -1686,10 +1648,7 @@ function LabsSettings({
 
       <SettingsGroup title="Personal memory">
         <SettingsList>
-          <SettingsRow
-            label="Use personal memory"
-            description={`Adds your saved notes to every conversation. ${memoryItems} saved.`}
-          >
+          <SettingsRow label="Use personal memory" description={`${memoryItems} saved`}>
             <Button size="sm" variant="ghost" onClick={onManageMemory}>Manage</Button>
             <Switch checked={personalMemory} onChange={onPersonalMemoryChange} label="Use personal memory" />
           </SettingsRow>
@@ -2113,7 +2072,7 @@ export default function ChatApp() {
   const promptProfileOptions = useMemo(() => {
     const hasSelected = promptProfiles.some((profile) => profile.id === selectedPromptProfileId);
     if (hasSelected && selectedPromptProfileId !== UNSAVED_PROMPT_PROFILE_ID) return promptProfiles;
-    return [...promptProfiles, { id: UNSAVED_PROMPT_PROFILE_ID, label: 'Current Custom', description: 'Unsaved instructions', content: systemPrompt, isBuiltin: false }];
+    return [...promptProfiles, { id: UNSAVED_PROMPT_PROFILE_ID, label: 'Custom', content: systemPrompt, isBuiltin: false }];
   }, [promptProfiles, selectedPromptProfileId, systemPrompt]);
 
   const selectedPromptProfile = useMemo(
@@ -2265,7 +2224,7 @@ export default function ChatApp() {
         const cfgKey = String(providerConfigs?.[provider]?.apiKey || '').trim();
         // Same rule as the send path: a backend-held key counts.
         if (providerNeedsKey(provider) && !hasUsableKey(provider, { pageKey: cfgKey, hints: keyHints })) {
-          setStatusText(`${providerLabel(provider)} selected. Add API key in Configure endpoint.`);
+          setStatusText('API key needed');
           return;
         }
         const query = new URLSearchParams({ provider });
@@ -2277,7 +2236,7 @@ export default function ChatApp() {
         if (cancelled) return;
         if (!health?.reachable) {
           const hint = health?.hint ? ` ${health.hint}` : '';
-          setStatusText(`Selected provider unavailable.${hint}`.trim());
+          setStatusText(`Provider unreachable.${hint}`.trim());
         }
       } catch {
         // ignore startup health probe failures
@@ -2381,7 +2340,7 @@ export default function ChatApp() {
         })
       );
       safeStorageSet('mirabilis-provider-configs', JSON.stringify(cleaned));
-      appStore.toast(`Moved ${withKeys.length} API key(s) out of browser storage into the app.`, { kind: 'info' });
+      appStore.toast(`${withKeys.length} API key(s) moved to the app`, { kind: 'info' });
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2490,7 +2449,7 @@ export default function ChatApp() {
 
   async function downloadPiperModel(modelId) {
     setDownloadingPiperModelId(modelId);
-    setStatusText(`Downloading voice model ${modelId}...`);
+    setStatusText(`Downloading ${modelId}...`);
     try {
       await api('/api/voice/download-model', { method: 'POST', body: JSON.stringify({ modelId }) });
       setStatusText('Voice model downloaded');
@@ -2514,13 +2473,13 @@ export default function ChatApp() {
 
   async function setupVoiceTools() {
     setIsSettingUpVoiceTools(true);
-    setStatusText('Setting up local voice tools...');
+    setStatusText('Installing Piper...');
     try {
       const payload = await api('/api/voice/setup', { method: 'POST' });
       setVoiceTools(payload?.status || null);
-      setStatusText('Voice tools installed');
+      setStatusText('Piper installed');
     } catch (error) {
-      setStatusText(`Voice setup failed: ${error.message}`);
+      setStatusText(`Piper install failed: ${error.message}`);
     } finally {
       setIsSettingUpVoiceTools(false);
       await checkVoiceTools();
@@ -2529,14 +2488,14 @@ export default function ChatApp() {
 
   async function setupStt() {
     setIsSettingUpStt(true);
-    setStatusText('Installing local speech-to-text (this can take a few minutes)...');
+    setStatusText('Installing speech to text...');
     try {
       const payload = await api('/api/voice/stt-setup', { method: 'POST' });
       if (payload?.status?.ready) voiceSttReadyRef.current = true;
-      setStatusText(payload?.status?.ready ? 'Speech-to-text ready' : 'Speech-to-text setup finished');
+      setStatusText(payload?.status?.ready ? 'Speech to text ready' : 'Speech to text not ready');
       await checkVoiceTools();
     } catch (error) {
-      setStatusText(`Speech-to-text setup failed: ${error.message}`);
+      setStatusText(`Speech to text setup failed: ${error.message}`);
     } finally {
       setIsSettingUpStt(false);
     }
@@ -2557,9 +2516,9 @@ export default function ChatApp() {
 
   async function startLocalVllm() {
     const model = vllmLocalModel.trim();
-    if (!model) { setStatusText('Enter a model id for local vLLM.'); return; }
+    if (!model) { setStatusText('Enter a model id'); return; }
     setIsVllmBusy(true);
-    setStatusText('Starting local vLLM (a first-time weight download can take a while)...');
+    setStatusText('Starting vLLM...');
     try {
       const out = await api('/api/runtimes/vllm/start', { method: 'POST', body: JSON.stringify({ model }) });
       // Point the vLLM provider at the managed local server so chat routes to it.
@@ -2608,9 +2567,9 @@ export default function ChatApp() {
 
   async function startLlamacpp() {
     const model = llamacppModel.trim();
-    if (!model) { setStatusText('Pick a model to run in llama.cpp.'); return; }
+    if (!model) { setStatusText('Pick a model'); return; }
     setIsLlamacppBusy(true);
-    setStatusText('Starting llama.cpp (loading the model)...');
+    setStatusText('Starting llama.cpp...');
     try {
       const body = /\.gguf$/i.test(model) ? { modelPath: model } : { model };
       const out = await api('/api/runtimes/llamacpp/start', { method: 'POST', body: JSON.stringify(body) });
@@ -2803,9 +2762,9 @@ export default function ChatApp() {
       });
       setKeyDraft('');
       await refreshKeyHints();
-      appStore.toast('API key saved in the app, not the browser.', { kind: 'success' });
+      appStore.toast('API key saved', { kind: 'success' });
     } catch (err) {
-      appStore.toast(`Could not save the key: ${err.message}`, { kind: 'error' });
+      appStore.toast(`API key not saved: ${plainError(err.message)}`, { kind: 'error' });
     }
   }
 
@@ -2815,7 +2774,7 @@ export default function ChatApp() {
       setKeyDraft('');
       await refreshKeyHints();
     } catch (err) {
-      appStore.toast(`Could not clear the key: ${err.message}`, { kind: 'error' });
+      appStore.toast(`API key not cleared: ${plainError(err.message)}`, { kind: 'error' });
     }
   }
 
@@ -2944,7 +2903,7 @@ export default function ChatApp() {
     // Not installed yet: use a browser voice now so the loop never blocks.
     pickBrowserVoiceForGender(gender);
     if (model && downloadingPiperModelId !== modelId) {
-      setVoiceNote(`Preparing the ${gender} voice (first-time download)...`);
+      setVoiceNote(`Downloading ${gender} voice...`);
       downloadPiperModel(modelId)
         .then(() => {
           setVoiceEngine('piper');
@@ -2971,7 +2930,7 @@ export default function ChatApp() {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     } catch {
       voiceActiveRef.current = false;
-      setVoiceNote('Microphone access denied. Allow the mic in System Settings, then reopen voice chat.');
+      setVoiceNote('Microphone access denied. Allow it in System Settings.');
       setVoicePhaseBoth('idle');
       return;
     }
@@ -2991,7 +2950,7 @@ export default function ChatApp() {
     } catch {
       stopVoiceRecognition();
       voiceActiveRef.current = false;
-      setVoiceNote('Audio recording is not supported here.');
+      setVoiceNote('Audio recording not supported');
       setVoicePhaseBoth('idle');
       return;
     }
@@ -3056,7 +3015,7 @@ export default function ChatApp() {
         stopVoiceRecognition();
         const msg = String(err?.message || '');
         setVoiceNote(/speech-to-text|speech to text|whisper/i.test(msg)
-          ? 'Local speech-to-text is not installed yet. Set it up in Settings, Voice.'
+          ? 'Install speech to text in Settings > Voice'
           : `Voice error: ${msg || 'transcription failed'}`);
         setVoicePhaseBoth('idle');
       }
@@ -3107,7 +3066,7 @@ export default function ChatApp() {
         finalized = true;
         stopVoiceRecognition();
         if (voiceActiveRef.current) {
-          setVoiceNote('Listening paused (no speech heard). Tap the orb to talk.');
+          setVoiceNote('No speech heard');
           setVoicePhaseBoth('idle');
         }
       }
@@ -3138,7 +3097,7 @@ export default function ChatApp() {
         // voiceAwaitingReplyRef first, and a live stream sets voiceSawStreamingRef.
         if (voiceAwaitingReplyRef.current && !voiceSawStreamingRef.current) {
           voiceAwaitingReplyRef.current = false;
-          setVoiceNote('That turn could not be sent. Check the provider, its API key, or Go Dark.');
+          setVoiceNote('Not sent. Check the provider, API key or Go Dark.');
           if (voiceActiveRef.current) startVoiceListening();
         }
       }).catch(() => {
@@ -3163,7 +3122,7 @@ export default function ChatApp() {
     fetchPiperModels();
     ensureVoiceForGender(voiceGender);
     if (!voiceLoopSupported) {
-      setVoiceNote('Microphone recording is not available here.');
+      setVoiceNote('Microphone not available');
       setVoicePhaseBoth('idle');
       return;
     }
@@ -3175,7 +3134,7 @@ export default function ChatApp() {
       if (s?.ready) {
         startVoiceListening();
       } else {
-        setVoiceNote('Local speech-to-text is not installed. Turn it on in Settings, Voice.');
+        setVoiceNote('Install speech to text in Settings > Voice');
         setVoicePhaseBoth('idle');
       }
     }).catch(() => {
@@ -3582,7 +3541,7 @@ export default function ChatApp() {
   function handleCreateImageTool() {
     // An explicit prompt reaches the image service at any Access level.
     setInput((current) => toImagePrompt(current));
-    setStatusText(imageServiceAvailable ? 'Ready to generate image prompt' : 'Image service offline');
+    setStatusText(imageServiceAvailable ? 'Image prompt ready' : 'Image service offline');
     // Started from Settings: hand the prompt to the message box.
     showChatTab();
     appStore.closeSettings();
@@ -3694,7 +3653,7 @@ export default function ChatApp() {
 
   async function toggleDictation() {
     if (!dictationSupported) {
-      setStatusText('Dictation is not supported on this device.');
+      setStatusText('Dictation unavailable');
       return;
     }
 
@@ -3745,15 +3704,15 @@ export default function ChatApp() {
           dictationPhaseRef.current = 'idle';
           setIsDictating(false);
           if (code === 'no-speech') {
-            setStatusText('No speech detected.');
+            setStatusText('No speech detected');
           } else if (code === 'aborted') {
             setStatusText('Ready');
           } else if (code === 'not-allowed' || code === 'service-not-allowed') {
-            setStatusText('Microphone access denied.');
-            appStore.toast('Could not transcribe - microphone permission was denied.', { kind: 'error' });
+            setStatusText('Microphone access denied');
+            appStore.toast('Microphone access denied', { kind: 'error' });
           } else {
-            setStatusText('Dictation error.');
-            appStore.toast('Could not transcribe - speech recognition failed. Please try again.', { kind: 'error' });
+            setStatusText('Dictation failed');
+            appStore.toast('Dictation failed. Try again.', { kind: 'error' });
           }
         };
 
@@ -3770,13 +3729,13 @@ export default function ChatApp() {
         dictationPhaseRef.current = 'idle';
         setIsDictating(false);
         setStatusText(`Dictation error: ${error?.message || 'unknown'}`);
-        appStore.toast('Could not transcribe - speech recognition failed to start.', { kind: 'error' });
+        appStore.toast('Dictation could not start', { kind: 'error' });
       }
       return;
     }
 
     if (dictationPhaseRef.current === 'transcribing') {
-      setStatusText('Dictation is still transcribing...');
+      setStatusText('Transcribing...');
       return;
     }
 
@@ -3792,7 +3751,7 @@ export default function ChatApp() {
     const mediaDevices = navigator.mediaDevices;
     const MediaRecorderCtor = window.MediaRecorder;
     if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {
-      setStatusText('Dictation is not supported on this device.');
+      setStatusText('Dictation unavailable');
       return;
     }
 
@@ -3809,7 +3768,7 @@ export default function ChatApp() {
 
       recorder.onstart = () => {
         setIsDictating(true);
-        setStatusText('Dictation recording...');
+        setStatusText('Recording...');
       };
 
       recorder.ondataavailable = (event) => {
@@ -3825,7 +3784,7 @@ export default function ChatApp() {
 
       recorder.onstop = async () => {
         dictationPhaseRef.current = 'transcribing';
-        setStatusText('Transcribing dictation...');
+        setStatusText('Transcribing...');
 
         try {
           const blob = new Blob(dictationChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
@@ -3839,11 +3798,11 @@ export default function ChatApp() {
             setInput(`${dictationBaseRef.current}${transcript}`);
             setStatusText('Ready');
           } else {
-            setStatusText('No speech detected.');
+            setStatusText('No speech detected');
           }
         } catch (error) {
           setStatusText(`Dictation error: ${error.message}`);
-          appStore.toast('Could not transcribe - your browser lacks speech recognition and no local Whisper is installed.', { kind: 'error', ttl: 5200 });
+          appStore.toast('Could not transcribe. Install speech to text in Settings > Voice.', { kind: 'error', ttl: 5200 });
         } finally {
           clearDictationResources();
           dictationPhaseRef.current = 'idle';
@@ -3857,7 +3816,7 @@ export default function ChatApp() {
       dictationPhaseRef.current = 'idle';
       setIsDictating(false);
       const message = error?.name === 'NotAllowedError'
-        ? 'Microphone access denied - check System Settings > Privacy > Microphone.'
+        ? 'microphone access denied (System Settings > Privacy & Security > Microphone)'
         : error.message || 'unknown';
       setStatusText(`Dictation error: ${message}`);
     }
@@ -3972,7 +3931,7 @@ export default function ChatApp() {
     await refreshChats();
     await loadChat(payload.chat.id);
     if (ephemeral) {
-      appStore.toast('Off the Record - this chat is never saved to disk and vanishes when you quit', { kind: 'info', ttl: 4200 });
+      appStore.toast('Off the Record: never saved to disk', { kind: 'info', ttl: 4200 });
     }
   }
 
@@ -3983,7 +3942,7 @@ export default function ChatApp() {
       setOpenClawMode(false);
     }
     if (!activeChatId) {
-      setStatusText(next ? 'Uncensored ON: model-only filtering (new chat will inherit)' : 'Uncensored OFF: model-native mode');
+      setStatusText(next ? 'Uncensored on' : 'Uncensored off');
       return;
     }
     try {
@@ -3995,12 +3954,12 @@ export default function ChatApp() {
         const best = pickMostUncensoredModel(models);
         if (best?.id && best.id !== model) {
           setModel(best.id);
-          setStatusText(`Uncensored ON: locked to ${best.label || best.id}`);
+          setStatusText(`Uncensored on: ${best.label || best.id}`);
           await refreshChats();
           return;
         }
       }
-      setStatusText(next ? 'Uncensored ON: model-only filtering' : 'Uncensored OFF: model-native mode');
+      setStatusText(next ? 'Uncensored on' : 'Uncensored off');
       await refreshChats();
     } catch (error) {
       setStatusText(`Mode update failed: ${error.message}`);
@@ -4019,7 +3978,7 @@ export default function ChatApp() {
       setSystemPrompt('');
 
       if (!activeChatId) {
-        setStatusText('OpenClaw ON: uncensored + no personal memory + no app system prompt');
+        setStatusText('OpenClaw on');
         return;
       }
 
@@ -4028,7 +3987,7 @@ export default function ChatApp() {
           method: 'PATCH',
           body: JSON.stringify({ uncensoredMode: true })
         });
-        setStatusText('OpenClaw ON: uncensored + no personal memory + no app system prompt');
+        setStatusText('OpenClaw on');
         await refreshChats();
       } catch (error) {
         setStatusText(`OpenClaw update failed: ${error.message}`);
@@ -4044,7 +4003,7 @@ export default function ChatApp() {
     }
 
     if (!activeChatId) {
-      setStatusText('OpenClaw OFF');
+      setStatusText('OpenClaw off');
       return;
     }
 
@@ -4054,7 +4013,7 @@ export default function ChatApp() {
         body: JSON.stringify({ uncensoredMode: false })
       });
       setUncensoredMode(false);
-      setStatusText('OpenClaw OFF');
+      setStatusText('OpenClaw off');
       await refreshChats();
     } catch (error) {
       setStatusText(`OpenClaw update failed: ${error.message}`);
@@ -4126,7 +4085,7 @@ export default function ChatApp() {
       });
       await refreshChats();
       await loadChat(payload.chat.id);
-      setStatusText('Created chat branch');
+      setStatusText('Branch created');
     } catch (error) {
       setStatusText(`Branch failed: ${error.message}`);
     }
@@ -4134,7 +4093,7 @@ export default function ChatApp() {
 
   async function saveSnapshot() {
     if (!activeChatId) {
-      setStatusText('Open a chat before saving a snapshot');
+      setStatusText('Open a chat first');
       return;
     }
     try {
@@ -4153,10 +4112,10 @@ export default function ChatApp() {
 
   async function restoreSnapshot() {
     if (!activeChatId || !selectedSnapshotId) {
-      setStatusText('Select a snapshot to restore');
+      setStatusText('Select a snapshot first');
       return;
     }
-    const confirmed = window.confirm('Restore this snapshot? Current chat state will be replaced.');
+    const confirmed = window.confirm('Restore this snapshot? It replaces the current chat.');
     if (!confirmed) return;
     try {
       await api(`/api/chats/${activeChatId}/snapshots/${selectedSnapshotId}/restore`, {
@@ -4188,20 +4147,20 @@ export default function ChatApp() {
     if (!profile) return;
     setSelectedPromptProfileId(profile.id);
     setSystemPrompt(profile.content);
-    setStatusText(`Loaded instruction profile: ${profile.label}`);
+    setStatusText(`Profile loaded: ${profile.label}`);
   }
 
   function saveCurrentPromptProfile() {
     const prompt = systemPrompt.trim();
     if (!prompt) {
-      setStatusText('Cannot save an empty instruction profile');
+      setStatusText('Instructions are empty');
       return;
     }
     const name = window.prompt('Profile name');
     if (!name) return;
     const label = name.trim().slice(0, 60);
     if (!label) return;
-    const description = window.prompt('Short description (optional)') || '';
+    const description = window.prompt('Description (optional)') || '';
     const slugBase = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'profile';
     const id = `custom-${slugBase}-${Date.now().toString(36)}`;
     const nextProfile = {
@@ -4212,17 +4171,17 @@ export default function ChatApp() {
     };
     setCustomPromptProfiles((prev) => [...prev, nextProfile]);
     setSelectedPromptProfileId(id);
-    setStatusText(`Saved instruction profile: ${label}`);
+    setStatusText(`Profile saved: ${label}`);
   }
 
   function deleteSelectedPromptProfile() {
     const selected = findPromptProfile(promptProfiles, selectedPromptProfileId);
     if (!selected || selected.isBuiltin) return;
-    const confirmed = window.confirm(`Delete instruction profile "${selected.label}"?`);
+    const confirmed = window.confirm(`Delete profile "${selected.label}"?`);
     if (!confirmed) return;
     setCustomPromptProfiles((prev) => prev.filter((profile) => profile.id !== selected.id));
     setSelectedPromptProfileId(UNSAVED_PROMPT_PROFILE_ID);
-    setStatusText(`Deleted instruction profile: ${selected.label}`);
+    setStatusText(`Profile deleted: ${selected.label}`);
   }
 
   async function exportChat(chatId) {
@@ -4301,7 +4260,7 @@ export default function ChatApp() {
           compute: null,
           npu: null,
           logic: {
-            label: `${cpuModel || 'Processor'} | ${cpuCores}c/${cpuThreads}t`,
+            label: `${cpuModel || 'Processor'} | ${cpuCores}C/${cpuThreads}T`,
             expanded: [
               archName ? `Arch: ${archName}` : null,
               platform ? `Platform: ${platform}` : null
@@ -4371,19 +4330,20 @@ export default function ChatApp() {
 
   async function indexConfigVault() {
     const folder = String(configVaultFolder || '').trim();
-    if (!folder) { setConfigVaultMsg('Enter a folder path first.'); return; }
+    if (!folder) { setConfigVaultMsg('Enter a folder path'); return; }
     setConfigVaultBusy(true);
-    setConfigVaultMsg('Indexing (embedding locally)...');
+    setConfigVaultMsg('Indexing...');
     try {
       const r = await api('/api/vault/index', { method: 'POST', body: JSON.stringify({ path: folder }) });
       if (r?.ok) {
         setConfigVaultStatus({ ok: true, root: r.root, builtAt: new Date().toISOString(), embedModel: r.embedModel, fileCount: r.fileCount, chunkCount: r.chunkCount });
-        setConfigVaultMsg(`Indexed ${r.fileCount} file(s), ${r.chunkCount} chunk(s) via ${r.embedModel}.${r.truncated ? ' Reached the chunk cap; narrow the folder for full coverage.' : ''}`);
+        // The counts show on the row above; only the chunk cap needs a word here.
+        setConfigVaultMsg(r.truncated ? 'Chunk limit reached. Index a smaller folder.' : 'Indexed');
       } else {
-        setConfigVaultMsg(r?.error || 'Indexing failed.');
+        setConfigVaultMsg(r?.error || 'Indexing failed');
       }
     } catch (error) {
-      setConfigVaultMsg(`Indexing failed: ${error.message}`);
+      setConfigVaultMsg(`Indexing failed: ${plainError(error.message)}`);
     } finally {
       setConfigVaultBusy(false);
     }
@@ -4394,9 +4354,9 @@ export default function ChatApp() {
     try {
       await api('/api/vault/index', { method: 'DELETE' });
       setConfigVaultStatus({ ok: true, root: '', builtAt: null, embedModel: null, fileCount: 0, chunkCount: 0 });
-      setConfigVaultMsg('Index cleared.');
+      setConfigVaultMsg('Index cleared');
     } catch (error) {
-      setConfigVaultMsg(`Clear failed: ${error.message}`);
+      setConfigVaultMsg(`Clear failed: ${plainError(error.message)}`);
     } finally {
       setConfigVaultBusy(false);
     }
@@ -4458,8 +4418,8 @@ export default function ChatApp() {
       }
 
       const hint = payload?.hint ? ` ${payload.hint}` : '';
-      const target = payload?.baseUrl || configuredBaseUrl || 'configured endpoint';
-      setStatusText(`Provider check warning: ${target} is unreachable.${hint}`);
+      const target = payload?.baseUrl || configuredBaseUrl || 'Endpoint';
+      setStatusText(`${target} is unreachable.${hint}`);
       return {
         provider,
         model: effectiveNonOllamaModel,
@@ -4490,7 +4450,7 @@ export default function ChatApp() {
       delete n[modelId];
       return n;
     });
-    setStatusText(`Model install canceled: ${modelId}`);
+    setStatusText(`Model install cancelled: ${modelId}`);
   }
 
   async function deleteModel(ollamaId, modelId) {
@@ -4511,7 +4471,7 @@ export default function ChatApp() {
 
   function installModel(ollamaId, modelId) {
     if (provider !== 'ollama') {
-      setStatusText('Model install is supported only in Ollama mode');
+      setStatusText('Model install needs Ollama');
       return;
     }
     if (pullingModels[modelId]) return; // already pulling
@@ -4573,7 +4533,7 @@ export default function ChatApp() {
               await refreshModels();
               setStatusText(`Model installed: ${modelId}`);
             } else if (job.status === 'canceled') {
-              setStatusText(`Model install canceled: ${modelId}`);
+              setStatusText(`Model install cancelled: ${modelId}`);
             } else {
               setStatusText(`Model install failed: ${job.error || job.message || 'unknown error'}`);
             }
@@ -4585,7 +4545,7 @@ export default function ChatApp() {
       } catch (error) {
         setPullingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });
         const msg = error?.name === 'AbortError'
-          ? `Model install canceled: ${modelId}`
+          ? `Model install cancelled: ${modelId}`
           : `Model install failed: ${error?.message || 'unknown error'}`;
         setStatusText(msg);
       }
@@ -4947,7 +4907,7 @@ export default function ChatApp() {
   async function handleImageGeneration(content) {
     setInput('');
     setIsStreaming(true);
-    setStatusText('Generating image on your device...');
+    setStatusText('Generating image...');
 
     let chatId = activeChatId;
     if (!chatId) {
@@ -4991,15 +4951,15 @@ export default function ChatApp() {
         content: [
           'Image service is not running.',
           '',
-          'To enable on-device image generation:',
-          '  1. Start the app with node run.js (without --no-image).',
-          '  2. The first run installs PyTorch and Stable Diffusion (about 6 GB). Wait for "Image service ready".',
-          '  3. Alternatively start it manually:',
-          '       cd mirabilis/image-service && python3 -m venv .venv',
-          '       .venv/bin/pip install -r requirements.txt',
-          '       .venv/bin/python server.py',
+          'Start the app with `node run.js` (without `--no-image`). The first run downloads about 6 GB.',
           '',
-          'Once running, ask for an image in chat, or use Settings, Chat tools, Create image.'
+          'Or start it manually:',
+          '',
+          '```',
+          'cd mirabilis/image-service && python3 -m venv .venv',
+          '.venv/bin/pip install -r requirements.txt',
+          '.venv/bin/python server.py',
+          '```'
         ].join('\n'),
         createdAt: new Date().toISOString(),
         tokenEstimate: 0
@@ -5142,7 +5102,7 @@ export default function ChatApp() {
       });
       setRadarSignals(Array.isArray(payload?.signals) ? payload.signals : []);
     } catch (err) {
-      setRadarError(err?.message || 'Commitment Radar is unavailable right now.');
+      setRadarError(plainError(err?.message, 'Scan failed'));
     } finally {
       setRadarScanned(true);
       setRadarLoading(false);
@@ -5153,13 +5113,13 @@ export default function ChatApp() {
     if (isCommittingToLedger) return;
     const transcript = buildChatTranscript();
     if (!transcript.trim()) {
-      setStatusText('Nothing to commit - the chat has no text yet.');
+      setStatusText('Nothing to commit');
       return;
     }
     const userId = safeStorageGet('mirabilis-user-id') || 'user-local';
     const chatTitle = (chats.find((c) => c.id === activeChatId)?.title || '').trim() || 'Untitled chat';
     setIsCommittingToLedger(true);
-    setStatusText('Committing chat to Ledger...');
+    setStatusText('Committing to Ledger...');
     try {
       const created = await api('/api/intelledger/sessions', {
         method: 'POST',
@@ -5171,7 +5131,7 @@ export default function ChatApp() {
         method: 'POST',
         body: JSON.stringify({ content: transcript, sourceName: 'chat' })
       });
-      setStatusText('Committed to Ledger - signals extracted.');
+      setStatusText('Committed to Ledger');
       appStore.toast('Committed to Ledger', { kind: 'success' });
       playReceive();
       window.dispatchEvent(new CustomEvent('mirabilis:open-session', { detail: { id: sessionId } }));
@@ -5211,7 +5171,7 @@ export default function ChatApp() {
     // Go Dark blocks web search for any model: the raw query would go to a
     // third-party API, and the provider check covers only the model call.
     if (deepWebEnabled && appStore.getGoDark()) {
-      appStore.toast('Go Dark is on - web search is off, so this answer uses local knowledge only.', { kind: 'warn' });
+      appStore.toast('Go Dark: web search skipped', { kind: 'warn' });
     }
     if (!deepWebEnabled || appStore.getGoDark() || classifyWebSearch(content) !== 'search') return '';
     setStatusText('Searching the web...');
@@ -5272,7 +5232,7 @@ export default function ChatApp() {
     if (blocks.length === 0) {
       if (skipped.length > 0) {
         appStore.toast(
-          `None of the ${skipped.length} pinned workspace file(s) could be read, so they were not sent. Reopen Workspace and re-pick the folder.`,
+          `${skipped.length} pinned file(s) unreadable. Pick the Workspace folder again.`,
           { kind: 'warn' }
         );
       }
@@ -5290,7 +5250,7 @@ export default function ChatApp() {
   async function vaultContext(content, doneStatus) {
     if (!(configVaultEnabled && configVaultStatus && configVaultStatus.chunkCount > 0)) return '';
     try {
-      setStatusText('Searching your config vault...');
+      setStatusText('Searching Config Vault...');
       const vr = await api('/api/vault/query', { method: 'POST', body: JSON.stringify({ query: content, limit: 4 }) });
       const results = Array.isArray(vr?.results) ? vr.results : [];
       if (results.length === 0) return '';
@@ -5348,7 +5308,7 @@ export default function ChatApp() {
   async function runAgentGoal(goal) {
     // One run at a time: runs share agentRunRef, so an older one could not be stopped.
     if (agentAbortRef.current) {
-      appStore.toast('A run is already in progress. Stop it before starting another.', { kind: 'warn' });
+      appStore.toast('Run in progress. Stop it first.', { kind: 'warn' });
       return 'busy';
     }
     // Claim the slot before any await, so a second Send cannot start a second run.
@@ -5493,7 +5453,7 @@ export default function ChatApp() {
           if (currentEvent === 'error') {
             settled = true;
             setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: payload.error } : prev));
-            settleReply({ content: `Error: ${payload.error || 'the run failed.'}`, failed: true });
+            settleReply({ content: `Error: ${payload.error || 'Run failed'}`, failed: true });
             continue;
           }
           if (currentEvent === 'result') {
@@ -5535,7 +5495,7 @@ export default function ChatApp() {
               pushEvent(`waiting for approval: ${what}`, payload.at);
               // The card is out of sight behind Settings or on the Ledger tab.
               if (settingsOpenRef.current || mainRef.current?.offsetParent === null) {
-                appStore.toast(`Mirabilis is waiting for your approval: ${what}.`, { kind: 'warn', ttl: 8000 });
+                appStore.toast(`Needs approval: ${what}`, { kind: 'warn', ttl: 8000 });
               }
             }
             continue;
@@ -5580,7 +5540,7 @@ export default function ChatApp() {
       }
       if (!settled) {
         // The stream closed with neither a result nor an error.
-        const lost = 'The run ended without a result.';
+        const lost = 'Run ended without a result';
         setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: prev.error || lost } : prev));
         settleReply({ content: `Error: ${lost}`, failed: true });
       }
@@ -5629,12 +5589,12 @@ export default function ChatApp() {
       );
       if (approvalReplyOutcome(res.status) === 'failed') {
         const body = await res.text().catch(() => '');
-        throw new Error(plainError(body, `The backend answered ${res.status}.`));
+        throw new Error(plainError(body, `Server error ${res.status}`));
       }
       setAgentRun((prev) => (prev ? { ...prev, approvals: removeApproval(prev.approvals, approval.approvalId) } : prev));
     } catch (err) {
-      const reason = err?.name === 'AbortError' ? 'Mirabilis did not answer in time.' : (err?.message || 'Something went wrong.');
-      appStore.toast(`Your answer was not sent. ${reason} Try again.`, { kind: 'error', ttl: 5200 });
+      const reason = err?.name === 'AbortError' ? 'timed out' : String(err?.message || 'request failed').trim().replace(/\.+$/, '');
+      appStore.toast(`Answer not sent: ${reason}. Try again.`, { kind: 'error', ttl: 5200 });
     } finally {
       clearTimeout(timer);
       setApprovalBusyId('');
@@ -5659,7 +5619,7 @@ export default function ChatApp() {
       const saved = await saveAccess({ level });
       appStore.setAccess(saved.level);
       if (saved.level === 'bypass') {
-        appStore.toast('Bypass is on. Commands and file changes run without asking.', { kind: 'warn', ttl: 5200 });
+        appStore.toast('Bypass on: runs anything, never asks', { kind: 'warn', ttl: 5200 });
       }
       if (agentAbortRef.current) {
         // The backend lowers a live run at once and never raises it past its start level.
@@ -5669,7 +5629,7 @@ export default function ChatApp() {
       }
     } catch (err) {
       appStore.setAccess(previous);
-      appStore.toast(`Access was not changed. ${describeApiError(err, 'Access settings')}`, { kind: 'error', ttl: 5200 });
+      appStore.toast(`Access not changed. ${describeApiError(err, 'Access')}`, { kind: 'error', ttl: 5200 });
     } finally {
       setAccessSaving('');
     }
@@ -5734,9 +5694,9 @@ export default function ChatApp() {
     // Go Dark: if the session is locked to local-only, refuse to send to a cloud
     // provider before anything leaves the machine (keeps the typed text intact).
     if (appStore.getGoDark()) {
-      const scope = PROVIDER_OPTIONS.find((p) => p.id === provider)?.scope;
-      if (scope === 'Remote') {
-        appStore.toast(`Go Dark is on - "${provider}" is a cloud provider. Switch to a local model or turn Go Dark off.`, { kind: 'warn' });
+      const option = PROVIDER_OPTIONS.find((p) => p.id === provider);
+      if (option?.scope === 'Remote') {
+        appStore.toast(`Go Dark blocks ${option.label}. Switch to a local model.`, { kind: 'warn' });
         return;
       }
     }
@@ -5746,7 +5706,7 @@ export default function ChatApp() {
       // Awaited so the voice loop settles when the reply is in, not at once.
       // runAgentGoal clears the composer once the run is accepted.
       if ((await runAgentGoal(content)) !== 'use-chat') return;
-      appStore.toast('Access is Chat only here, so this went out as a normal chat message.', { kind: 'info' });
+      appStore.toast('Chat only: sent without tools', { kind: 'info' });
     }
 
     setInput('');
@@ -5792,7 +5752,7 @@ export default function ChatApp() {
     try {
       resolvedProvider = await resolveProviderForSend();
     } catch (error) {
-      setStatusText(error?.message || 'Cannot send with the selected provider.');
+      setStatusText(error?.message || 'Cannot send with this provider');
       setInput(content);
       return;
     }
@@ -5819,7 +5779,7 @@ export default function ChatApp() {
       } catch (error) {
         setStatusText('Could not start a chat');
         appStore.toast(
-          `Could not start a new chat: ${describeRunError(0, error?.message || '')}`,
+          `Could not start a chat: ${describeRunError(0, error?.message || '')}`,
           { kind: 'error' }
         );
         setInput(content);
@@ -5940,7 +5900,7 @@ export default function ChatApp() {
       let liveTokenCount = 0;
       let liveFirstTokenTs = null;
       liveProgressTimer = setInterval(() => {
-        if (liveFirstTokenTs == null) { setStatusText('Loading model / prefilling...'); return; }
+        if (liveFirstTokenTs == null) { setStatusText('Loading model...'); return; }
         const elapsed = (Date.now() - liveFirstTokenTs) / 1000;
         const tps = elapsed > 0 ? liveTokenCount / elapsed : 0;
         setStatusText(`${liveTokenCount.toLocaleString()} tok | ${tps >= 10 ? tps.toFixed(0) : tps.toFixed(1)} tok/s | ${elapsed.toFixed(0)}s`);
@@ -6067,13 +6027,14 @@ export default function ChatApp() {
       if (stallTimer) clearTimeout(stallTimer);
       if (error?.name === 'AbortError') {
         if (stalledByWatchdog) {
-          setStatusText('Stream timed out. Try a smaller model or shorter prompt.');
+          // Short label only: the status chip is fixed-width; the bubble has the detail.
+          setStatusText('Timed out');
           setMessages((prev) => {
             const next = [...prev];
             if (next.length > 0 && next[next.length - 1].role === 'assistant' && !next[next.length - 1].content) {
               next[next.length - 1] = {
                 ...next[next.length - 1],
-                content: 'Error: the stream went quiet with no output for a long time and was stopped. The model may not be running. Try again, or pick a smaller model.'
+                content: 'Error: no output, stream stopped. Try again or pick a smaller model.'
               };
             }
             return next;
@@ -6160,7 +6121,7 @@ export default function ChatApp() {
       />
       {pendingApprovals.length > 1 && (
         <p className="mt-1.5 px-1 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
-          {pendingApprovals.length - 1} more waiting after this one.
+          {pendingApprovals.length - 1} more waiting
         </p>
       )}
     </>
@@ -6172,21 +6133,18 @@ export default function ChatApp() {
       id: 'access',
       label: 'Access',
       icon: ShieldIcon,
-      description: 'How much Mirabilis may do on this computer.',
       render: () => <AccessPane workspaceRoot={workspaceRoot} onOpenWorkspace={() => appStore.openWorkspace()} />
     },
     {
       id: 'connectors',
       label: 'Connectors',
       icon: PlugIcon,
-      description: 'Tools from MCP servers, and how other apps reach Mirabilis.',
       render: () => <ConnectorsPane />
     },
     {
       id: 'chat-tools',
       label: 'Chat tools',
       icon: SlidersIcon,
-      description: 'Instructions, web search, Config Vault and images.',
       render: () => (
         <ChatToolsSettings
           instructionsVisible={isSystemPromptVisible}
@@ -6222,7 +6180,6 @@ export default function ChatApp() {
       id: 'voice',
       label: 'Voice',
       icon: MicIcon,
-      description: 'Speech to text and spoken replies.',
       render: () => (
         <VoiceSettings
           voiceTools={voiceTools}
@@ -6256,7 +6213,6 @@ export default function ChatApp() {
       id: 'remote',
       label: 'Remote Control',
       icon: TerminalIcon,
-      description: 'Run the commands in answers on this computer or a server.',
       render: () => (
         <RemoteSettings
           connected={remoteConnected}
@@ -6286,7 +6242,6 @@ export default function ChatApp() {
       id: 'labs',
       label: 'Labs',
       icon: FlaskIcon,
-      description: 'Experimental answer modes, training and personal memory.',
       render: () => (
         <LabsSettings
           canvas={canvasEnabled}
@@ -6321,7 +6276,7 @@ export default function ChatApp() {
         <aside className={`flex shrink-0 flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--panel-border)] bg-[var(--material-thin)] p-2 sm:p-4 transition-all duration-200 ${sidebarOpen ? 'w-28 sm:w-72' : 'hidden'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span aria-hidden="true" className="icq-mark" title="ICQ logo">
+              <span aria-hidden="true" className="icq-mark">
                 <svg viewBox="0 0 210 210" className="icq-mark-svg" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ICQ logo">
                   <g stroke="#000" strokeLinecap="round" strokeLinejoin="round" strokeWidth="13.229">
                     <g fill="#00ff03">
@@ -6346,13 +6301,16 @@ export default function ChatApp() {
           {isSystemPromptVisible && (
           <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.25)]">
             <div className="space-y-2.5">
+              {/* A saved profile's own description, if it has one; built-ins have none. */}
               <div className="flex items-center justify-between gap-2">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-main)]">
-                  Assistant
+                  Instructions
                 </div>
-                <div className="text-[10px] text-[color:var(--text-muted)]">
-                  {selectedPromptProfile?.description || (selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? 'Custom for this chat' : 'Preset active')}
-                </div>
+                {selectedPromptProfile?.description ? (
+                  <div className="min-w-0 truncate text-[10px] text-[color:var(--text-muted)]" title={selectedPromptProfile.description}>
+                    {selectedPromptProfile.description}
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex items-center gap-2">
@@ -6364,6 +6322,7 @@ export default function ChatApp() {
                     <select
                       value={selectedPromptProfileId}
                       onChange={(event) => applyPromptProfile(event.target.value)}
+                      aria-label="Profile"
                       className="min-w-0 flex-1 bg-transparent py-2 text-[12px] font-semibold outline-none"
                     >
                       {promptProfileOptions.map((profile) => (
@@ -6383,8 +6342,7 @@ export default function ChatApp() {
                 </button>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-[color:var(--text-muted)]">
-                <span className="truncate">{selectedPromptProfile?.label || 'Current custom prompt'}</span>
+              <div className="flex flex-wrap items-center justify-end gap-2 text-[10px] text-[color:var(--text-muted)]">
                 <div className="flex items-center gap-3 shrink-0">
                   <button
                     type="button"
@@ -6405,12 +6363,10 @@ export default function ChatApp() {
                 </div>
               </div>
 
-              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">
-                Prompt
-              </div>
               <textarea
                 value={systemPrompt}
                 onChange={(event) => handleSystemPromptChange(event.target.value)}
+                aria-label="Instructions"
                 rows={4}
                 className="w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-2.5 text-[12px] leading-relaxed text-[color:var(--text-main)] outline-none transition focus:border-accent dark:text-[color:var(--text-main)]"
               />
@@ -6422,7 +6378,8 @@ export default function ChatApp() {
             <input
               type="text"
               autoComplete="off"
-              placeholder="Search chats..."
+              placeholder="Search"
+              aria-label="Search chats"
               value={chatSearch}
               onChange={(e) => setChatSearch(e.target.value)}
               className="min-w-0 flex-1 rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-2.5 py-1.5 text-xs outline-none placeholder:text-[color:var(--text-muted)] focus:border-accent dark:placeholder:text-[color:var(--text-muted)]"
@@ -6443,7 +6400,7 @@ export default function ChatApp() {
                 onClick={() => { if (clearArmed) { clearAllChats(); setClearArmed(false); } else { setClearArmed(true); } }}
                 onMouseLeave={() => setClearArmed(false)}
                 onBlur={() => setClearArmed(false)}
-                title={clearArmed ? 'Click again to clear all chats' : 'Clear all chats'}
+                title={clearArmed ? undefined : 'Clear all chats'}
                 aria-label={clearArmed ? 'Confirm clear all chats' : 'Clear all chats'}
                 className={`inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-full text-xs font-semibold transition ${
                   clearArmed
@@ -6479,7 +6436,7 @@ export default function ChatApp() {
               ))}
               {sortedAndFilteredChats.length === 0 && (
                 <li className="rounded-lg border border-dashed border-black/20 p-3 text-xs text-[color:var(--text-muted)]">
-                  {chatSearch.trim() ? 'No chats match your search.' : 'No chats yet.'}
+                  {chatSearch.trim() ? 'No matches' : 'No chats yet'}
                 </li>
               )}
             </ul>
@@ -6500,7 +6457,7 @@ export default function ChatApp() {
           {isDragOverChat && (
             <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-[var(--material-thin)]">
               <div className="rounded-full border border-accent/40 bg-accentSoft px-4 py-2 text-sm font-semibold text-ink dark:bg-accent/20 dark:text-white">
-                Drop files to attach
+                Drop to attach
               </div>
             </div>
           )}
@@ -6568,7 +6525,6 @@ export default function ChatApp() {
                               ? 'border-green-400/60 bg-green-50/80 text-green-700 dark:border-green-500/40 dark:bg-green-900/20 dark:text-green-400'
                               : 'border-black/10 bg-[var(--material-thin)] text-[color:var(--text-muted)]'
                           }`}
-                          title={item.label}
                         >
                           {fillPct > 0 && !isActive && (
                             <span
@@ -6594,14 +6550,13 @@ export default function ChatApp() {
 
               </div>
 
-              {/* RIGHT zone: contextual actions + Prompt + Context */}
+              {/* RIGHT zone: contextual actions */}
               <div className="flex shrink-0 items-center gap-1.5">
                 {messages.length > 0 && (
                   <button
                     type="button"
                     onClick={runCommitmentRadar}
                     disabled={radarLoading}
-                    title="Commitment Radar - scan this conversation for commitments, asks, and decisions without saving anything"
                     className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-black/5 px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-muted)] transition hover:bg-black/10 hover:text-[color:var(--text-main)] disabled:opacity-50 dark:bg-[var(--material-thin)] dark:hover:bg-[var(--material-thin)]"
                   >
                     <RadarIcon size={12} />
@@ -6613,7 +6568,6 @@ export default function ChatApp() {
                     type="button"
                     onClick={commitChatToLedger}
                     disabled={isCommittingToLedger}
-                    title="Commit this conversation to IntelLedger - extract signals, actions, and decisions, then open the session"
                     className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent transition hover:bg-accent/20 disabled:opacity-50 dark:border-accent/30 dark:bg-accent/15 dark:hover:bg-accent/25"
                   >
                     <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -6622,78 +6576,13 @@ export default function ChatApp() {
                     {isCommittingToLedger ? 'Committing...' : 'To Ledger'}
                   </button>
                 )}
-                <div data-menu-container="true" className="relative">
-                  <button
-                    type="button"
-                    data-menu-trigger="context"
-                    aria-haspopup="true"
-                    aria-expanded={isContextPanelOpen}
-                    onClick={() => {
-                      setOpenHardwarePopover(null);
-                      setIsContextPanelOpen((prev) => !prev);
-                    }}
-                    className="group inline-flex items-center justify-center rounded-full p-0.5 transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                    title={`Context usage: ${contextUsage.totalTokens.toLocaleString()} / ${contextUsage.windowTokens.toLocaleString()} tokens (${contextUsage.usedPct}%). Click for details.`}
-                    aria-label={`Context ${contextUsage.usedPct} percent used`}
-                  >
-                    {/* Usage dial: the ring fills with the context window, amber then red. */}
-                    <span className="relative inline-flex h-6 w-6 items-center justify-center">
-                      <svg viewBox="0 0 36 36" className="absolute inset-0 h-6 w-6 -rotate-90" aria-hidden="true">
-                        <circle cx="18" cy="18" r="15.5" fill="none" strokeWidth="3"
-                          className="stroke-black/10 dark:stroke-white/15" />
-                        <circle
-                          cx="18" cy="18" r="15.5" fill="none" strokeWidth="3" strokeLinecap="round"
-                          stroke={contextUsage.usedPct >= 90 ? '#dc2626' : contextUsage.usedPct >= 70 ? '#d97706' : 'var(--accent)'}
-                          strokeDasharray={`${Math.min(contextUsage.usedPct, 100) * 0.974} 100`}
-                          className="transition-[stroke-dasharray] duration-500"
-                        />
-                      </svg>
-                      <FlowerMark className="h-3.5 w-3.5 opacity-90" />
-                    </span>
-                  </button>
-
-                  {isContextPanelOpen && (
-                    <div data-menu-panel="context" role="group" aria-label="Context usage details" tabIndex={-1} className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Token Limit</span>
-                        <span className="text-[10px] text-[color:var(--text-muted)]">{contextUsage.usedPct}% used</span>
-                      </div>
-
-                      <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-[var(--material-thin)]">
-                        <div
-                          className="h-full rounded-full bg-accent transition-all duration-300"
-                          style={{ width: `${Math.min(contextUsage.usedPct, 100)}%` }}
-                        />
-                      </div>
-
-                      <div className="space-y-1 text-[11px] text-[color:var(--text-main)]">
-                        <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
-                          <span>System instructions</span>
-                          <span>{contextUsage.systemPct}% | {contextUsage.systemTokens.toLocaleString()} tok</span>
-                        </div>
-                        <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
-                          <span>User content</span>
-                          <span>{contextUsage.userPct}% | {contextUsage.userTokens.toLocaleString()} tok</span>
-                        </div>
-                        <div className="flex items-center justify-between rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1">
-                          <span>Assistant</span>
-                          <span>{contextUsage.uncategorizedPct}% | {contextUsage.uncategorizedTokens.toLocaleString()} tok</span>
-                        </div>
-                      </div>
-
-                      <div className="mt-2 text-[10px] text-[color:var(--text-muted)]">
-                        {contextUsage.totalTokens.toLocaleString()} / {contextUsage.windowTokens.toLocaleString()} tokens
-                      </div>
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
 
             {remoteUsage.enabled && (
               <div className="mt-1.5 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5">
                 <div className="mb-1 flex items-center justify-between gap-2 text-[10px] font-mono text-[color:var(--text-muted)]">
-                  <span>{provider} est. {formatUsdEstimate(remoteUsage.estUsd)} / ${remoteUsage.budgetUsd.toFixed(2)}</span>
+                  <span>{PROVIDER_OPTIONS.find((o) => o.id === provider)?.label || provider} est. {formatUsdEstimate(remoteUsage.estUsd)} / ${remoteUsage.budgetUsd.toFixed(2)}</span>
                   <span>{formatUsagePercent(remoteUsage.estUsd, remoteUsage.budgetUsd)}</span>
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-black/10 dark:bg-[var(--material-thin)]">
@@ -6736,19 +6625,20 @@ export default function ChatApp() {
             {activeChatMeta?.ephemeral && (
               <div className="flex items-center justify-center gap-1.5 rounded-2xl border border-dashed border-amber-400/50 bg-amber-500/10 px-3 py-2 text-[11px] font-medium text-amber-700 dark:text-amber-300">
                 <IncognitoIcon size={13} />
-                <span>Off the Record - this chat is never written to disk and disappears when you quit Mirabilis.</span>
+                <span>Off the Record: never saved to disk</span>
               </div>
             )}
             {activeChatId && (
               <section className="rounded-2xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h3 className="text-sm font-semibold text-[color:var(--text-main)]">Branching & Snapshots</h3>
-                    <p className="text-[11px] text-[color:var(--text-muted)]">
-                      {activeChatMeta?.parentChatId
-                        ? `Branch chat${activeChatMeta?.branchLabel ? ` | ${activeChatMeta.branchLabel}` : ''}`
-                        : 'Create a branch before experimenting, or save a restore point first.'}
-                    </p>
+                    <h3 className="text-sm font-semibold text-[color:var(--text-main)]">Branches and snapshots</h3>
+                    {/* A branch shows where it came from; the backend names it "Branch <date>" by default. */}
+                    {activeChatMeta?.parentChatId ? (
+                      <p className="text-[11px] text-[color:var(--text-muted)]">
+                        {activeChatMeta?.branchLabel || 'Branch'}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
@@ -6756,14 +6646,14 @@ export default function ChatApp() {
                       onClick={() => branchChat(activeChatId)}
                       className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                     >
-                      Branch Chat
+                      Branch
                     </button>
                     <button
                       type="button"
                       onClick={saveSnapshot}
                       className="rounded-xl bg-accent px-3 py-1.5 text-[11px] font-semibold text-white shadow-[0_10px_24px_-14px_rgba(26,168,111,0.9)] transition hover:brightness-95"
                     >
-                      Save Snapshot
+                      Save snapshot
                     </button>
                   </div>
                 </div>
@@ -6771,17 +6661,18 @@ export default function ChatApp() {
                   <select
                     value={selectedSnapshotId}
                     onChange={(event) => setSelectedSnapshotId(event.target.value)}
+                    aria-label="Snapshot"
                     disabled={!Array.isArray(activeChatMeta?.snapshots) || activeChatMeta.snapshots.length === 0}
                     className="min-w-0 flex-1 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-2 text-xs outline-none disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {Array.isArray(activeChatMeta?.snapshots) && activeChatMeta.snapshots.length > 0 ? (
                       [...activeChatMeta.snapshots].reverse().map((snapshot) => (
                         <option key={snapshot.id} value={snapshot.id}>
-                          {snapshot.label} | {snapshot.messageCount} msgs
+                          {snapshot.label} | {snapshot.messageCount} messages
                         </option>
                       ))
                     ) : (
-                      <option value="">No snapshots yet</option>
+                      <option value="">No snapshots</option>
                     )}
                   </select>
                   <button
@@ -6790,7 +6681,7 @@ export default function ChatApp() {
                     disabled={!selectedSnapshotId}
                     className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-2 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[var(--material-thin)]"
                   >
-                    Restore Snapshot
+                    Restore
                   </button>
                 </div>
               </section>
@@ -6820,7 +6711,7 @@ export default function ChatApp() {
                   value={canvasText}
                   onChange={(event) => setCanvasText(event.target.value)}
                   rows={6}
-                  placeholder="Draft ideas, prompts, or notes here..."
+                  aria-label="Canvas"
                   className="w-full resize-y rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2 text-sm outline-none focus:border-accent"
                 />
               </section>
@@ -6836,15 +6727,10 @@ export default function ChatApp() {
                   <FlowerMark size={120} />
                 </span>
                 <h2 className="text-[length:var(--text-xl)] font-[650] tracking-tight text-[color:var(--text-main)]">
-                  {activeChatId ? 'New Conversation' : 'Welcome to Mirabilis AI'}
+                  {activeChatId ? 'New chat' : 'Welcome to Mirabilis AI'}
                 </h2>
-                <p className="max-w-md text-[length:var(--text-md)] leading-relaxed text-[color:var(--text-muted)]">
-                  {engineUp === false
-                    ? 'No local engine is running yet, so there is nothing to answer you.'
-                    : activeChatId ? 'Type a message below to get started.' : 'See who is online in the flower, pick a model in the bar, and start talking.'}
-                </p>
 
-                {/* No engine reachable: say what is missing and how to fix it. */}
+                {/* No engine reachable: what to install and run. */}
                 {engineUp === false && (
                   <div className="w-full max-w-md rounded-[var(--r-lg)] border border-amber-400/40 bg-amber-50/70 p-4 text-left dark:border-amber-400/25 dark:bg-amber-950/20">
                     <p className="mb-2 text-[length:var(--text-sm)] font-semibold text-amber-900 dark:text-amber-200">
@@ -6854,19 +6740,14 @@ export default function ChatApp() {
                       <li>
                         1. Install Ollama from{' '}
                         <a href="https://ollama.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">ollama.com</a>
-                        {' '}if you have not already.
                       </li>
                       <li>
-                        2. Start it, then pull a model:
+                        2. Start it and pull a model:
                         <code className="mt-1 block whitespace-pre rounded-md bg-black/10 px-2 py-1 font-mono text-[length:var(--text-xs)] dark:bg-black/30">
                           {'ollama serve\nollama pull gemma3:12b'}
                         </code>
                       </li>
-                      <li>3. This page picks it up on its own within 30 seconds.</li>
                     </ol>
-                    <p className="mt-2 text-[length:var(--text-xs)] text-amber-900/70 dark:text-amber-200/70">
-                      Already using a cloud provider? Pick it in the bar below and add your API key.
-                    </p>
                   </div>
                 )}
                 <div className="flex flex-wrap items-center justify-center gap-2">
@@ -6877,7 +6758,7 @@ export default function ChatApp() {
                       className="au-focus rounded-[var(--r-lg)] px-5 py-2.5 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition hover:brightness-110 active:scale-[0.98]"
                       style={{ background: 'var(--accent)' }}
                     >
-                      Start a chat
+                      New chat
                     </button>
                   )}
                   <button
@@ -6929,7 +6810,7 @@ export default function ChatApp() {
           {isTeachPanelOpen && (
             <section className="mt-3 rounded-2xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3">
               <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Personal Memory</h3>
+                <h3 className="text-sm font-semibold">Personal memory</h3>
                 <button
                   type="button"
                   onClick={() => setIsTeachPanelOpen(false)}
@@ -6938,16 +6819,14 @@ export default function ChatApp() {
                   Close
                 </button>
               </div>
-              <p className="mb-2 text-[11px] text-[color:var(--text-muted)]">
-                These notes are injected as context into every conversation when memory is enabled.
-              </p>
               <div className="mb-2 flex gap-2">
                 <input
                   type="text"
                   value={memoryInput}
                   onChange={(e) => setMemoryInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMemoryItem(); } }}
-                  placeholder="Add a memory (e.g. I prefer concise answers)"
+                  placeholder="I prefer concise answers"
+                  aria-label="New memory"
                   className="flex-1 rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-1.5 text-xs outline-none focus:border-accent"
                 />
                 <button
@@ -6960,7 +6839,7 @@ export default function ChatApp() {
                 </button>
               </div>
               {memoryItems.length === 0 ? (
-                <p className="text-[11px] text-[color:var(--text-muted)]">No memories yet.</p>
+                <p className="text-[11px] text-[color:var(--text-muted)]">No memories</p>
               ) : (
                 <ul className="max-h-48 space-y-1 overflow-y-auto scroll-thin">
                   {memoryItems.map((item) => (
@@ -6997,7 +6876,7 @@ export default function ChatApp() {
                     setTimeout(() => { isProgrammaticScrollRef.current = false; }, 600);
                   }}
                   className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full border border-accent/30 bg-accentSoft px-3 text-[11px] font-semibold text-ink shadow-[0_4px_16px_-4px_rgba(15,23,42,0.18)] backdrop-blur-sm transition hover:bg-accent/20 dark:border-accent/30 dark:bg-accent/15 dark:text-accent dark:hover:bg-accent/25"
-                  title="Jump to latest messages"
+                  title="Scroll to bottom"
                   aria-label="Scroll to bottom"
                 >
                   {isStreaming && !autoScrollEnabled ? <span className="inline-flex items-center gap-1">New messages <ArrowDownIcon size={12} /></span> : <ArrowDownIcon size={14} />}
@@ -7036,7 +6915,6 @@ export default function ChatApp() {
                       if (installingBinary?.done) setInstallingBinary(null);
                     }}
                     className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
-                    title="Choose provider"
                   >
                     <span className="max-w-[9rem] truncate">{PROVIDER_OPTIONS.find((opt) => opt.id === provider)?.label || provider}</span>
                     <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
@@ -7045,7 +6923,7 @@ export default function ChatApp() {
                   </button>
 
                   {isProviderMenuOpen && (
-                    <div data-menu-panel="provider" role="group" aria-label="Provider and runtime" tabIndex={-1} className="absolute bottom-9 left-0 z-20 flex max-h-[min(70vh,460px)] w-72 flex-col overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="provider" role="group" aria-label="Provider" tabIndex={-1} className="absolute bottom-9 left-0 z-20 flex max-h-[min(70vh,460px)] w-72 flex-col overflow-hidden rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       {/* Search box - keeps the picker usable as providers grow */}
                       <div className="shrink-0 border-b border-black/10 p-2">
                         <input
@@ -7057,7 +6935,8 @@ export default function ChatApp() {
                             e.stopPropagation();
                             if (e.key === 'Escape') { setProviderSearch(''); setIsProviderMenuOpen(false); }
                           }}
-                          placeholder="Search providers..."
+                          placeholder="Search"
+                          aria-label="Search providers"
                           className="au-focus w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5 text-xs text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
                         />
                       </div>
@@ -7072,7 +6951,7 @@ export default function ChatApp() {
                             .map((g) => ({ group: g, items: PROVIDER_OPTIONS.filter((o) => effGroup(o) === g && (!q || o.label.toLowerCase().includes(q) || o.id.includes(q))) }))
                             .filter((g) => g.items.length);
                           if (!groups.length) {
-                            return <div className="px-2 py-3 text-center text-[11px] text-[color:var(--text-muted)]">No providers match "{providerSearch}"</div>;
+                            return <div className="px-2 py-3 text-center text-[11px] text-[color:var(--text-muted)]">No matches</div>;
                           }
                           return groups.map(({ group, items }) => (
                             <div key={group} className="mb-1 last:mb-0">
@@ -7091,7 +6970,7 @@ export default function ChatApp() {
                                         setProvider(opt.id);
                                         setIsProviderMenuOpen(false);
                                         setProviderSearch('');
-                                        setStatusText(`Provider: ${opt.label} (${opt.scope})`);
+                                        setStatusText(`Provider: ${opt.label}`);
                                         const cloudOnlyProviders = ['openai', 'grok', 'groq', 'openrouter', 'gemini', 'cerebras', 'claude', 'gpuaas', 'vllm'];
                                         if (cloudOnlyProviders.includes(opt.id)) {
                                           setModel((m) => (typeof m === 'string' && m.toLowerCase().endsWith('.gguf') ? 'auto' : m));
@@ -7110,7 +6989,8 @@ export default function ChatApp() {
                                     >
                                       <span className="flex min-w-0 flex-col">
                                         <span className="truncate">{opt.label}</span>
-                                        <span className="text-[10px] opacity-60">{binaryMissing ? 'Not installed' : opt.id === 'vllm' ? (vllmHasRemote ? 'Remote server' : 'Local (or set a remote URL)') : opt.scope}</span>
+                                        {/* The group header already says where it runs. */}
+                                        {binaryMissing ? <span className="text-[10px] opacity-60">Not installed</span> : null}
                                       </span>
                                       {!disabled && provider === opt.id ? <span className="ml-2 shrink-0 text-[10px] opacity-70">active</span> : null}
                                     </button>
@@ -7136,7 +7016,6 @@ export default function ChatApp() {
                                           setIsProviderMenuOpen(false);
                                         }}
                                         className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1.5 py-0.5 text-[10px] font-medium text-[color:var(--text-muted)] hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                                        title="Uninstall binary"
                                       >
                                         Uninstall
                                       </button>
@@ -7160,7 +7039,6 @@ export default function ChatApp() {
                           className="flex shrink-0 w-full items-center justify-between border-t border-black/10 px-3 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                         >
                           <span>Configure endpoint</span>
-                          <span className="opacity-60">...</span>
                         </button>
                       )}
                     </div>
@@ -7175,7 +7053,7 @@ export default function ChatApp() {
                         Installing {installingBinary.provider}
                       </span>
                       {installingBinary.done && (
-                        <button type="button" onClick={() => setInstallingBinary(null)} className="text-[10px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)] dark:hover:text-slate-200"><CloseIcon size={11} /></button>
+                        <button type="button" onClick={() => setInstallingBinary(null)} aria-label="Close" title="Close" className="text-[10px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)] dark:hover:text-slate-200"><CloseIcon size={11} /></button>
                       )}
                     </div>
                     <div className="max-h-32 overflow-y-auto space-y-0.5">
@@ -7197,20 +7075,20 @@ export default function ChatApp() {
                     </p>
                     {provider === 'koboldcpp' && (
                       <p className="mb-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                        KoboldCpp is a <strong>separate app</strong> you must install &amp; run on your machine. It is not included in Mirabilis. Once running, enter its URL below.
+                        Requires KoboldCpp running on this computer
                       </p>
                     )}
                     {provider === 'llamacpp' && (
                       <div className="mb-2 rounded-lg border border-[var(--hairline)] p-2">
                         <div className="mb-1 flex items-center justify-between">
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">llama.cpp engine (local, Metal)</span>
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Local engine</span>
                           <span className={`text-[10px] font-medium ${llamacppStatus?.running ? 'text-emerald-600 dark:text-emerald-300' : llamacppStatus?.installed ? 'text-amber-600 dark:text-amber-300' : 'text-[color:var(--text-muted)]'}`}>
-                            {llamacppStatus?.running ? 'Running' : llamacppStatus?.installed ? 'Ready to launch' : 'Not installed'}
+                            {llamacppStatus?.running ? 'Running' : llamacppStatus?.installed ? 'Not running' : 'Not installed'}
                           </span>
                         </div>
                         {!llamacppStatus?.installed ? (
                           <p className="text-[10px] leading-relaxed text-[color:var(--text-muted)]">
-                            llama.cpp runs your models locally with no Ollama needed. Install it with <code className="rounded bg-black/5 px-1 dark:bg-white/10">brew install llama.cpp</code>, then reopen this panel.
+                            Install with <code className="rounded bg-black/5 px-1 dark:bg-white/10">brew install llama.cpp</code>
                           </p>
                         ) : llamacppStatus?.running ? (
                           <div className="flex items-center justify-between gap-2">
@@ -7225,6 +7103,7 @@ export default function ChatApp() {
                               <select
                                 value={llamacppModel}
                                 onChange={(e) => setLlamacppModel(e.target.value)}
+                                aria-label="Model"
                                 className="au-focus w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[11px] text-[color:var(--text-main)] outline-none"
                               >
                                 {llamacppLaunchable.map((id) => <option key={id} value={id}>{id}</option>)}
@@ -7234,26 +7113,26 @@ export default function ChatApp() {
                                 type="text"
                                 value={llamacppModel}
                                 onChange={(e) => setLlamacppModel(e.target.value)}
-                                placeholder="Model name or /path/to/model.gguf"
+                                placeholder="qwen3:8b"
+                                aria-label="Model name or .gguf path"
                                 className="au-focus w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[11px] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
                               />
                             )}
                             <button type="button" onClick={startLlamacpp} disabled={isLlamacppBusy || !llamacppModel.trim()} className="w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
-                              {isLlamacppBusy ? 'Starting...' : 'Start llama.cpp with this model'}
+                              {isLlamacppBusy ? 'Starting...' : 'Start'}
                             </button>
-                            <p className="text-[10px] leading-relaxed text-[color:var(--text-muted)]">Runs the model file directly with KV-cache quant + flash attention. Your downloaded models are reused - Ollama does not need to be running.</p>
                           </div>
                         )}
                       </div>
                     )}
                     {provider === 'openai-compatible' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Point to any OpenAI-compatible local server (LM Studio, llama.cpp, Oobabooga, etc.) or a cloud API that requires a key.
+                        Any OpenAI-compatible endpoint
                       </p>
                     )}
                     {provider === 'gpuaas' && (
                       <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Use your GPUaaS OpenAI-compatible endpoint URL and key (for example Together, Fireworks, RunPod OpenAI proxy, vLLM gateway).
+                        Any OpenAI-compatible endpoint
                       </p>
                     )}
                     {provider === 'vllm' && (
@@ -7261,7 +7140,7 @@ export default function ChatApp() {
                         <div className="mb-1 flex items-center justify-between">
                           <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Local vLLM (NVIDIA GPU)</span>
                           <span className={`text-[10px] font-medium ${vllmStatus?.running ? 'text-emerald-600 dark:text-emerald-300' : vllmStatus?.canRunLocal ? 'text-amber-600 dark:text-amber-300' : 'text-[color:var(--text-muted)]'}`}>
-                            {vllmStatus?.running ? 'Running' : vllmStatus?.canRunLocal ? 'Ready to launch' : 'Not available here'}
+                            {vllmStatus?.running ? 'Running' : vllmStatus?.canRunLocal ? 'Not running' : 'Unavailable'}
                           </span>
                         </div>
                         {vllmStatus?.canRunLocal ? (
@@ -7278,7 +7157,8 @@ export default function ChatApp() {
                                 type="text"
                                 value={vllmLocalModel}
                                 onChange={(e) => setVllmLocalModel(e.target.value)}
-                                placeholder="Hugging Face id, e.g. Qwen/Qwen2.5-7B-Instruct"
+                                placeholder="Qwen/Qwen2.5-7B-Instruct"
+                                aria-label="Hugging Face model id"
                                 className="au-focus min-w-0 flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[11px] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
                               />
                               <button type="button" onClick={startLocalVllm} disabled={isVllmBusy || !vllmLocalModel.trim()} className="shrink-0 rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50">
@@ -7293,62 +7173,25 @@ export default function ChatApp() {
                         )}
                       </div>
                     )}
-                    {provider === 'vllm' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Or connect to a <strong>remote vLLM server</strong>: enter its URL below (e.g. <code>http://gpu-host:8000/v1</code>). Models load from that server automatically. Key optional.
-                      </p>
-                    )}
-                    {provider === 'openai' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        OpenAI uses https://api.openai.com/v1 and requires an API key.
-                      </p>
-                    )}
-                    {provider === 'grok' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Grok uses xAI API at https://api.x.ai/v1 and requires an API key.
-                      </p>
-                    )}
-                    {provider === 'groq' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Groq uses https://api.groq.com/openai/v1 and requires an API key.
-                      </p>
-                    )}
-                    {provider === 'openrouter' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        OpenRouter uses https://openrouter.ai/api/v1 and requires an API key.
-                      </p>
-                    )}
-                    {provider === 'gemini' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Gemini uses Google AI OpenAI endpoint at https://generativelanguage.googleapis.com/v1beta/openai and requires an API key.
-                      </p>
-                    )}
-                    {provider === 'cerebras' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Cerebras uses https://api.cerebras.ai/v1 and requires an API key (csk-...). Free tier available.
-                      </p>
-                    )}
-                    {provider === 'claude' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Claude uses Anthropic API at https://api.anthropic.com and requires an API key.
-                      </p>
-                    )}
+                    {/* Cloud providers need no note: the URL placeholder and "(required)" on the key say it. */}
                     <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">Base URL</label>
                     <input
                       type="text"
                       className="mb-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
-                      placeholder={provider === 'koboldcpp' ? 'http://127.0.0.1:5001/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'grok' ? 'https://api.x.ai/v1' : provider === 'groq' ? 'https://api.groq.com/openai/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'cerebras' ? 'https://api.cerebras.ai/v1' : provider === 'claude' ? 'https://api.anthropic.com' : provider === 'gpuaas' ? 'https://your-gpuaas-endpoint.example/v1' : provider === 'vllm' ? 'http://gpu-host:8000/v1' : 'http://127.0.0.1:1234/v1'}
+                      placeholder={provider === 'koboldcpp' ? 'http://127.0.0.1:5001/v1' : provider === 'openai' ? 'https://api.openai.com/v1' : provider === 'grok' ? 'https://api.x.ai/v1' : provider === 'groq' ? 'https://api.groq.com/openai/v1' : provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : provider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta/openai' : provider === 'cerebras' ? 'https://api.cerebras.ai/v1' : provider === 'claude' ? 'https://api.anthropic.com' : provider === 'gpuaas' ? 'https://gpu.example.com/v1' : provider === 'vllm' ? 'http://gpu-host:8000/v1' : 'http://127.0.0.1:1234/v1'}
+                      aria-label="Base URL"
                       value={providerConfigs[provider]?.baseUrl || ''}
                       onChange={(e) => setProviderConfigs((prev) => ({ ...prev, [provider]: { ...prev[provider], baseUrl: e.target.value } }))}
                     />
                     {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') && (
                       <>
-                        <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">API Key <span className="opacity-60">{provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' ? '(required)' : '(leave empty for local servers)'}</span></label>
+                        <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">API key <span className="opacity-60">{provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' ? '(required)' : '(optional)'}</span></label>
                         <div className="mb-2 flex gap-1">
                           <input
                             type="password"
                             className="min-w-0 flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
-                            placeholder={provider === 'openai' ? 'sk-... (required)' : provider === 'grok' ? 'xai-... (required)' : provider === 'groq' ? 'gsk_... (required)' : provider === 'openrouter' ? 'sk-or-... (required)' : provider === 'gemini' ? 'AIza... (required)' : provider === 'cerebras' ? 'csk-... (required)' : provider === 'claude' ? 'sk-ant-... (required)' : provider === 'gpuaas' ? 'provider key (required)' : 'sk-... (optional for local)'}
+                            placeholder={provider === 'openai' ? 'sk-...' : provider === 'grok' ? 'xai-...' : provider === 'groq' ? 'gsk_...' : provider === 'openrouter' ? 'sk-or-...' : provider === 'gemini' ? 'AIza...' : provider === 'cerebras' ? 'csk-...' : provider === 'claude' ? 'sk-ant-...' : provider === 'gpuaas' ? undefined : 'sk-...'}
+                            aria-label="API key"
                             value={keyDraft}
                             onChange={(e) => setKeyDraft(e.target.value)}
                             onKeyDown={(e) => { if (e.key === 'Enter' && keyDraft.trim()) saveProviderKey(provider, keyDraft.trim()); }}
@@ -7356,7 +7199,6 @@ export default function ChatApp() {
                           {keyDraft.trim() ? (
                             <button
                               type="button"
-                              title="Save API key"
                               onClick={() => saveProviderKey(provider, keyDraft.trim())}
                               className="flex-shrink-0 rounded-lg bg-accent px-2 py-1 text-xs font-semibold text-white transition hover:brightness-95"
                             >
@@ -7365,7 +7207,6 @@ export default function ChatApp() {
                           ) : keyHints[provider]?.hasKey ? (
                             <button
                               type="button"
-                              title="Remove the stored API key"
                               onClick={() => clearProviderKey(provider)}
                               className="flex-shrink-0 rounded-lg border border-[var(--hairline)] px-2 py-1 text-xs text-[color:var(--text-muted)] transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:text-[color:var(--text-muted)] dark:hover:border-red-500/40 dark:hover:bg-red-900/20 dark:hover:text-red-400"
                             >
@@ -7375,19 +7216,18 @@ export default function ChatApp() {
                         </div>
                         {/* The key never returns to the page; show only the masked hint. */}
                         <p className="mb-2 text-[10px] text-[color:var(--text-muted)]">
-                          {keyHints[provider]?.hasKey
-                            ? `Stored in the app: ${keyHints[provider].hint}. Keys are held by the backend, not the browser.`
-                            : 'No key stored. Keys are held by the backend, never in browser storage.'}
+                          {keyHints[provider]?.hasKey ? `Stored: ${keyHints[provider].hint}` : 'No key stored'}
                         </p>
                       </>
                     )}
                     {(provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas') && (
                       <>
-                        <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">Estimated Monthly Budget (USD)</label>
+                        <label className="mb-1 block text-[11px] text-[color:var(--text-muted)]">Monthly budget (USD)</label>
                         <input
                           type="number"
                           min="1"
                           step="1"
+                          aria-label="Monthly budget (USD)"
                           className="mb-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1 text-xs text-[color:var(--text-main)] outline-none focus:ring-1 focus:ring-accentSoft dark:text-[color:var(--text-main)]"
                           value={remoteBudgetUsd}
                           onChange={(e) => {
@@ -7400,7 +7240,7 @@ export default function ChatApp() {
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => { setProvider('ollama'); setIsProviderConfigOpen(false); setStatusText('Switched back to Ollama'); }}
+                        onClick={() => { setProvider('ollama'); setIsProviderConfigOpen(false); setStatusText('Provider: Ollama'); }}
                         className="flex-1 rounded-lg border border-[var(--hairline)] px-2 py-1 text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                       >
                         Back to Ollama
@@ -7428,7 +7268,6 @@ export default function ChatApp() {
                     aria-expanded={isModelMenuOpen}
                     onClick={() => { setIsProviderMenuOpen(false); setIsEffortMenuOpen(false); setIsAccessMenuOpen(false); setOpenHardwarePopover(null); setIsModelMenuOpen((prev) => !prev); }}
                     className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
-                    title="Choose model"
                   >
                     <span className="max-w-[9rem] truncate">
                         {model === 'auto' ? 'Auto' : (selectedModelRecord?.label || model)}
@@ -7439,7 +7278,7 @@ export default function ChatApp() {
                   </button>
 
                   {isModelMenuOpen && (
-                  <div data-menu-panel="model" role="group" aria-label="Model selection" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-96 w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                  <div data-menu-panel="model" role="group" aria-label="Model" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-96 w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       {models.length > 0 ? (
                         <>
                         {/* Auto mode entry - no group header, divider separates it from model groups */}
@@ -7460,7 +7299,7 @@ export default function ChatApp() {
                               <span className="truncate font-semibold">Auto</span>
                             </span>
                             <span className="ml-2 shrink-0 text-[10px] text-[color:var(--text-muted)]">
-                              {pickBestAutoModel(models) ? `uses ${pickBestAutoModel(models).label}` : 'no model installed'}
+                              {pickBestAutoModel(models) ? `uses ${pickBestAutoModel(models).label}` : 'none installed'}
                             </span>
                           </button>
                         </div>
@@ -7486,17 +7325,17 @@ export default function ChatApp() {
                                         installModel(item.ollamaId || item.id, item.id);
                                       } else {
                                         const plabel = PROVIDER_OPTIONS.find((o) => o.id === provider)?.label || provider;
-                                        setStatusText(`${plabel} loads a GGUF at launch and cannot pull models. Drop a .gguf into mirabilis/models, or start ${plabel} with your model, then it will appear here.`);
+                                        setStatusText(`${plabel} cannot pull models. Add a .gguf to mirabilis/models.`);
                                       }
                                     } else if (isInstalled) {
                                       // Only local GGUF servers need switch-model; elsewhere the
                                       // id travels with each request and the route returns 400.
                                       if (!needsServerModelSwitch(provider)) {
                                         setModel(item.id);
-                                        setStatusText(`Active model: ${item.label}`);
+                                        setStatusText(`Model: ${item.label}`);
                                         setIsModelMenuOpen(false);
                                       } else {
-                                        setStatusText(`Switching ${provider} model...`);
+                                        setStatusText('Switching model...');
                                         api('/api/providers/switch-model', {
                                           method: 'POST',
                                           body: JSON.stringify({
@@ -7508,7 +7347,7 @@ export default function ChatApp() {
                                           .then(async () => {
                                             await refreshModels();
                                             setModel(item.id);
-                                            setStatusText(`Active model: ${item.label}`);
+                                            setStatusText(`Model: ${item.label}`);
                                             setIsModelMenuOpen(false);
                                           })
                                           .catch((error) => {
@@ -7592,7 +7431,7 @@ export default function ChatApp() {
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); deleteModel(item.ollamaId || item.id, item.id); }}
                                     className="ml-0.5 shrink-0 rounded p-1 text-[10px] text-slate-300 opacity-0 transition hover:text-red-500 group-hover/row:opacity-100 dark:text-[color:var(--text-main)] dark:hover:text-red-400"
-                                    title={`Remove ${item.label} to free space`}
+                                    title={`Remove ${item.label}`}
                                   ><CloseIcon size={11} /></button>
                                 )}
                                 {isDeleting && (
@@ -7612,7 +7451,7 @@ export default function ChatApp() {
                           if (provider === 'llamacpp') {
                             return (
                               <div className="px-2 py-3 text-[11px] leading-relaxed text-[color:var(--text-muted)]">
-                                No model running yet. Open the llama.cpp config to pick one of your models and start it locally.
+                                No model running
                                 <button type="button" onClick={openConfig} className="mt-2 block w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110">
                                   Configure llama.cpp
                                 </button>
@@ -7622,9 +7461,7 @@ export default function ChatApp() {
                           if (endpointProviders.includes(provider) && !hasBaseUrl) {
                             return (
                               <div className="px-2 py-3 text-[11px] leading-relaxed text-[color:var(--text-muted)]">
-                                {provider === 'vllm'
-                                  ? 'No vLLM server connected. Start a local vLLM (NVIDIA GPU) or enter a remote server URL - then this list fills with that server\'s models.'
-                                  : 'No server connected. Set the endpoint URL - then this list fills with its models.'}
+                                No server connected
                                 <button
                                   type="button"
                                   onClick={openConfig}
@@ -7635,14 +7472,14 @@ export default function ChatApp() {
                               </div>
                             );
                           }
-                          return <div className="px-2 py-2 text-xs text-[color:var(--text-muted)]">No models found</div>;
+                          return <div className="px-2 py-2 text-xs text-[color:var(--text-muted)]">No models</div>;
                         })()
                       )}
 
                     {/* Pull any Ollama model by name via installModel(). */}
                     {provider === 'ollama' && (
                       <div className="mt-1 border-t border-black/10 px-2 py-2">
-                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Add any model</div>
+                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Add a model</div>
                         <div className="flex items-center gap-1.5">
                           <input
                             type="text"
@@ -7656,7 +7493,8 @@ export default function ChatApp() {
                                 if (name) { installModel(name, name); setCustomModelInput(''); }
                               }
                             }}
-                            placeholder="e.g. llama3.2, qwen2.5:7b"
+                            placeholder="qwen2.5:7b"
+                            aria-label="Model name"
                             className="au-focus min-w-0 flex-1 rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5 text-[11px] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
                           />
                           <button
@@ -7680,20 +7518,20 @@ export default function ChatApp() {
                         </div>
                         {customModelInput.trim() && customModelLookup && (
                           <div className="mt-1 text-[10px] text-[color:var(--text-muted)]">
-                            {customModelLookup.status === 'checking' && 'Checking the registry...'}
+                            {customModelLookup.status === 'checking' && 'Checking...'}
                             {customModelLookup.status === 'found' && (
                               <span className="text-emerald-600 dark:text-emerald-400">
-                                Found{customModelLookup.size ? ` - ${customModelLookup.size} download` : ''}
+                                Found{customModelLookup.size ? `, ${customModelLookup.size}` : ''}
                               </span>
                             )}
                             {customModelLookup.status === 'missing' && (
-                              <span className="text-rose-500">No model with that name and tag.</span>
+                              <span className="text-rose-500">Not found</span>
                             )}
                             {customModelLookup.status === 'invalid' && (
-                              <span className="text-rose-500">That is not a valid model name.</span>
+                              <span className="text-rose-500">Invalid name</span>
                             )}
                             {customModelLookup.status === 'unknown' && (
-                              <span>Could not check it. You can still pull if you know it exists.</span>
+                              <span>Could not check</span>
                             )}
                           </div>
                         )}
@@ -7703,7 +7541,7 @@ export default function ChatApp() {
                           rel="noopener noreferrer"
                           className="mt-1.5 inline-block text-[10px] text-[color:var(--text-muted)] underline decoration-[var(--hairline)] underline-offset-2 hover:text-accent"
                         >
-                          Browse the Ollama model library
+                          Ollama library
                         </a>
                       </div>
                     )}
@@ -7713,7 +7551,7 @@ export default function ChatApp() {
                       <div className="mt-1 border-t border-black/10 px-2 py-2">
                         <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Loading a model</div>
                         <p className="text-[10px] leading-relaxed text-[color:var(--text-muted)]">
-                          This runtime loads a single GGUF at launch. Drop a <code className="rounded bg-black/5 px-1 dark:bg-white/10">.gguf</code> file into <code className="rounded bg-black/5 px-1 dark:bg-white/10">mirabilis/models</code> and it appears above, or start the server pointed at your model. Only Ollama can download models on demand.
+                          Add a <code className="rounded bg-black/5 px-1 dark:bg-white/10">.gguf</code> to <code className="rounded bg-black/5 px-1 dark:bg-white/10">mirabilis/models</code>
                         </p>
                       </div>
                     )}
@@ -7723,14 +7561,12 @@ export default function ChatApp() {
                       <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Generation</div>
                       <div className="mb-1.5">
                         <div className="flex items-center justify-between text-[10px] text-[color:var(--text-muted)]">
-                          <span className="flex items-center gap-1">
-                            Temperature
-                            <span title="Controls randomness. 0 = precise and deterministic. 0.7 = balanced (default). 1+ = more creative but less predictable." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none text-[color:var(--text-muted)] dark:border-slate-600 dark:text-[color:var(--text-muted)]">?</span>
-                          </span>
+                          <span>Temperature</span>
                           <span>{temperature == null ? 'default' : temperature.toFixed(2)}</span>
                         </div>
                         <input
                           type="range"
+                          aria-label="Temperature"
                           min="0"
                           max="2"
                           step="0.05"
@@ -7744,20 +7580,18 @@ export default function ChatApp() {
                             onClick={() => setTemperature(null)}
                             className="text-[9px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)] dark:hover:text-slate-300"
                           >
-                            Reset to default
+                            Reset
                           </button>
                         )}
                       </div>
                       <div>
-                        <div className="mb-0.5 flex items-center gap-1 text-[10px] text-[color:var(--text-muted)]">
-                          Max tokens
-                          <span title="Hard cap on reply length. Leave blank to let the model stop naturally. Set a number (e.g. 512) to limit response length." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none text-[color:var(--text-muted)] dark:border-slate-600 dark:text-[color:var(--text-muted)]">?</span>
-                        </div>
+                        <div className="mb-0.5 text-[10px] text-[color:var(--text-muted)]">Max tokens</div>
                         <input
                           type="number"
+                          aria-label="Max tokens"
                           min="1"
                           max="131072"
-                          placeholder="provider default"
+                          placeholder="default"
                           value={maxTokens ?? ''}
                           onChange={(e) => setMaxTokens(e.target.value === '' ? null : Math.max(1, Number(e.target.value)))}
                           className="w-full rounded border border-[var(--hairline)] bg-[var(--material-thick)] px-1.5 py-0.5 text-[10px] outline-none focus:border-accent"
@@ -7780,29 +7614,30 @@ export default function ChatApp() {
                           </div>
                           <div className="mb-1.5">
                             <div className="flex items-center justify-between text-[10px] text-[color:var(--text-muted)]">
-                              <span className="flex items-center gap-1">Top-p<span title="Nucleus sampling. Lower keeps word choice focused; 1 considers all. Leave default unless you know you need it." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none dark:border-slate-600">?</span></span>
+                              <span>Top-p</span>
                               <span>{ollamaParams.top_p == null ? 'default' : Number(ollamaParams.top_p).toFixed(2)}</span>
                             </div>
-                            <input type="range" min="0" max="1" step="0.05" value={ollamaParams.top_p ?? 0.9} onChange={(e) => setOllamaParams((p) => ({ ...p, top_p: Number(e.target.value) }))} className="mt-0.5 w-full accent-[var(--accent)]" />
+                            <input type="range" aria-label="Top-p" min="0" max="1" step="0.05" value={ollamaParams.top_p ?? 0.9} onChange={(e) => setOllamaParams((p) => ({ ...p, top_p: Number(e.target.value) }))} className="mt-0.5 w-full accent-[var(--accent)]" />
                           </div>
                           <div className="mb-1.5">
                             <div className="flex items-center justify-between text-[10px] text-[color:var(--text-muted)]">
-                              <span className="flex items-center gap-1">Repeat penalty<span title="Discourages repetition. 1.0 = off; 1.1 to 1.3 reduces loops. Too high hurts fluency." className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none dark:border-slate-600">?</span></span>
+                              <span>Repeat penalty</span>
                               <span>{ollamaParams.repeat_penalty == null ? 'default' : Number(ollamaParams.repeat_penalty).toFixed(2)}</span>
                             </div>
-                            <input type="range" min="0.8" max="2" step="0.05" value={ollamaParams.repeat_penalty ?? 1.1} onChange={(e) => setOllamaParams((p) => ({ ...p, repeat_penalty: Number(e.target.value) }))} className="mt-0.5 w-full accent-[var(--accent)]" />
+                            <input type="range" aria-label="Repeat penalty" min="0.8" max="2" step="0.05" value={ollamaParams.repeat_penalty ?? 1.1} onChange={(e) => setOllamaParams((p) => ({ ...p, repeat_penalty: Number(e.target.value) }))} className="mt-0.5 w-full accent-[var(--accent)]" />
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             {[
-                              { key: 'top_k', label: 'Top-k', placeholder: 'default', title: 'Limits choices to the K most likely tokens. Blank = off.', min: 0, max: 500 },
-                              { key: 'num_ctx', label: 'Context', placeholder: 'model default', title: 'Context window size in tokens (num_ctx). Larger uses more memory.', min: 256, max: 131072 },
-                              { key: 'num_gpu', label: 'GPU layers', placeholder: 'auto', title: 'Layers offloaded to GPU (num_gpu). 0 = CPU only; higher is faster if it fits.', min: 0, max: 512 },
-                              { key: 'seed', label: 'Seed', placeholder: 'random', title: 'Fixes the random seed for reproducible output. Blank = random each run.', min: 0, max: 2147483647 }
+                              { key: 'top_k', label: 'Top-k', placeholder: 'default', min: 0, max: 500 },
+                              { key: 'num_ctx', label: 'Context', placeholder: 'default', min: 256, max: 131072 },
+                              { key: 'num_gpu', label: 'GPU layers', placeholder: 'auto', min: 0, max: 512 },
+                              { key: 'seed', label: 'Seed', placeholder: 'random', min: 0, max: 2147483647 }
                             ].map((f) => (
                               <div key={f.key}>
-                                <div className="mb-0.5 flex items-center gap-1 text-[10px] text-[color:var(--text-muted)]">{f.label}<span title={f.title} className="inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-slate-300 text-[8px] leading-none dark:border-slate-600">?</span></div>
+                                <div className="mb-0.5 text-[10px] text-[color:var(--text-muted)]">{f.label}</div>
                                 <input
                                   type="number"
+                                  aria-label={f.label}
                                   min={f.min}
                                   max={f.max}
                                   placeholder={f.placeholder}
@@ -7816,7 +7651,6 @@ export default function ChatApp() {
                           <button
                             type="button"
                             onClick={() => setPinModel((v) => { const n = !v; safeStorageSet('mirabilis-pin-model', n ? 'true' : 'false'); return n; })}
-                            title="Keep the model resident in memory (Ollama keep_alive: never unload) so replies after a pause don't cold-reload. Uses RAM continuously."
                             className={`mt-2 flex w-full items-center justify-between rounded-[var(--r-md)] px-2 py-1.5 text-[10px] font-medium transition ${
                               pinModel ? 'border text-[color:var(--accent)]' : 'au-hairline au-material text-[color:var(--text-main)]'
                             }`}
@@ -7828,7 +7662,6 @@ export default function ChatApp() {
                           {resolvedTuning && resolvedTuning.note ? (
                             <p className="mt-1.5 text-[9px] leading-tight text-[color:var(--accent)]">Auto-tuned: {resolvedTuning.note}</p>
                           ) : null}
-                          <p className="mt-1 text-[9px] leading-tight text-[color:var(--text-muted)]">Auto-tuned for your hardware. Fields above override; blank = auto. KV-cache quant is set on the Ollama server.</p>
                         </div>
                       )}
                     </div>
@@ -7846,7 +7679,6 @@ export default function ChatApp() {
                     aria-expanded={isEffortMenuOpen}
                     onClick={() => { const open = !isEffortMenuOpen; closeAllDropdowns(); setIsEffortMenuOpen(open); }}
                     className="inline-flex h-7 items-center gap-1 rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
-                    title="Answer effort level"
                   >
                     Effort: {EFFORT_LABELS[effortLevel] || EFFORT_LABELS.balanced}
                     <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
@@ -7854,7 +7686,7 @@ export default function ChatApp() {
                     </svg>
                   </button>
                   {isEffortMenuOpen && (
-                    <div data-menu-panel="effort" role="group" aria-label="Answer effort" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-44 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                    <div data-menu-panel="effort" role="group" aria-label="Effort" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-44 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
                       <div className="px-2 pb-1 pt-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
                         Answer style
                       </div>
@@ -7881,7 +7713,7 @@ export default function ChatApp() {
                       {/* These run for up to hours; under Chat only they would do so with no tools. */}
                       {currentAccess.id === 'chat' && (
                         <p className="max-w-[13rem] px-2 pb-1.5 text-[10px] leading-snug text-[color:var(--text-muted)]">
-                          Access is Chat only, so these runs cannot use tools.{' '}
+                          Chat only: no tools.{' '}
                           <button
                             type="button"
                             onClick={() => {
@@ -7924,7 +7756,6 @@ export default function ChatApp() {
                     aria-expanded={isAccessMenuOpen}
                     onClick={openAccessMenu}
                     aria-label={`Access: ${currentAccess.label}`}
-                    title={`Access: ${currentAccess.label}. ${currentAccess.description}`}
                     className={`inline-flex h-7 items-center gap-1.5 rounded-[var(--r-md)] px-2.5 text-[length:var(--text-2xs)] font-medium transition hover:brightness-105 ${
                       bypassOn ? 'border text-rose-600 dark:text-rose-300' : 'au-hairline au-material text-[color:var(--text-main)]'
                     }`}
@@ -7954,9 +7785,6 @@ export default function ChatApp() {
                       style={accessMenuPlace}
                       className="au-scroll absolute bottom-9 z-20 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur"
                     >
-                      <div className="px-2 pb-1 pt-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
-                        What Mirabilis may do on this computer
-                      </div>
                       {ACCESS_LEVELS.map((level) => {
                         const checked = level.id === currentAccess.id;
                         const danger = level.tone === 'danger';
@@ -7984,7 +7812,7 @@ export default function ChatApp() {
                                 {checked ? <CheckIcon size={13} className="shrink-0 text-[color:var(--text-main)]" /> : null}
                               </span>
                               <span className="mt-0.5 block text-[11px] leading-snug text-[color:var(--text-muted)]">
-                                {level.description}
+                                {level.hint}
                               </span>
                             </span>
                           </button>
@@ -8002,7 +7830,7 @@ export default function ChatApp() {
                         className="au-focus flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                       >
                         <ShieldIcon size={13} className="shrink-0 text-[color:var(--text-muted)]" />
-                        <span>Access settings...</span>
+                        <span>Access settings</span>
                       </button>
                     </div>
                   )}
@@ -8012,7 +7840,6 @@ export default function ChatApp() {
                   type="button"
                   onClick={toggleUncensoredMode}
                   aria-pressed={uncensoredMode}
-                  title={uncensoredMode ? 'Uncensored is on for this chat. Click to turn off.' : 'Uncensored is off. Click to turn on for this chat.'}
                   className={`inline-flex h-7 items-center rounded-[var(--r-md)] px-2.5 text-[length:var(--text-2xs)] font-medium transition hover:brightness-105 ${
                     uncensoredMode
                       ? 'border text-[color:var(--accent)]'
@@ -8027,9 +7854,7 @@ export default function ChatApp() {
                   type="button"
                   onClick={() => setDeepWebEnabled((prev) => !prev)}
                   aria-pressed={deepWebEnabled}
-                  title={webSearchStatus === 'error'
-                    ? 'Web search failed last time. Click to toggle.'
-                    : deepWebEnabled ? 'Web search (www) is on by default. Click to turn it off.' : 'Web search (www) is off. Click to turn it back on.'}
+                  title={webSearchStatus === 'error' ? 'Last search failed' : 'Web search'}
                   className={`inline-flex h-7 items-center rounded-[var(--r-md)] px-2.5 text-[length:var(--text-2xs)] font-medium transition hover:brightness-105 ${
                     webSearchStatus === 'searching'
                       ? 'border text-[color:var(--presence-away)] animate-pulse'
@@ -8065,7 +7890,7 @@ export default function ChatApp() {
               <div className="flex flex-wrap justify-end gap-1.5">
                 {[
                   deepThinkingEnabled && { key: 'deep-thinking', label: 'Deep Thinking', section: 'labs' },
-                  guidedLearningEnabled && { key: 'guided', label: 'Guided', section: 'labs' },
+                  guidedLearningEnabled && { key: 'guided', label: 'Guided Learning', section: 'labs' },
                   trainingMode === 'fine-tuning' && { key: 'quick-learning', label: 'Quick Learning', section: 'labs' },
                   trainingMode === 'full-training' && { key: 'deep-training', label: 'Deep Training', section: 'labs', tone: 'warn' },
                   canvasEnabled && { key: 'canvas', label: 'Canvas', section: 'labs' },
@@ -8076,7 +7901,6 @@ export default function ChatApp() {
                     key={chip.key}
                     type="button"
                     onClick={() => appStore.openSettings(chip.section)}
-                    title={`${chip.label} is on. Click to change it in Settings.`}
                     className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition ${
                       chip.tone === 'warn'
                         ? 'border-amber-300/60 bg-amber-100 text-amber-800 hover:brightness-95 dark:border-amber-400/40 dark:bg-amber-900/30 dark:text-amber-200'
@@ -8092,7 +7916,7 @@ export default function ChatApp() {
                   <button
                     type="button"
                     onClick={() => appStore.openSettings('remote')}
-                    title={`Remote Control is connected to ${remoteTarget}. Click to manage it.`}
+                    title="Remote Control"
                     className="inline-flex items-center gap-1 rounded-full border border-emerald-300/50 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:brightness-95 dark:border-emerald-400/30 dark:bg-emerald-900/20 dark:text-emerald-300"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -8103,7 +7927,6 @@ export default function ChatApp() {
                   <button
                     type="button"
                     onClick={() => appStore.openWorkspace()}
-                    title="Pinned workspace files - read fresh from disk on send"
                     className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
                   >
                     <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
@@ -8111,12 +7934,64 @@ export default function ChatApp() {
                   </button>
                 )}
               </div>
-                <span
-                  className="shrink-0 font-medium tabular-nums text-[length:var(--text-2xs)] text-[color:var(--text-muted)]"
-                  title={`in ${chatTokenSummary.input.toLocaleString()} / out ${chatTokenSummary.output.toLocaleString()}`}
-                >
-                  {(chatTokenSummary.input + chatTokenSummary.output).toLocaleString()} tokens
-                </span>
+                <div data-menu-container="true" className="relative shrink-0">
+                  <button
+                    type="button"
+                    data-menu-trigger="context"
+                    aria-haspopup="true"
+                    aria-expanded={isContextPanelOpen}
+                    onClick={() => {
+                      setOpenHardwarePopover(null);
+                      setIsContextPanelOpen((prev) => !prev);
+                    }}
+                    className={`au-focus rounded-md px-1 font-medium tabular-nums text-[length:var(--text-2xs)] underline-offset-2 transition hover:underline ${
+                      contextUsage.usedPct >= 90
+                        ? 'text-red-600 dark:text-red-400'
+                        : contextUsage.usedPct >= 70
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]'
+                    }`}
+                  >
+                    {(chatTokenSummary.input + chatTokenSummary.output).toLocaleString()} tokens
+                  </button>
+
+                  {isContextPanelOpen && (
+                    <div data-menu-panel="context" role="group" aria-label="Tokens" tabIndex={-1} className="absolute bottom-full right-0 z-30 mb-2 w-60 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 text-[11px] text-[color:var(--text-main)] shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className="font-semibold">Context</span>
+                        <span className="tabular-nums text-[color:var(--text-muted)]">{contextUsage.usedPct}%</span>
+                      </div>
+                      <div className="mb-2.5 h-1.5 w-full overflow-hidden rounded-full bg-black/10 dark:bg-[var(--material-thin)]">
+                        <div
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            contextUsage.usedPct >= 90 ? 'bg-red-500' : contextUsage.usedPct >= 70 ? 'bg-amber-500' : 'bg-accent'
+                          }`}
+                          style={{ width: `${Math.min(contextUsage.usedPct, 100)}%` }}
+                        />
+                      </div>
+                      <dl className="space-y-1 tabular-nums">
+                        {[
+                          ['System', contextUsage.systemTokens],
+                          ['You', contextUsage.userTokens],
+                          ['Assistant', contextUsage.uncategorizedTokens]
+                        ].map(([label, value]) => (
+                          <div key={label} className="flex justify-between">
+                            <dt className="text-[color:var(--text-muted)]">{label}</dt>
+                            <dd>{value.toLocaleString()}</dd>
+                          </div>
+                        ))}
+                        <div className="flex justify-between border-t border-[var(--hairline)] pt-1">
+                          <dt className="text-[color:var(--text-muted)]">Window</dt>
+                          <dd>{contextUsage.totalTokens.toLocaleString()} / {contextUsage.windowTokens.toLocaleString()}</dd>
+                        </div>
+                        <div className="flex justify-between">
+                          <dt className="text-[color:var(--text-muted)]">Chat in / out</dt>
+                          <dd>{chatTokenSummary.input.toLocaleString()} / {chatTokenSummary.output.toLocaleString()}</dd>
+                        </div>
+                      </dl>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -8144,7 +8019,8 @@ export default function ChatApp() {
                     sendMessage();
                   }
                 }}
-                placeholder="Type your message..."
+                placeholder="Message"
+                aria-label="Message"
                 rows={3}
                 className="w-full resize-none bg-transparent border-0 px-3.5 pt-2.5 pb-1 text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
               />
@@ -8170,7 +8046,7 @@ export default function ChatApp() {
                         ? 'text-[color:var(--accent)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                         : 'text-[color:var(--text-muted)] hover:bg-black/5 hover:text-[color:var(--text-main)] dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200'
                     }`}
-                    title={dictationSupported ? (isDictating ? 'Stop dictation' : 'Start dictation') : 'Dictation not supported in this browser'}
+                    title={dictationSupported ? (isDictating ? 'Stop dictation' : 'Start dictation') : 'Dictation unavailable'}
                   >
                     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <rect x="9" y="3" width="6" height="11" rx="3" />
@@ -8184,7 +8060,7 @@ export default function ChatApp() {
                     onClick={() => appStore.openVoiceChat()}
                     disabled={isStreaming}
                     className="rounded p-1 text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[var(--material-thin)] dark:hover:text-slate-200"
-                    title="Voice chat - hands-free spoken conversation"
+                    title="Voice chat"
                   >
                     <WaveIcon size={16} className="h-4 w-4" />
                   </button>

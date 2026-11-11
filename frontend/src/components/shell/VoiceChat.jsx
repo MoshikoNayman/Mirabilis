@@ -6,7 +6,7 @@ import { Modal, IconButton, SegmentedControl } from '../ui/primitives';
 import { FlowerMark } from '../ui/StatusOrb';
 
 const PHASE_LABEL = {
-  idle: 'Tap the orb to talk',
+  idle: 'Paused',
   listening: 'Listening...',
   thinking: 'Thinking...',
   speaking: 'Speaking...'
@@ -46,7 +46,7 @@ export default function VoiceChat({
   children = null
 }) {
   const waiting = Boolean(children);
-  const label = waiting ? 'Waiting for your approval' : (PHASE_LABEL[phase] || PHASE_LABEL.idle);
+  const label = waiting ? 'Needs approval' : (PHASE_LABEL[phase] || PHASE_LABEL.idle);
   const orbPhase = srSupported ? phase : 'idle';
 
   return (
@@ -74,8 +74,7 @@ export default function VoiceChat({
             data-voice-orb=""
             onClick={onOrbTap}
             disabled={!srSupported}
-            aria-label={srSupported ? 'Tap to talk' : 'Speech recognition unavailable'}
-            title={srSupported ? label : 'Speech recognition unavailable'}
+            aria-label={!srSupported ? 'Voice input unavailable' : phase === 'listening' ? 'Send' : 'Talk'}
             className="au-focus relative inline-flex shrink-0 items-center justify-center rounded-full transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
             style={{ width: 180, height: 180 }}
           >
@@ -105,13 +104,7 @@ export default function VoiceChat({
               <p className="text-[length:var(--text-md)] text-[color:var(--text-main)]">
                 {interimText}
               </p>
-            ) : (
-              <p className="text-[length:var(--text-sm)] text-[color:var(--text-muted)]">
-                {srSupported
-                  ? 'Speak naturally - it listens, replies, then listens again.'
-                  : 'Voice input needs a browser with speech recognition (Chrome/Safari). You can still type in chat and have replies read aloud.'}
-              </p>
-            )}
+            ) : null}
 
             {/* Latest reply, shown while and after speaking */}
             {replyText && !waiting ? (

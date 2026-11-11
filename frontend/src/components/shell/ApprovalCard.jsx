@@ -8,6 +8,9 @@ import { Badge, Button, Spinner, FolderIcon, GlobeIcon, ShieldIcon } from '../ui
 // Amber, as the run strip and a connector tool's Ask setting show "needs approval".
 const WAITING = '#d97706';
 
+// Reasons that only restate the title. The card shows the rest (the Go Dark one).
+const TITLE_ONLY_REASONS = new Set(['changes-files', 'not-read-only', 'connector-ask']);
+
 // 'Always allow `git status`' -> text with the backticked part in mono.
 function withCode(text) {
   return String(text || '').split('`').map((part, i) => (
@@ -79,7 +82,8 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
 
   if (!approval) return null;
 
-  const { title, detail, reason, alwaysLabel, network, kind, cwd } = approval;
+  const { title, detail, reason, reasonCode, alwaysLabel, network, kind, cwd } = approval;
+  const shownReason = reason && !TITLE_ONLY_REASONS.has(reasonCode) ? reason : '';
 
   function decide(decision) {
     if (busy) return;
@@ -97,13 +101,13 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
       data-approval-card={approval.approvalId}
       tabIndex={-1}
       aria-labelledby={`${uid}-title`}
-      aria-describedby={reason ? `${uid}-reason` : undefined}
+      aria-describedby={shownReason ? `${uid}-reason` : undefined}
       className="au-focus au-material-thick au-elev-2 w-full rounded-[var(--r-lg)] border px-4 py-3 outline-none"
       style={{ borderColor: `color-mix(in srgb, ${WAITING} 45%, var(--hairline))` }}
     >
       {/* The run pauses with nothing taking focus, so say so; the card remounts per approval. */}
       <p role="alert" className="sr-only">
-        {`Approval needed: ${title || 'an action'}.${reason ? ` ${reason}` : ''}`}
+        {`${title ? `Needs approval: ${title}.` : 'Needs approval.'}${shownReason ? ` ${shownReason}` : ''}`}
       </p>
       <div className="flex items-start gap-2">
         <ShieldIcon size={15} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-300" />
@@ -113,12 +117,12 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
               {title || 'Approve this action?'}
             </h3>
             <span className="text-[length:var(--text-2xs)] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300">
-              Waiting for approval
+              Needs approval
             </span>
             {network ? (
               <Badge tone="warn" className="ml-auto">
                 <GlobeIcon size={11} />
-                uses the network
+                Uses network
               </Badge>
             ) : null}
           </div>
@@ -129,9 +133,9 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
               <code className="min-w-0 truncate font-mono text-[color:var(--text-main)]" title={cwd}>{cwd}</code>
             </p>
           ) : null}
-          {reason ? (
+          {shownReason ? (
             <p id={`${uid}-reason`} className="mt-1 text-[length:var(--text-xs)] leading-snug text-[color:var(--text-muted)]">
-              {reason}
+              {shownReason}
             </p>
           ) : null}
         </div>
@@ -141,7 +145,7 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
 
       {noteOpen ? (
         <div className="mt-2">
-          <label htmlFor={`${uid}-note`} className="sr-only">Note for the assistant</label>
+          <label htmlFor={`${uid}-note`} className="sr-only">Note</label>
           <input
             id={`${uid}-note`}
             ref={noteRef}
@@ -160,7 +164,6 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
             }}
             readOnly={busy}
             maxLength={500}
-            placeholder="Tell the assistant why or what to do instead. Enter denies."
             className="au-hairline au-focus h-8 w-full rounded-[var(--r-sm)] bg-transparent px-3 text-[length:var(--text-xs)] text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] placeholder:opacity-60 disabled:opacity-50"
           />
         </div>
@@ -178,7 +181,7 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
             {...lock}
             className="au-focus rounded-[var(--r-xs)] px-1 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-muted)] underline-offset-2 transition-colors hover:text-[color:var(--text-main)] hover:underline aria-disabled:opacity-40"
           >
-            Add a note
+            Add note
           </button>
         ) : null}
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
@@ -188,7 +191,7 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
               variant="soft"
               onClick={() => decide('always')}
               {...lock}
-              title={alwaysLabel.replace(/`/g, '')}
+              title={alwaysLabel.includes('`') ? alwaysLabel.replace(/`/g, '') : undefined}
               className="min-w-0 max-w-[280px]"
             >
               {working('always')}

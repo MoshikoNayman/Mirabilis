@@ -44,5 +44,5 @@ export function hasUsableKey(provider, { pageKey = '', hints = {} } = {}) {
  * @param {string} provider
  */
 export function missingKeyMessage(provider) {
-  return `${providerLabel(provider)} API key is required. Open Configure endpoint and paste your key.`;
+  return `${providerLabel(provider)} API key missing. Add it in Configure endpoint.`;
 }

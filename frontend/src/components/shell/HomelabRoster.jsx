@@ -84,7 +84,7 @@ function HostRow({ host, status, connecting, onConnect, onDelete }) {
           <input
             type="password"
             className={fieldClass}
-            placeholder={`Password for ${host.user || 'user'}@${host.host}`}
+            placeholder="Password"
             value={pw}
             autoFocus
             onChange={(e) => setPw(e.target.value)}
@@ -118,24 +118,24 @@ function AddHostForm({ onAdd, busy }) {
   return (
     <div className="flex flex-col gap-2 border-t px-4 py-3" style={{ borderColor: 'var(--hairline)' }}>
       <div className="text-[length:var(--text-2xs)] font-medium uppercase tracking-wide text-[color:var(--text-muted)]">
-        Add a machine
+        Add host
       </div>
-      <input className={fieldClass} placeholder="Label (e.g. Living-room Pi)" value={form.label} onChange={(e) => set('label', e.target.value)} />
+      <input className={fieldClass} placeholder="Name" value={form.label} onChange={(e) => set('label', e.target.value)} />
       <div className="flex gap-2">
-        <input className={fieldClass} placeholder="host or IP" value={form.host} onChange={(e) => set('host', e.target.value)} />
-        <input className={`${fieldClass} w-20`} placeholder="port" inputMode="numeric" value={form.port} onChange={(e) => set('port', e.target.value)} />
+        <input className={fieldClass} placeholder="Host or IP" value={form.host} onChange={(e) => set('host', e.target.value)} />
+        <input className={`${fieldClass} w-20`} placeholder="Port" inputMode="numeric" value={form.port} onChange={(e) => set('port', e.target.value)} />
       </div>
       <div className="flex gap-2">
-        <select className={fieldClass} value={form.type} onChange={(e) => set('type', e.target.value)}>
+        <select className={fieldClass} aria-label="Type" value={form.type} onChange={(e) => set('type', e.target.value)}>
           {HOST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>
-        <input className={fieldClass} placeholder="user" value={form.user} onChange={(e) => set('user', e.target.value)} />
+        <input className={fieldClass} placeholder="User" value={form.user} onChange={(e) => set('user', e.target.value)} />
       </div>
-      <select className={fieldClass} value={form.authType} onChange={(e) => set('authType', e.target.value)}>
+      <select className={fieldClass} aria-label="Authentication" value={form.authType} onChange={(e) => set('authType', e.target.value)}>
         {AUTH_TYPES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
       </select>
       {form.authType === 'key' ? (
-        <input className={fieldClass} placeholder="key file path (e.g. ~/.ssh/id_ed25519)" value={form.keyPath} onChange={(e) => set('keyPath', e.target.value)} />
+        <input className={fieldClass} aria-label="Key file" placeholder="~/.ssh/id_ed25519" value={form.keyPath} onChange={(e) => set('keyPath', e.target.value)} />
       ) : null}
       {error ? <div className="text-[length:var(--text-2xs)] text-rose-500">{error}</div> : null}
       <Button variant="primary" size="sm" onClick={submit} disabled={busy}>Save host</Button>
@@ -237,7 +237,7 @@ export default function HomelabRoster({ open }) {
       appStore.closeHomelab();
       appStore.toast(`Connected to ${host.label}`, { kind: 'success' });
     } catch (err) {
-      appStore.toast(`Connect failed: ${err.message}`, { kind: 'error' });
+      appStore.toast(`Could not connect to ${host.label}: ${err.message}`, { kind: 'error' });
     } finally {
       setConnectingId('');
     }
@@ -254,14 +254,16 @@ export default function HomelabRoster({ open }) {
         material="chrome"
         className="au-enter absolute right-3 top-16 flex max-h-[80vh] w-[360px] flex-col overflow-hidden"
         role="dialog"
-        aria-label="Homelab Roster"
+        aria-label="Homelab"
       >
         <div className="flex items-center justify-between border-b px-4 py-3" style={{ borderColor: 'var(--hairline)' }}>
           <div className="flex flex-col">
             <span className="text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">Homelab</span>
-            <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
-              {hosts.length ? `${onlineCount} of ${hosts.length} reachable` : 'Your machines as buddies'}
-            </span>
+            {hosts.length ? (
+              <span className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
+                {onlineCount} of {hosts.length} reachable
+              </span>
+            ) : null}
           </div>
           <IconButton label="Close" onClick={() => appStore.closeHomelab()}><CloseIcon size={14} /></IconButton>
         </div>
@@ -271,7 +273,7 @@ export default function HomelabRoster({ open }) {
             <div className="px-3 py-4 text-[length:var(--text-xs)] text-rose-500">{loadError}</div>
           ) : hosts.length === 0 ? (
             <div className="px-3 py-6 text-center text-[length:var(--text-xs)] text-[color:var(--text-muted)]">
-              No machines yet. Add your router, NAS, server, or Pi below.
+              No hosts
             </div>
           ) : (
             <div className="flex flex-col">
@@ -290,11 +292,6 @@ export default function HomelabRoster({ open }) {
         </div>
 
         <AddHostForm onAdd={addHost} busy={busy} />
-
-        <div className="flex items-center gap-2 border-t px-4 py-2 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]" style={{ borderColor: 'var(--hairline)' }}>
-          <span className="flex items-center gap-1"><PresenceDot presence="online" /> reachable</span>
-          <span className="flex items-center gap-1"><PresenceDot presence="offline" /> offline</span>
-        </div>
       </Panel>
     </div>
   );

@@ -162,8 +162,8 @@ export function accessChangeNotice(runLevel, nextLevel) {
   const rank = (/** @type {unknown} */ id) => ACCESS_LEVELS.findIndex((l) => l.id === normalizeAccess(id));
   const run = accessMeta(runLevel);
   const next = accessMeta(nextLevel);
-  if (rank(next.id) <= rank(run.id)) return `${next.label} applies to the run in progress right away.`;
-  return `The run in progress keeps ${run.label}. ${next.label} applies from your next message.`;
+  if (rank(next.id) <= rank(run.id)) return `${next.label} applies now`;
+  return `${next.label} applies from next message`;
 }
 
 /**
@@ -205,7 +205,7 @@ export function describeRunError(status, body) {
     // Show a raw body only when it is short enough to read as a message.
     if (!raw.startsWith('{') && !raw.startsWith('[') && raw.length <= 300) return raw;
   }
-  return `The run could not be started (${status}).`;
+  return `Request failed (${status})`;
 }
 
 /* Run context. A run's goal is only the new message and the backend does not

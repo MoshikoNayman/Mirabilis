@@ -260,7 +260,8 @@ export function connectorStatus(c) {
   }
   if (state === 'starting') return { label: 'Starting', tone: 'neutral' };
   if (state === 'error') return { label: 'Error', tone: 'danger' };
-  return { label: 'Off', tone: 'neutral' };
+  // Switched on but not running: "Off" would contradict the switch.
+  return { label: c.enabled ? 'Stopped' : 'Off', tone: 'neutral' };
 }
 
 /** @param {string} arg */
@@ -328,7 +329,7 @@ export function parseEnvLines(text) {
     if (eq <= 0) return { env: {}, error: `Environment line ${i + 1}: use KEY=value.` };
     const key = line.slice(0, eq).trim();
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-      return { env: {}, error: `Environment line ${i + 1}: ${key} is not a valid variable name.` };
+      return { env: {}, error: `Environment line ${i + 1}: ${key} is not a valid name.` };
     }
     env[key] = line.slice(eq + 1);
   }
@@ -364,10 +365,10 @@ function isHttpUrl(url) {
  */
 export function buildCustomConnector(form) {
   const name = String(form.name || '').trim();
-  if (!name || name.length > 60) return { input: null, error: 'Give it a name of 1 to 60 characters.' };
+  if (!name || name.length > 60) return { input: null, error: 'Enter a name, up to 60 characters.' };
   if (form.transport === 'http') {
     const url = String(form.url || '').trim();
-    if (!isHttpUrl(url)) return { input: null, error: 'Enter a full URL that starts with http:// or https://.' };
+    if (!isHttpUrl(url)) return { input: null, error: 'Enter a URL starting with http:// or https://.' };
     const token = String(form.token || '').trim().replace(/^Bearer\s+/i, '');
     return {
       input: { name, transport: 'http', url, headers: token ? { Authorization: `Bearer ${token}` } : {} },
@@ -375,7 +376,7 @@ export function buildCustomConnector(form) {
     };
   }
   const command = String(form.command || '').trim();
-  if (!command) return { input: null, error: 'Enter the command to run, for example npx.' };
+  if (!command) return { input: null, error: 'Enter a command.' };
   const { env, error } = parseEnvLines(form.env);
   if (error) return { input: null, error };
   const cwd = String(form.cwd || '').trim();
@@ -526,9 +527,9 @@ export function maskToken(token) {
 /** @typedef {'claude-code'|'cursor'|'vscode'} McpClientId */
 
 export const MCP_CLIENTS = /** @type {const} */ ([
-  { id: 'claude-code', label: 'Claude Code', hint: 'Run this in a terminal.' },
-  { id: 'cursor', label: 'Cursor', hint: 'Add to ~/.cursor/mcp.json, or .cursor/mcp.json in a project.' },
-  { id: 'vscode', label: 'VS Code', hint: 'Add to .vscode/mcp.json in your project.' }
+  { id: 'claude-code', label: 'Claude Code', hint: 'Run in a terminal' },
+  { id: 'cursor', label: 'Cursor', hint: 'Add to ~/.cursor/mcp.json' },
+  { id: 'vscode', label: 'VS Code', hint: 'Add to .vscode/mcp.json' }
 ]);
 
 /**

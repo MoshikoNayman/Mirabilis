@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Kbd, PencilIcon, ChatIcon, FolderIcon, SearchIcon, UsersIcon, MoonIcon, BellIcon, GlobeIcon, PaletteIcon, TypeIcon } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
 import {
-  SCHEMES, SCHEME_META, FONTS, FONT_META, setScheme, setFont, cycleMode, getMode
+  SCHEMES, SCHEME_META, FONTS, FONT_META, setScheme, setFont, cycleMode
 } from '../../lib/theme';
 import { toggleMuted, isMuted } from '../../lib/sounds';
 
@@ -37,12 +37,12 @@ export default function CommandPalette({ open, onTab }) {
 
   const commands = useMemo(() => {
     const cmds = [
-      { id: 'new-chat', title: 'New chat', hint: 'Start a fresh conversation', icon: <PencilIcon size={15} />, run: () => { onTab?.('chat'); emit('mirabilis:new-chat'); } },
+      { id: 'new-chat', title: 'New chat', icon: <PencilIcon size={15} />, run: () => { onTab?.('chat'); emit('mirabilis:new-chat'); } },
       { id: 'go-chat', title: 'Go to Chat', icon: <ChatIcon size={15} />, run: () => onTab?.('chat') },
       { id: 'go-intel', title: 'Go to IntelLedger', icon: <FolderIcon size={15} />, run: () => onTab?.('intel') },
-      { id: 'search', title: 'Search everything...', hint: 'Chats and providers', icon: <SearchIcon size={15} />, run: () => appStore.openSearch() },
-      { id: 'buddy', title: 'Open Buddy List', icon: <UsersIcon size={15} />, run: () => appStore.setBuddyOpen(true) },
-      { id: 'theme', title: `Toggle appearance (now: ${getMode()})`, icon: <MoonIcon size={15} />, run: () => cycleMode() },
+      { id: 'search', title: 'Search', icon: <SearchIcon size={15} />, run: () => appStore.openSearch() },
+      { id: 'buddy', title: 'Open buddy list', icon: <UsersIcon size={15} />, run: () => appStore.setBuddyOpen(true) },
+      { id: 'theme', title: 'Toggle appearance', icon: <MoonIcon size={15} />, run: () => cycleMode() },
       { id: 'sound', title: isMuted() ? 'Unmute sounds' : 'Mute sounds', icon: <BellIcon size={15} />, run: () => { toggleMuted(); } },
       { id: 'web', title: 'Toggle web search', icon: <GlobeIcon size={15} />, run: () => emit('mirabilis:toggle-web-search') }
     ];
@@ -55,7 +55,9 @@ export default function CommandPalette({ open, onTab }) {
       group: 'Appearance', run: () => setFont(f)
     }));
     return cmds;
-  }, [onTab]);
+    // open is a dependency so the Mute label is current each time the palette opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onTab, open]);
 
   const filtered = useMemo(() => {
     return commands
@@ -104,14 +106,14 @@ export default function CommandPalette({ open, onTab }) {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setActive(0); }}
             onKeyDown={onKeyDown}
-            placeholder="Type a command..."
+            placeholder="Commands"
             className="w-full bg-transparent text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
           />
           <Kbd>Esc</Kbd>
         </div>
         <div ref={listRef} className="au-scroll max-h-[50vh] overflow-y-auto p-1.5">
           {filtered.length === 0 ? (
-            <div className="px-3 py-6 text-center text-[length:var(--text-sm)] text-[color:var(--text-muted)]">No matching commands</div>
+            <div className="px-3 py-6 text-center text-[length:var(--text-sm)] text-[color:var(--text-muted)]">No matches</div>
           ) : (
             filtered.map((cmd, i) => (
               <button

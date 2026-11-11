@@ -24,6 +24,8 @@ Versions use Junos-style tags. Newest first.
   Chat tools, Voice, Remote Control, Labs.
 - Desktop quits gracefully, so connector processes stop with the app.
 - Run log redaction covers bearer tokens, `*_token` keys and URL passwords.
+- Token count under the composer opens the context breakdown; header dial removed.
+- UI copy trimmed across menus, Settings, sheets and IntelLedger.
 - Sub-agents share the parent budget, two at a time by default.
 - `POST /api/agent/runs` streams progress; stop kills the process group.
 - Run panel with tool calls and budget meters; context usage ring.

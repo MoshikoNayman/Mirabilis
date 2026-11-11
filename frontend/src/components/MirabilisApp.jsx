@@ -5,7 +5,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ChatApp from './ChatApp';
 import IntelLedgerSession from './IntelLedgerSession';
-import InfoHint from './ui/InfoHint';
 import { CloseIcon } from './ui/primitives';
 import AppErrorBoundary from './ui/AppErrorBoundary';
 import AuroraChrome from './shell/AuroraChrome';
@@ -122,21 +121,16 @@ function sessionInsights(session) {
   const signals = Number(session?.signal_count || 0);
   const syntheses = Number(session?.synthesis_count || 0);
   const activityCount = Number(session?.activity_count || (interactions + signals + syntheses));
-  const sourceText = normalizeSessionPreviewText(session);
-  const wordCount = sourceText ? sourceText.split(/\s+/).filter(Boolean).length : 0;
 
   const parts = [];
   if (interactions > 0) {
-    parts.push(`${interactions} ${interactions === 1 ? 'message' : 'messages'}`);
+    parts.push(`${interactions} ${interactions === 1 ? 'interaction' : 'interactions'}`);
   }
   if (signals > 0) {
     parts.push(`${signals} ${signals === 1 ? 'signal' : 'signals'}`);
   }
   if (syntheses > 0) {
-    parts.push(`${syntheses} ${syntheses === 1 ? 'summary' : 'summaries'}`);
-  }
-  if (wordCount > 0) {
-    parts.push(`~${wordCount} preview words`);
+    parts.push(`${syntheses} ${syntheses === 1 ? 'synthesis' : 'syntheses'}`);
   }
 
   if (parts.length > 0) {
@@ -367,7 +361,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
       }
 
       if (failedIds.length > 0) {
-        setError(`Failed to delete ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}. Please refresh and try again.`);
+        setError(`Failed to delete ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}. Refresh and retry.`);
       }
     } finally {
       setDeleteBusy(false);
@@ -384,7 +378,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
         body: JSON.stringify({ sessionIds: ids, query: 'Find recurring patterns, shared risks, and a unified action plan.' })
       });
       const payload = await res.json();
-      if (!res.ok) throw new Error(payload?.error || 'Cross-synthesis failed');
+      if (!res.ok) throw new Error(payload?.error || 'Cross-session synthesis failed.');
       setCrossSynthesis({
         loading: false,
         result: payload.synthesis,
@@ -488,11 +482,11 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
     setPromptRegistryError('');
     try {
       const res = await fetch(`${API_BASE}/api/intelledger/prompts/profiles/${encodeURIComponent(profileId)}`);
-      const payload = await readJsonOrThrow(res, 'Failed to load prompt profile detail.');
+      const payload = await readJsonOrThrow(res, 'Failed to load prompt profile.');
       setPromptProfileDetail(payload?.profile || null);
     } catch (err) {
       setPromptProfileDetail(null);
-      setPromptRegistryError(err?.message || 'Failed to load prompt profile detail.');
+      setPromptRegistryError(err?.message || 'Failed to load prompt profile.');
     } finally {
       setPromptDetailLoading(false);
     }
@@ -810,7 +804,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
       }
 
       if (failedIds.length > 0) {
-        setError('Failed to delete session. Please refresh and try again.');
+        setError('Failed to delete session. Refresh and retry.');
       }
     } finally {
       setDeleteBusy(false);
@@ -847,7 +841,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
       }
 
       setSelectedSessions((previous) => new Set([...previous].filter((id) => !deletedSet.has(id))));
-      setError(`Failed to clear ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}. Refresh and retry.`);
+      setError(`Failed to delete ${failedIds.length} session${failedIds.length === 1 ? '' : 's'}. Refresh and retry.`);
     } finally {
       setDeleteBusy(false);
     }
@@ -881,37 +875,9 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
     <main className="relative h-screen w-screen overflow-hidden p-3 pb-8 sm:p-6 sm:pb-10">
       <div className="mx-auto flex h-full min-h-0 max-w-7xl flex-col gap-3 rounded-[var(--r-xl)] border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
         <div className="grid gap-3 rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-4 py-3 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
-          <div className="space-y-2">
-            <div className="space-y-1">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
-                Mirabilis Workspace Memory
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-lg font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">IntelLedger</h1>
-                <TabSwitch active="intel" />
-                <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">
-                  embedded mode
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">Session</span>
-              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">Ingest</span>
-              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">Extract</span>
-              <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)]">Synthesis</span>
-              <InfoHint
-                title="IntelLedger Quick Guide"
-                description="Short definitions. Keep each session focused on one topic."
-                triggerClassName="bg-[var(--material-thin)] px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-main)] hover:border-black/10 hover:text-[color:var(--text-main)] dark:hover:border-white/10 dark:hover:text-slate-300"
-                points={[
-                  'Session',
-                  'Ingest',
-                  'Extract',
-                  'Synthesis'
-                ]}
-              />
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-lg font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">IntelLedger</h1>
+            <TabSwitch active="intel" />
           </div>
 
           <div className="self-start">
@@ -920,12 +886,13 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search sessions"
+                placeholder="Search"
+                aria-label="Search sessions"
                 className="min-w-0 flex-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-sm text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
               />
               {searching ? (
                 <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.08em] text-[color:var(--text-muted)]">
-                  searching...
+                  Searching...
                 </span>
               ) : null}
               <button
@@ -941,20 +908,21 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                   onClick={() => setCreateBubbleOpen((prev) => !prev)}
                   className="rounded-full bg-accent px-3 py-1 text-[11px] font-semibold text-white shadow-[var(--shadow-2)] transition hover:brightness-95"
                 >
-                  New Session
+                  New session
                 </button>
 
                 {createBubbleOpen && (
                   <div className="absolute right-0 top-[calc(100%+0.45rem)] z-30 w-[min(19rem,86vw)] rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thick)] p-2.5 shadow-lg dark:border-white/15">
                     <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">
-                      Optional title
+                      Title
                     </div>
                     <input
                       type="text"
                       value={newSessionTitle}
                       onChange={(e) => setNewSessionTitle(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && createSession()}
-                      placeholder="Leave blank for Untitled"
+                      placeholder="Untitled"
+                      aria-label="Session title"
                       className="w-full rounded-full border border-[var(--hairline)] bg-[var(--material-thick)] px-3 py-1.5 text-sm text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                       autoFocus
                     />
@@ -990,7 +958,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
         {!localMode && (digestLoading || todayDigest) && (
           <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-4 py-3">
             {digestLoading ? (
-              <div className="text-xs text-[color:var(--text-muted)]">Loading today digest...</div>
+              <div className="text-xs text-[color:var(--text-muted)]">Loading digest...</div>
             ) : todayDigest && (
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
@@ -999,7 +967,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                   <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Overdue {todayDigest.overdue_actions || 0}</span>
                   <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Due today {todayDigest.due_today_actions || 0}</span>
                   <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Blocked {todayDigest.blocked_actions || 0}</span>
-                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">New notes (24h) {todayDigest.new_interactions_24h || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">New interactions (24h) {todayDigest.new_interactions_24h || 0}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
                   <button
@@ -1007,7 +975,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                     onClick={() => setSelectedSessions(new Set(todayDigest.overdue_session_ids || []))}
                     className="rounded-full border border-amber-300/70 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 transition hover:brightness-95 dark:border-amber-500/30 dark:bg-amber-900/20 dark:text-amber-300"
                   >
-                    Select overdue sessions
+                    Select overdue
                   </button>
                   <button
                     type="button"
@@ -1023,7 +991,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                           body: JSON.stringify({ sessionIds: ids, query: 'Prioritize urgent risks, blockers, and next actions for today.' })
                         });
                         const payload = await res.json();
-                        if (!res.ok) throw new Error(payload?.error || 'Cross-synthesis failed');
+                        if (!res.ok) throw new Error(payload?.error || 'Cross-session synthesis failed.');
                         setCrossSynthesis({
                           loading: false,
                           result: payload.synthesis,
@@ -1038,7 +1006,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                     }}
                     className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                   >
-                    Synthesize attention sessions
+                    Synthesize urgent
                   </button>
                   {(todayDigest.top_overdue_sessions || []).slice(0, 4).map((item) => (
                     <button
@@ -1059,14 +1027,14 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
         {!localMode && (auditOverviewLoading || auditOverview) && (
           <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-4 py-3">
             {auditOverviewLoading ? (
-              <div className="text-xs text-[color:var(--text-muted)]">Loading audit overview...</div>
+              <div className="text-xs text-[color:var(--text-muted)]">Loading audit...</div>
             ) : (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
-                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Audit overview</span>
-                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Events 24h {auditOverview?.trends?.event_count_24h || 0}</span>
-                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Events 7d {auditOverview?.trends?.event_count_7d || 0}</span>
-                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Events 30d {auditOverview?.trends?.event_count_30d || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Audit</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Events (24h) {auditOverview?.trends?.event_count_24h || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Events (7d) {auditOverview?.trends?.event_count_7d || 0}</span>
+                  <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Events (30d) {auditOverview?.trends?.event_count_30d || 0}</span>
                   <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Event types (7d) {(auditOverview?.summary?.event_types || []).length}</span>
                   {auditLastUpdatedAt ? (
                     <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">
@@ -1077,7 +1045,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
 
                 <div className="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
                   <div className="rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
-                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">7-day trend</div>
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Last 7 days</div>
                     {Array.isArray(auditOverview?.trends?.daily_7) && auditOverview.trends.daily_7.length > 0 ? (
                       <div>
                         <div className="flex h-14 items-end gap-1">
@@ -1096,16 +1064,16 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                         </div>
                         <div className="mt-1 flex justify-between text-[10px] text-[color:var(--text-muted)]">
                           <span>{auditOverview.trends.daily_7[0]?.date?.slice(5) || ''}</span>
-                          <span>today</span>
+                          <span>Today</span>
                         </div>
                       </div>
                     ) : (
-                      <div className="text-xs text-[color:var(--text-muted)]">No trend data available yet.</div>
+                      <div className="text-xs text-[color:var(--text-muted)]">No data</div>
                     )}
                   </div>
 
                   <div className="rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
-                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Top event types (24h)</div>
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Top types (24h)</div>
                     {Array.isArray(auditOverview?.trends?.top_types_24h) && auditOverview.trends.top_types_24h.length > 0 ? (
                       <ul className="space-y-1">
                         {auditOverview.trends.top_types_24h.slice(0, 5).map((item) => (
@@ -1116,14 +1084,14 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                         ))}
                       </ul>
                     ) : (
-                      <div className="text-xs text-[color:var(--text-muted)]">No events in the last 24h.</div>
+                      <div className="text-xs text-[color:var(--text-muted)]">No events</div>
                     )}
                   </div>
                 </div>
 
                 {auditTenantRollup.length > 0 && (
                   <div className="rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-2">
-                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Tenant audit rollup</div>
+                    <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Tenants</div>
                     <div className="space-y-2">
                       {(() => {
                         const topTenants = auditTenantRollup.slice(0, 5);
@@ -1162,13 +1130,13 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
 
         {!localMode && (promptProfilesLoading || promptProfiles.length > 0 || promptRegistryError) && (
           <div className="rounded-[var(--r-lg)] border border-[var(--hairline)] bg-[var(--material-thin)] px-4 py-3">
-            <div className="mb-3 flex items-center justify-between gap-3">
+            <div className={`${promptRegistryOpen ? 'mb-3 ' : ''}flex items-center justify-between gap-3`}>
               <button
                 type="button"
                 onClick={() => setPromptRegistryOpen((prev) => !prev)}
                 className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
               >
-                {promptRegistryOpen ? 'Hide Prompt Registry' : 'Show Prompt Registry (Advanced)'}
+                {promptRegistryOpen ? 'Hide prompt registry' : 'Show prompt registry'}
               </button>
               {promptRegistryOpen && (
                 <button
@@ -1180,7 +1148,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                   disabled={promptProfilesLoading || promptDetailLoading || promptMutationLoading}
                   className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 disabled:opacity-50 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                 >
-                  Refresh prompts
+                  Refresh
                 </button>
               )}
             </div>
@@ -1191,12 +1159,10 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
               </div>
             )}
 
-            {!promptRegistryOpen ? (
-              <div className="text-xs text-[color:var(--text-muted)]">Hidden by default for day-to-day use. Open only when managing prompt versions.</div>
-            ) : promptProfilesLoading ? (
-              <div className="text-xs text-[color:var(--text-muted)]">Loading prompt profiles...</div>
+            {!promptRegistryOpen ? null : promptProfilesLoading ? (
+              <div className="text-xs text-[color:var(--text-muted)]">Loading...</div>
             ) : promptProfiles.length === 0 ? (
-              <div className="text-xs text-[color:var(--text-muted)]">No prompt profiles available.</div>
+              <div className="text-xs text-[color:var(--text-muted)]">No profiles</div>
             ) : (
               <div className="grid gap-3 lg:grid-cols-[minmax(14rem,0.7fr)_minmax(0,1.3fr)]">
                 <div className="space-y-2">
@@ -1215,7 +1181,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                       >
                         <div className="text-xs font-semibold text-[color:var(--text-main)]">{profile.profile_id}</div>
                         <div className="mt-0.5 text-[11px] text-[color:var(--text-muted)]">
-                          Active {profile.active_label || 'default'}
+                          Active {profile.active_label || 'Default'}
                         </div>
                         <div className="mt-0.5 text-[10px] text-[color:var(--text-muted)]">Versions {profile.version_count || 0}</div>
                       </button>
@@ -1225,16 +1191,11 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
 
                 <div className="space-y-3 rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-3">
                   {promptDetailLoading ? (
-                    <div className="text-xs text-[color:var(--text-muted)]">Loading profile details...</div>
+                    <div className="text-xs text-[color:var(--text-muted)]">Loading...</div>
                   ) : !promptProfileDetail ? (
-                    <div className="text-xs text-[color:var(--text-muted)]">Select a profile to view versions.</div>
+                    <div className="text-xs text-[color:var(--text-muted)]">No profile selected</div>
                   ) : (
                     <>
-                      <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
-                        <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Profile {promptProfileDetail.profile_id}</span>
-                        <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5">Active {promptProfileDetail.active_label || 'default'}</span>
-                      </div>
-
                       <div className="space-y-1.5">
                         {(promptProfileDetail.versions || []).map((version) => {
                           const selected = version.id === promptProfileDetail.active_version_id;
@@ -1261,39 +1222,39 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                           );
                         })}
                         {(promptProfileDetail.versions || []).length === 0 && (
-                          <div className="text-xs text-[color:var(--text-muted)]">No stored versions yet (using fallback default).</div>
+                          <div className="text-xs text-[color:var(--text-muted)]">No versions</div>
                         )}
                       </div>
 
                       <div className="rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-3">
-                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">Create version</div>
+                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-muted)]">New version</div>
                         <div className="grid gap-2 sm:grid-cols-2">
                           <input
                             type="text"
                             value={newPromptVersion.version_id}
                             onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, version_id: e.target.value }))}
-                            placeholder="version_id (optional)"
+                            placeholder="Version ID"
                             className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                           />
                           <input
                             type="text"
                             value={newPromptVersion.label}
                             onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, label: e.target.value }))}
-                            placeholder="label"
+                            placeholder="Label"
                             className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                           />
                         </div>
                         <textarea
                           value={newPromptVersion.system_prompt}
                           onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, system_prompt: e.target.value }))}
-                          placeholder="system_prompt"
+                          placeholder="System prompt"
                           rows={3}
                           className="mt-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                         />
                         <textarea
                           value={newPromptVersion.user_template}
                           onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, user_template: e.target.value }))}
-                          placeholder="user_template"
+                          placeholder="User template"
                           rows={4}
                           className="mt-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2.5 py-1.5 text-xs text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20 dark:border-white/20 dark:text-white"
                         />
@@ -1305,7 +1266,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                               onChange={(e) => setNewPromptVersion((prev) => ({ ...prev, set_active: e.target.checked }))}
                               className="h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent/30 dark:border-white/20"
                             />
-                            Set active after create
+                            Set active
                           </label>
                           <div className="flex items-center gap-1.5">
                             <button
@@ -1322,7 +1283,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                               }}
                               className="rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[10px] font-semibold text-[color:var(--text-main)] transition hover:bg-black/5 dark:border-white/20 dark:hover:bg-[var(--material-thin)]"
                             >
-                              Seed from active
+                              Copy from active
                             </button>
                             <button
                               type="button"
@@ -1330,7 +1291,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                               disabled={promptMutationLoading}
                               className="rounded-full bg-accent px-2.5 py-1 text-[10px] font-semibold text-white transition hover:brightness-95 disabled:opacity-50"
                             >
-                              {promptMutationLoading ? 'Saving...' : 'Create version'}
+                              {promptMutationLoading ? 'Creating...' : 'Create'}
                             </button>
                           </div>
                         </div>
@@ -1358,24 +1319,24 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
             <div className="flex h-full items-center justify-center text-sm text-[color:var(--text-muted)]">Loading sessions...</div>
           ) : sessions.length === 0 ? (
             <div className="flex h-full items-center justify-center rounded-[var(--r-lg)] border border-dashed border-black/10 bg-[var(--material-thin)] px-6 text-center text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
-              Create a session to start tracking recurring patterns, decisions, risks, and follow-ups.
+              No sessions
             </div>
           ) : filteredSessions.length === 0 ? (
             <div className="flex h-full items-center justify-center rounded-[var(--r-lg)] border border-dashed border-black/10 bg-[var(--material-thin)] px-6 text-center text-sm text-[color:var(--text-muted)] dark:text-[color:var(--text-muted)]">
-              No sessions match your search.
+              No matches
             </div>
           ) : (
             <>
             {selectedSessions.size > 0 && (
               <div className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--r-lg)] border border-accent/30 bg-accent/5 px-4 py-2.5 dark:border-accent/20 dark:bg-accent/10">
-                <span className="mr-1 text-xs font-semibold text-accent">{selectedSessions.size} session{selectedSessions.size !== 1 ? 's' : ''} selected</span>
+                <span className="mr-1 text-xs font-semibold text-accent">{selectedSessions.size} selected</span>
                 <button
                   type="button"
                   onClick={bulkSynthesize}
                   disabled={crossSynthesis?.loading}
                   className="rounded-full bg-accent px-2.5 py-1 text-[11px] font-semibold text-white shadow-[0_8px_18px_-10px_rgba(26,168,111,0.8)] transition hover:brightness-95 disabled:opacity-50"
                 >
-                  {crossSynthesis?.loading ? 'Analyzing...' : `Synthesize ${selectedSessions.size}`}
+                  {crossSynthesis?.loading ? 'Synthesizing...' : `Synthesize ${selectedSessions.size}`}
                 </button>
                 <button
                   type="button"
@@ -1402,6 +1363,8 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                 <button
                   type="button"
                   onClick={deselectAll}
+                  aria-label="Clear selection"
+                  title="Clear selection"
                   className="ml-auto rounded-full border border-[var(--hairline)] px-2.5 py-1 text-[11px] font-semibold text-[color:var(--text-muted)] transition hover:bg-black/5 dark:border-white/20 dark:text-[color:var(--text-muted)] dark:hover:bg-[var(--material-thin)]"
                 >
                   <CloseIcon size={12} />
@@ -1435,13 +1398,11 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                         checked={isSelected}
                         onChange={() => toggleSelect(session.id)}
                         onClick={(e) => e.stopPropagation()}
+                        aria-label={`Select ${session.title}`}
                         className={`h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent/30 dark:border-white/20 transition ${
                           isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-60'
                         }`}
                       />
-                      <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-main)]">
-                        Session
-                      </span>
                     </div>
                     <span className="text-[10px] text-[color:var(--text-muted)]">
                       {new Date(session.created_at).toLocaleDateString()}
@@ -1468,12 +1429,12 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         {session.latest_synthesis_prompt_version && (
                           <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
-                            Synth {humanizePromptProfile(session.latest_synthesis_prompt_profile)} {humanizePromptVersion(session.latest_synthesis_prompt_version)}
+                            {humanizePromptProfile(session.latest_synthesis_prompt_profile)} {humanizePromptVersion(session.latest_synthesis_prompt_version)}
                           </span>
                         )}
                         {session.latest_signal_prompt_version && (
                           <span className="rounded-full border border-[var(--hairline)] px-2 py-0.5 text-[10px] text-[color:var(--text-muted)]">
-                            Signal {humanizePromptProfile(session.latest_signal_prompt_profile)} {humanizePromptVersion(session.latest_signal_prompt_version)}
+                            {humanizePromptProfile(session.latest_signal_prompt_profile)} {humanizePromptVersion(session.latest_signal_prompt_version)}
                           </span>
                         )}
                       </div>
@@ -1508,7 +1469,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                   onChange={(e) => setAllowClearAll(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent/30 dark:border-white/20"
                 />
-                I understand this deletes all saved IntelLedger sessions.
+                I understand this deletes all sessions
               </label>
               <button
                 type="button"
@@ -1516,7 +1477,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                 disabled={!allowClearAll || deleteBusy}
                 className="rounded-full border border-red-300/70 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-950/30"
               >
-                Clear All
+                Delete all
               </button>
             </div>
           )}
@@ -1535,8 +1496,8 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
         <div className="au-chrome au-hairline au-elev-3 relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-[var(--r-xl)]">
           <div className="flex items-center justify-between border-b border-black/10 px-6 py-4">
             <div>
-              <h2 className="text-base font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">Cross-Session Synthesis</h2>
-              <p className="text-xs text-[color:var(--text-muted)]">{crossSynthesis.sessionCount} session{crossSynthesis.sessionCount !== 1 ? 's' : ''} analyzed</p>
+              <h2 className="text-base font-semibold tracking-tight text-[color:var(--text-main)] dark:text-white">Cross-session synthesis</h2>
+              <p className="text-xs text-[color:var(--text-muted)]">{crossSynthesis.sessionCount} session{crossSynthesis.sessionCount !== 1 ? 's' : ''}</p>
             </div>
             <button
               type="button"
@@ -1551,7 +1512,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
             {crossSynthesis.loading && (
               <div className="flex items-center gap-3 text-sm text-[color:var(--text-muted)]">
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-                Analyzing {crossSynthesis.sessionCount} sessions...
+                Synthesizing...
               </div>
             )}
             {(crossSynthesis.promptProfile || crossSynthesis.promptVersion) && (
@@ -1593,11 +1554,11 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                       {r.summary}
                     </div>
                   )}
-                  <Section label="Cross-Session Patterns" items={r.cross_session_patterns} />
-                  <Section label="Aggregated Risks" items={r.aggregated_risks} />
-                  <Section label="Combined Next Actions" items={r.combined_next_actions} />
-                  <Section label="Key Decisions" items={r.key_decisions} />
-                  <Section label="Open Questions" items={r.open_questions} />
+                  <Section label="Patterns" items={r.cross_session_patterns} />
+                  <Section label="Risks" items={r.aggregated_risks} />
+                  <Section label="Next actions" items={r.combined_next_actions} />
+                  <Section label="Key decisions" items={r.key_decisions} />
+                  <Section label="Open questions" items={r.open_questions} />
                 </div>
               );
             })()}
