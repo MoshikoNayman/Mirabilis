@@ -34,17 +34,17 @@ jobs:
 
   macos:
     needs: test
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       RELEASE_REF: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -78,7 +78,7 @@ jobs:
       # which is indistinguishable from being up to date. The zip is what
       # Squirrel.Mac installs; the dmg stays for a first install by hand.
       - name: Upload macOS assets to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_REF }}
           files: |
@@ -96,12 +96,12 @@ jobs:
       CI: true
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -131,7 +131,7 @@ jobs:
           Get-Content SHA256SUMS-windows.txt
 
       - name: Upload Windows assets to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_REF }}
           files: |
@@ -147,12 +147,12 @@ jobs:
       RELEASE_REF: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_REF }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -178,7 +178,7 @@ jobs:
           cat SHA256SUMS-linux.txt
 
       - name: Upload Linux assets to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_REF }}
           files: |

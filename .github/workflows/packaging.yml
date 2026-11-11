@@ -37,8 +37,8 @@ jobs:
   structure:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -68,7 +68,7 @@ jobs:
       fail-fast: false          # one platform failing should not hide the others
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             name: macOS DMG
             target: dmg
           - os: ubuntu-22.04
@@ -80,8 +80,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
