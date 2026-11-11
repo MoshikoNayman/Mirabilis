@@ -50,10 +50,12 @@ async function mapWithLimit(jobs, limit) {
  * @param {(event: object) => void} [args.onEvent]
  * @param {AbortSignal} [args.signal]
  * @param {() => number} [args.now]
+ * @param {(p: Promise<any>) => Promise<any>} [args.pause]  The parent's pause: a sub-agent waiting
+ *        on an approval stops the parent's clock as well as its own.
  */
-export function createSpawnTool({ budget, profile, makeRegistry, callModel, onEvent = () => {}, signal, now }) {
+export function createSpawnTool({ budget, profile, makeRegistry, callModel, onEvent = () => {}, signal, now, pause }) {
   return {
-    needs: 'read-only',
+    kind: 'internal',
     description:
       'Run several independent sub-tasks in parallel, each with its own fresh context, and get their '
       + 'summaries back. Use this only for parts that do NOT depend on each other. They share your budget.',
@@ -112,6 +114,8 @@ export function createSpawnTool({ budget, profile, makeRegistry, callModel, onEv
             callModel,
             signal,
             now,
+            outerPause: pause,
+            subAgent: index,
             onEvent: (event) => onEvent({ ...event, subAgent: index, subGoal: task.goal })
           });
           return { index, goal: task.goal, outcome };

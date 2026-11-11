@@ -496,17 +496,44 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// Orphaned process cleanup
-// Kill child processes on any exit path including crashes
-function killChildren() {
+// Orphaned process cleanup.
+// Graceful first: SIGTERM lets the backend run its shutdown path, which stops the
+// MCP connector process groups. SIGKILL would skip that and orphan them.
+let quitting = false;
+
+// Last-resort synchronous kill for the process 'exit' handler, which cannot await.
+function forceKillChildren() {
   try { if (frontendProc) { frontendProc.kill('SIGKILL'); frontendProc = null; } } catch {}
   try { if (backendProc)  { backendProc.kill('SIGKILL');  backendProc = null; } } catch {}
 }
 
-app.on('before-quit', () => {
+// SIGTERM the child, wait for exit, SIGKILL after the grace period. Always resolves.
+function stopChild(proc, graceMs = 5000) {
+  return new Promise((resolve) => {
+    if (!proc || proc.exitCode !== null || proc.signalCode !== null) { resolve(); return; }
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    const killTimer = setTimeout(() => {
+      try { proc.kill('SIGKILL'); } catch {}
+      setTimeout(finish, 1000);
+    }, graceMs);
+    proc.once('exit', () => { clearTimeout(killTimer); finish(); });
+    try { proc.kill('SIGTERM'); } catch { clearTimeout(killTimer); finish(); }
+  });
+}
+
+app.on('before-quit', (event) => {
   app.isQuiting = true;
-  killChildren();
+  if (quitting) return;
+  if (!backendProc && !frontendProc) return;
+  quitting = true;
+  event.preventDefault();
+  Promise.all([stopChild(backendProc), stopChild(frontendProc)]).finally(() => {
+    backendProc = null;
+    frontendProc = null;
+    app.quit();
+  });
 });
 
-process.on('exit', killChildren);
-process.on('SIGTERM', killChildren);
+process.on('exit', forceKillChildren);
+process.on('SIGTERM', () => { app.isQuiting = true; app.quit(); });

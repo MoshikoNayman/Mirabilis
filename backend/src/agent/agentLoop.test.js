@@ -8,6 +8,7 @@ import { runAgent } from './agentLoop.js';
 import { resolveEffort } from './effortProfiles.js';
 import { createToolRegistry } from './tools.js';
 import { STOP_REASONS } from './budget.js';
+import { createApprovalBroker } from './approvals.js';
 
 /** A scripted model: each entry is the next reply. Records what it is asked. */
 function scriptedModel(replies) {
@@ -269,16 +270,56 @@ test('a refused tool becomes an observation the agent can react to', async () =>
   const dir = await sandbox();
   const model = scriptedModel([
     'plan',
-    '{"action":"tool","tool":"run_command","args":{"command":"echo hi"}}',  // not permitted read-only
-    '{"action":"finish","summary":"could not run commands"}',
+    '{"action":"tool","tool":"run_command","args":{"command":"touch made.txt"}}',  // changes something
+    '{"action":"finish","summary":"could not change anything"}',
     '{"pass":true}'
   ]);
   const out = await runAgent({
-    goal: 'try to exceed policy', profile: resolveEffort('high'),
-    registry: createToolRegistry({ policy: 'read-only', fsRoot: dir }), callModel: model.fn
+    goal: 'try to exceed the access level', profile: resolveEffort('high'),
+    registry: createToolRegistry({ level: 'read', fsRoot: dir }), callModel: model.fn
   });
-  assert.match(out.history[0].observation, /ERROR.*not permitted/);
+  assert.match(out.history[0].observation, /ERROR.*Read only/);
   assert.equal(out.ok, true);
+});
+
+test('time spent waiting for an approval is not charged to the budget', async () => {
+  const dir = await sandbox();
+  let t = 1_000_000;
+  // The user takes two hours to answer; a 30 minute budget must survive it.
+  const broker = createApprovalBroker({
+    emit: (type, payload) => {
+      if (type !== 'approval-required') return;
+      setImmediate(() => { t += 2 * 60 * 60_000; broker.resolve(payload.approvalId, 'allow'); });
+    }
+  });
+  const replies = [
+    '{"action":"tool","tool":"run_command","args":{"command":"touch waited.txt"}}',
+    '{"action":"finish","summary":"done after approval"}'
+  ];
+  let i = 0;
+  const callModel = async () => { t += 60_000; return { text: replies[Math.min(i++, replies.length - 1)], tokens: 5 }; };
+  const out = await runAgent({
+    goal: 'touch a file',
+    profile: resolveEffort('high', { plan: false, validate: false }),
+    registry: createToolRegistry({ level: 'ask', workDir: dir, gate: { broker } }),
+    callModel,
+    now: () => t
+  });
+  assert.equal(out.stopReason, STOP_REASONS.COMPLETED);
+  assert.equal(out.history[0].observation.includes('"exitCode":0'), true, 'the approved command ran');
+  assert.ok(out.budget.elapsedMs < 10 * 60_000, `the wait was charged: ${out.budget.elapsedMs}ms`);
+  await fs.access(path.join(dir, 'waited.txt'));
+});
+
+test('run-start reports the access level the run has', async () => {
+  const dir = await sandbox();
+  const { events, onEvent } = collect();
+  const model = scriptedModel(['{"action":"finish","summary":"ok"}']);
+  await runAgent({
+    goal: 'g', profile: resolveEffort('high', { plan: false, validate: false }),
+    registry: createToolRegistry({ level: 'ask', fsRoot: dir }), callModel: model.fn, onEvent
+  });
+  assert.equal(events.find((e) => e.type === 'run-start').access, 'ask');
 });
 
 test('a thrown model error is reported as a failed run, not an unhandled rejection', async () => {

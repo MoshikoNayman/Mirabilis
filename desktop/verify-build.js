@@ -65,6 +65,21 @@ const checks = [
     hint: 'Add a zip target to build.mac.target: Squirrel.Mac cannot install from a dmg.'
   },
   {
+    // The self tools read docs/ARCHITECTURE.md from the packaged resources folder;
+    // electron-builder ships it only through extraResources and the staged copy.
+    name: 'Architecture doc is packaged',
+    ok: (() => {
+      try {
+        const extra = require(path.join(DESKTOP_DIR, 'package.json')).build.extraResources || [];
+        const listed = extra.some((r) => (typeof r === 'string' ? r : r.from) === 'docs');
+        const staged = readText(path.join(DESKTOP_DIR, 'build.sh')).includes('$MIRABILIS/docs/')
+          && readText(path.join(DESKTOP_DIR, 'build.bat')).includes('%MIRABILIS%\\docs');
+        return listed && staged && exists(path.join(ROOT_DIR, 'docs', 'ARCHITECTURE.md'));
+      } catch { return false; }
+    })(),
+    hint: 'Add docs to build.extraResources in desktop/package.json, copy docs/ in build.sh and build.bat, and keep docs/ARCHITECTURE.md.'
+  },
+  {
     name: 'Windows icon',
     ok: exists(path.join(DESKTOP_DIR, 'icons', 'Mirabilis.ico')),
     hint: 'desktop/icons/Mirabilis.ico is missing.'

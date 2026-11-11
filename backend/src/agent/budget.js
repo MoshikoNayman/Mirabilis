@@ -36,8 +36,15 @@ export function createBudget(profile, { signal, now = () => Date.now() } = {}) {
   let repairs = 0;
   /** @type {string|null} */
   let stoppedBecause = null;
+  // Time spent waiting on the user (approvals) does not count against the budget.
+  let pausedMs = 0;
+  let activePauses = 0;
+  let pauseStart = 0;
 
-  const elapsed = () => now() - startedAt;
+  const elapsed = () => {
+    const ongoing = activePauses > 0 ? now() - pauseStart : 0;
+    return now() - startedAt - pausedMs - ongoing;
+  };
 
   /** Remaining headroom on every axis. Reported to the model so it can triage. */
   const remaining = () => ({
@@ -114,6 +121,26 @@ export function createBudget(profile, { signal, now = () => Date.now() } = {}) {
       if (stop) throw new BudgetExhaustedError(stop, snapshot());
       toolCalls += 1;
       return toolCalls;
+    },
+
+    /**
+     * Await a promise without charging the wait to the budget. Used while a tool
+     * call is blocked on a user approval, so thinking time and waiting time stay
+     * separate. Nested and concurrent pauses are counted, so the clock resumes
+     * only once nothing is waiting.
+     * @template T
+     * @param {Promise<T>} promise
+     * @returns {Promise<T>}
+     */
+    async pauseWhile(promise) {
+      if (activePauses === 0) pauseStart = now();
+      activePauses += 1;
+      try {
+        return await promise;
+      } finally {
+        activePauses -= 1;
+        if (activePauses === 0) pausedMs += now() - pauseStart;
+      }
     },
 
     /** Account for generated tokens. Never throws: the tokens already exist. */

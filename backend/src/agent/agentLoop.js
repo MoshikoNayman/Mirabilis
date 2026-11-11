@@ -27,14 +27,20 @@ const WRAP_UP_TIMEOUT_MS = 60_000;
  * @param {string} [args.systemPrompt]
  * @param {() => number} [args.now]                Injectable clock, for tests.
  * @param {() => any} [args.makeRegistry]          Fresh registry per sub-agent; enables fan-out.
+ * @param {(p: Promise<any>) => Promise<any>} [args.outerPause]  A parent's pause, so a sub-agent
+ *        waiting on the user stops the parent's clock too.
+ * @param {number} [args.subAgent]                 This run's index when it is a sub-agent.
  */
 export async function runAgent({
-  goal, profile, registry, callModel, onEvent = () => {}, signal, systemPrompt = '', now, makeRegistry
+  goal, profile, registry, callModel, onEvent = () => {}, signal, systemPrompt = '', now, makeRegistry,
+  outerPause, subAgent
 }) {
   const budget = createBudget(profile, { signal, now });
   const emit = (type, payload = {}) => {
     try { onEvent({ type, at: budget.elapsed(), ...payload }); } catch { /* a sink must never break the run */ }
   };
+  /** Time spent waiting on an approval is not charged to this budget or any parent's. */
+  const pause = (/** @type {Promise<any>} */ p) => budget.pauseWhile(outerPause ? outerPause(p) : p);
 
   /** @type {Array<{step: number, thought: string, tool?: string, args?: object, observation: string}>} */
   const history = [];
@@ -63,7 +69,7 @@ export async function runAgent({
   // maxSubAgents 0, so nesting stops at one level.
   if (profile.maxSubAgents > 0 && typeof makeRegistry === 'function' && typeof registry.addTool === 'function') {
     registry.addTool('spawn_agents', createSpawnTool({
-      budget, profile, makeRegistry, callModel, signal, now,
+      budget, profile, makeRegistry, callModel, signal, now, pause,
       onEvent: (/** @type {any} */ event) => emit(event.type || 'sub-agent', event)
     }));
   }
@@ -83,7 +89,7 @@ export async function runAgent({
     }).join('\n\n');
   };
 
-  emit('run-start', { goal, effort: profile.id, budget: budget.snapshot(), policy: registry.policy });
+  emit('run-start', { goal, effort: profile.id, budget: budget.snapshot(), access: registry.level });
 
   try {
     // plan
@@ -220,7 +226,7 @@ export async function runAgent({
       if (!charged) break;
 
       emit('tool-call', { iteration, tool: action.tool, args: action.args, mutating: registry.isMutating(action.tool) });
-      const result = await registry.dispatch(action.tool, action.args);
+      const result = await registry.dispatch(action.tool, action.args, { pause, iteration, subAgent });
       const observation = result.ok
         ? JSON.stringify(result.result).slice(0, MAX_OBSERVATION_CHARS)
         : `ERROR: ${result.error}`;

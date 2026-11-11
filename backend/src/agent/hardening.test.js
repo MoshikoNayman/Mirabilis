@@ -61,8 +61,8 @@ test('a symlink inside the root does not grant access outside it', async () => {
   const ok = safeResolvePath('inside.txt', root);
   assert.ok(ok.startsWith(root), 'a legitimate path must still resolve');
 
-  // The tool layer must refuse it as well.
-  const reg = createToolRegistry({ policy: 'write', fsRoot: root });
+  // The tool layer must refuse it as well, even in Bypass: the operator jail always holds.
+  const reg = createToolRegistry({ level: 'bypass', fsRoot: root });
   const read = await reg.dispatch('read_file', { path: 'data/secret.txt' });
   assert.equal(read.ok, false);
   const write = await reg.dispatch('write_file', { path: 'data/pwned.txt', content: 'x' });
@@ -86,11 +86,22 @@ test('an aborted signal stops a shell command and kills its children', async () 
 
 test('a registry whose run was cancelled refuses further tool calls', async () => {
   const ac = new AbortController();
-  const reg = createToolRegistry({ policy: 'full', signal: ac.signal });
+  const reg = createToolRegistry({ level: 'bypass', signal: ac.signal });
   ac.abort();
   const res = await reg.dispatch('run_command', { command: 'echo should-not-run' });
   assert.equal(res.ok, false);
   assert.match(res.error, /cancelled/i);
+});
+
+test('stopping a run stops its running command and the command\'s children', async () => {
+  const ac = new AbortController();
+  const reg = createToolRegistry({ level: 'bypass', signal: ac.signal, commandTimeoutMs: 20_000 });
+  const started = Date.now();
+  setTimeout(() => ac.abort(), 200);
+  const res = await reg.dispatch('run_command', { command: 'sleep 5 & sleep 5' });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /cancelled/i);
+  assert.ok(Date.now() - started < 4_000, 'a stop must not wait for the command to finish');
 });
 
 // reporting the truth about a result

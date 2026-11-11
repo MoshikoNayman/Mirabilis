@@ -23,7 +23,7 @@ Backend defaults come from `backend/src/config.js` and the modules named below.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MIRABILIS_DATA_DIR` | `../mirabilis-data` beside the repo | Chats, IntelLedger, config vault, agent run logs, MCP token. |
+| `MIRABILIS_DATA_DIR` | `../mirabilis-data` beside the repo | Chats, IntelLedger, config vault, Access settings, connectors, agent run logs, MCP token. |
 | `DATA_DIR` | (unset) | Older alias. `MIRABILIS_DATA_DIR` wins. The desktop app sets it to its per-app data folder. |
 
 ## Providers
@@ -82,19 +82,61 @@ Go Dark blocks web search regardless of the key.
 | `MIRABILIS_HISTORY_CTX_FRACTION` | `0.65` | Share of the context window history may use, clamped to 0.1 to 0.9. |
 | `MIRABILIS_CONTRADICTION_MODEL` | (unset) | Model for the contradiction detector. |
 
-## Autonomous agent
+## Agent runs and Access
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MIRABILIS_MCP_FS_ROOT` | (unset, no jail) | Confines agent and MCP file tools, and the command working directory, to one subtree. Set it before using the long tiers. It does not limit what a running shell command can reach. |
+| `MIRABILIS_MCP_FS_ROOT` | (unset, no jail) | Operator jail. Confines the agent and MCP file tools, and where commands start, to one subtree, at every Access level including Bypass. It does not limit what a running shell command can reach. |
 | `MIRABILIS_AGENT_FANOUT_CONCURRENCY` | `2` | Sub-agents generating at once, maximum 8. A single local engine serves one request per model at a time, so more only holds more live contexts. Raise it for an engine that serves in parallel. |
-| `MIRABILIS_AGENT_MAX_CONCURRENT_RUNS` | `2` | Runs executing at once. Each has its own budget and, under `full`, its own shell. |
-| `MIRABILIS_MCP_TOKEN` | generated | Bearer token for `/mcp` and the privileged routes. Generated and saved to the data directory when unset. |
+| `MIRABILIS_AGENT_MAX_CONCURRENT_RUNS` | `2` | Runs executing at once. Each has its own budget and, above Read only, can run its own commands. |
+| `MIRABILIS_MCP_TOKEN` | generated | Bearer token for `/mcp` and the privileged routes (agent runs, Access, connectors). Generated and saved to the data directory when unset. |
+
+### Access levels
+
+One setting decides what the assistant may do on this computer. It is saved in
+`access.json` in the data folder and changed in Settings, Access (or with
+`PUT /api/access`). The default is Chat only.
+
+| Level | What a run may do |
+|---|---|
+| Chat only | No tools. A single-shot effort goes to the normal chat route. |
+| Read only | Read files anywhere, inspect the system, run commands that are proven read-only, use connector tools their server marks read-only. Never changes anything and never asks. |
+| Ask first | Everything Read only does, freely. Anything that changes something, or is not known to be read-only, pauses until you allow or deny it. |
+| Bypass | Everything, with no approvals, no command blocklist and no folder jail. |
+
+- A run's request may lower the saved level, never raise it. Lowering the saved
+  level while a run is going applies to its next tool call.
+- Read-only means proven: a command is split on `|`, `&&`, `||` and `;`, any
+  redirection or subshell disqualifies it, and every program and its arguments
+  must be on the built-in list (`ps`, `df`, `ls`, `lsof`, `git status`, `brew
+  list` and so on). Settings shows the list.
+- Ask first shows an approval above the composer with the exact command, the
+  file and a preview, or the connector tool and its arguments. Deny can carry a
+  note, which reaches the model. Waiting does not use up the run's budget.
+- "Always allow" on a command saves a rule such as `git status` or `npm test`
+  to `allowCommands`; rules apply in Ask first only. On a file change it allows
+  changes for the rest of that run. On a connector tool it sets that tool to
+  Allow.
+- Bypass still applies `MIRABILIS_MCP_FS_ROOT`, the work budget, the run log,
+  and connector tools set to Off. Go Dark does not filter commands in Bypass.
+- The blocklist (recursive `rm`, `mkfs`, `dd` to a device, fork bombs,
+  `shutdown`, recursive `chmod` on `/`) applies in Read only and Ask first. It
+  catches accidents, not a determined prompt.
+- Before any file change the old bytes are copied to
+  `agent-runs/<runId>/before/` in the data folder and the copy is named in the
+  run log. Copies older than 30 days are removed at startup.
+- Commands run with `/bin/sh -c` (`cmd.exe /d /s /c` on Windows) as your user,
+  starting in the project folder when one is set, else your home folder. They
+  get your environment without the backend's own `PORT`, `NODE_ENV`,
+  `ELECTRON_RUN_AS_NODE` and `MIRABILIS_MCP_TOKEN`.
+
+Real confinement needs an OS sandbox (container, VM, Seatbelt, namespaces).
 
 ### Tiers
 
 | Tier | Wall clock | Steps | Tool calls | Sub-agents |
 |---|---|---|---|---|
+| Assist (Instant to Thorough, Access above Chat only) | 10 min | 16 | 40 | none |
 | High effort | 30 min | 12 | 60 | none |
 | 1 hour | 60 min | 80 | 500 | up to 3 |
 | 5 hours | 5 hours | 400 | 2500 | up to 6 |
@@ -104,25 +146,40 @@ note on what is left undone. Runs are held in memory, so a backend restart drops
 one in flight. Small models struggle with the tool-calling format; 12B or larger
 works better.
 
-### Tool policies
+### access.json
 
-| Policy | Tools | Reach |
-|---|---|---|
-| `read-only` (default) | `list_dir`, `read_file`, `search_files` | reads inside the file root |
-| `write` | adds `write_file` | writes inside the file root |
-| `full` | adds `run_command` | a real shell |
+```json
+{
+  "level": "ask",
+  "allowCommands": ["git status", "npm test"],
+  "updatedAt": "2026-11-11T12:00:00.000Z"
+}
+```
 
-`full` gives the model the same reach as the account running Mirabilis. It must
-be acknowledged per run and is never the default. The mitigations:
+`level` is `chat`, `read`, `ask` or `bypass`; anything else reads as `chat`.
+`allowCommands` holds up to 200 rules of 1 to 120 characters. A rule covers a
+command when each part of it is read-only or starts with the rule's words;
+a command with a redirection or a subshell never matches. The file is written
+`0600`, through a temp file and a rename.
 
-- A pattern blocklist rejects recursive `rm`, `mkfs`, `dd` to a device, fork
-  bombs, `shutdown` and recursive `chmod` on `/`. It catches accidents, not a
-  determined prompt.
-- `MIRABILIS_MCP_FS_ROOT` sets where a command starts, not where it can go.
-- Every tool call goes to an append-only audit log.
+### connectors.json
 
-Real confinement needs an OS sandbox (container, VM, Seatbelt, namespaces).
-For most work use `write` with a file root.
+The connectors added in Settings, Connectors. Written `0600` with a `.bak`; a
+file that cannot be read is moved aside and the `.bak` used. Each entry:
+
+```json
+{
+  "id": "...", "name": "Filesystem", "transport": "stdio",
+  "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Documents"],
+  "env": {}, "cwd": "", "url": "", "headers": {},
+  "enabled": true, "tools": { "write_file": "ask", "read_file": "allow" },
+  "preset": "filesystem", "createdAt": "...", "updatedAt": "..."
+}
+```
+
+`env` and `headers` hold secrets such as tokens; the API returns their names,
+never their values. The Memory preset keeps its data in
+`connector-memory.jsonl`. See [MCP.md](MCP.md).
 
 ## Image generation
 
@@ -177,13 +234,15 @@ browser never stores them and only sees a masked hint. This protects against
 anything that can read a browser profile or run script in the page, not against
 a process already running as you.
 
-Agent audit logs redact credential-shaped strings before writing.
+Agent run logs redact credential-shaped strings before writing. Connector
+environment values and headers stay in `connectors.json` and never leave the
+backend.
 
 ## File permissions
 
 Data files are written `0600` and the data directory `0700`: chats, IntelLedger,
-config vault index, homelab roster, personal memory, provider keys and agent run
-logs. Startup tightens existing files that are looser and logs how many it
+config vault index, homelab roster, personal memory, provider keys, Access
+settings, connectors and agent run logs. Startup tightens existing files that are looser and logs how many it
 changed. This is a file mode, not encryption; use whole-disk encryption
 (FileVault, BitLocker, LUKS) for offline protection.
 

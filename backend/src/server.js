@@ -10,14 +10,13 @@ import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import { mkdir, writeFile, readFile, appendFile, unlink, readdir, rename, chmod, open, copyFile, stat } from 'node:fs/promises';
 import { existsSync, createWriteStream } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { exec as cpExec, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
-import { createHash } from 'node:crypto';
 import os from 'node:os';
 import { Client as SshClient } from 'ssh2';
 import { config } from './config.js';
-import { APP_VERSION } from './version.js';
 import { getLocalHardwareProfile } from './hardwareProfile.js';
 import {
   ensureStoreFile,
@@ -38,7 +37,7 @@ import { route as routeModel, classifyLane } from './modelRouter.js';
 import { listHosts, addHost, deleteHost } from './storage/homelabStore.js';
 import { probeAllHosts } from './homelab.js';
 import * as workspace from './workspace.js';
-import { McpConnectorService } from './mcp/mcpConnectorService.js';
+import { createConnectorManager } from './mcp/connectors.js';
 import { createMcpServerHandler } from './mcp/mcpServer.js';
 import { createIntelLedgerStorage } from './storage/intelLedger.js';
 import { createRecall } from './recall.js';
@@ -60,6 +59,9 @@ import {
 } from './services/whisperCpp.js';
 import { selectHistoryWindow } from './historyWindow.js';
 import { createAgentRouter } from './agent/routes.js';
+import { createAccessStore } from './accessSettings.js';
+import { createAccessRouter } from './routes/access.js';
+import { createConnectorsRouter } from './routes/connectors.js';
 import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
 import { shouldSuppressReminder, buildReminderWebhookHeaders } from './intelLedgerReminderUtils.js';
 import { expandHome } from './paths.js';
@@ -2128,303 +2130,6 @@ app.get('/api/homelab/hosts/status', async (_req, res) => {
   }
 });
 
-// Generic MCP connector (streamable-http)
-
-const mcpStorePath = join(dirname(config.chatStorePath), 'mcp-servers.json');
-const mcpAuditLogPath = join(dirname(config.chatStorePath), 'mcp-audit.jsonl');
-const mcpConnector = new McpConnectorService({
-  filePath: mcpStorePath,
-  clientName: 'mirabilis',
-  clientVersion: APP_VERSION
-});
-let mcpInitPromise = null;
-const mcpApprovalTokens = new Map(); // token -> { serverId, toolName, argsHash, expiresAt }
-
-function cleanExpiredMcpApprovals() {
-  const now = Date.now();
-  for (const [token, value] of mcpApprovalTokens.entries()) {
-    if (!value || value.expiresAt <= now) {
-      mcpApprovalTokens.delete(token);
-    }
-  }
-}
-
-function mcpArgsHash(value) {
-  return createHash('sha256').update(JSON.stringify(value || {})).digest('hex');
-}
-
-function summarizeMcpArgs(args) {
-  const input = args && typeof args === 'object' ? args : {};
-  const keys = Object.keys(input).sort((a, b) => a.localeCompare(b));
-  return {
-    argCount: keys.length,
-    argKeys: keys.slice(0, 20),
-    argsHash: mcpArgsHash(input)
-  };
-}
-
-async function appendMcpAudit(eventType, details = {}) {
-  const payload = {
-    ts: nowIso(),
-    eventType,
-    ...details
-  };
-  try {
-    await mkdir(dirname(mcpAuditLogPath), { recursive: true });
-    await appendFile(mcpAuditLogPath, `${JSON.stringify(payload)}\n`, 'utf8');
-  } catch {
-    // Best-effort logging only; never fail request path.
-  }
-}
-
-async function ensureMcpConnectorReady() {
-  if (!mcpInitPromise) {
-    mcpInitPromise = mcpConnector.init();
-  }
-  await mcpInitPromise;
-}
-
-app.get('/api/mcp/servers', async (_req, res) => {
-  try {
-    await ensureMcpConnectorReady();
-    res.json({ servers: mcpConnector.listServers() });
-  } catch (error) {
-    res.status(500).json({ error: error.message || 'Failed to list MCP servers' });
-  }
-});
-
-app.post('/api/mcp/servers', async (req, res) => {
-  try {
-    await ensureMcpConnectorReady();
-    const saved = await mcpConnector.upsertServer(req.body || {});
-    res.status(201).json({ server: saved });
-  } catch (error) {
-    res.status(400).json({ error: error.message || 'Failed to save MCP server' });
-  }
-});
-
-app.put('/api/mcp/servers/:id', async (req, res) => {
-  try {
-    await ensureMcpConnectorReady();
-    const payload = { ...(req.body || {}), id: req.params.id };
-    const saved = await mcpConnector.upsertServer(payload);
-    res.json({ server: saved });
-  } catch (error) {
-    res.status(400).json({ error: error.message || 'Failed to update MCP server' });
-  }
-});
-
-app.delete('/api/mcp/servers/:id', async (req, res) => {
-  try {
-    await ensureMcpConnectorReady();
-    const removed = await mcpConnector.removeServer(req.params.id);
-    if (!removed) {
-      res.status(404).json({ error: 'MCP server not found' });
-      return;
-    }
-    res.status(204).end();
-  } catch (error) {
-    res.status(500).json({ error: error.message || 'Failed to remove MCP server' });
-  }
-});
-
-app.post('/api/mcp/servers/:id/test', async (req, res) => {
-  try {
-    await ensureMcpConnectorReady();
-    const timeoutMs = Math.max(1000, Math.min(Number(req.body?.timeoutMs) || 15000, 60000));
-    const result = await mcpConnector.testServer(req.params.id, timeoutMs);
-    res.json(result);
-  } catch (error) {
-    res.status(503).json({ error: error.message || 'MCP test failed' });
-  }
-});
-
-app.post('/api/mcp/servers/:id/tools/list', async (req, res) => {
-  try {
-    await ensureMcpConnectorReady();
-    const timeoutMs = Math.max(1000, Math.min(Number(req.body?.timeoutMs) || 15000, 60000));
-    const result = await mcpConnector.listTools(req.params.id, timeoutMs);
-    res.json(result);
-  } catch (error) {
-    res.status(503).json({ error: error.message || 'Failed to list MCP tools' });
-  }
-});
-
-app.get('/api/mcp/servers/:id/policy', async (req, res) => {
-  try {
-    await ensureMcpConnectorReady();
-    const policy = mcpConnector.getServerPolicy(req.params.id);
-    res.json({ policy });
-  } catch (error) {
-    res.status(404).json({ error: error.message || 'Failed to load MCP policy' });
-  }
-});
-
-app.put('/api/mcp/servers/:id/policy', async (req, res) => {
-  try {
-    await ensureMcpConnectorReady();
-    const policy = await mcpConnector.setServerPolicy(req.params.id, req.body || {});
-    res.json({ policy });
-  } catch (error) {
-    res.status(400).json({ error: error.message || 'Failed to update MCP policy' });
-  }
-});
-
-app.post('/api/mcp/servers/:id/tools/request-approval', async (req, res) => {
-  const toolName = req.body?.name;
-  const args = req.body?.arguments || {};
-  const serverId = req.params.id;
-  const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
-  const argsSummary = summarizeMcpArgs(args);
-
-  if (!toolName || typeof toolName !== 'string') {
-    void appendMcpAudit('approval_validation_failed', { serverId, clientIp, reason: 'missing_tool_name' });
-    res.status(400).json({ error: 'Tool name is required' });
-    return;
-  }
-  if (args && typeof args !== 'object') {
-    void appendMcpAudit('approval_validation_failed', { serverId, clientIp, toolName: String(toolName || ''), reason: 'arguments_not_object' });
-    res.status(400).json({ error: 'Tool arguments must be an object' });
-    return;
-  }
-
-  try {
-    await ensureMcpConnectorReady();
-    const policy = mcpConnector.getServerPolicy(serverId);
-
-    if (policy.enforceAllowlist && !policy.allowedTools.includes(toolName)) {
-      void appendMcpAudit('approval_blocked_allowlist', { serverId, clientIp, toolName, ...argsSummary });
-      res.status(403).json({ error: `Tool "${toolName}" is not allowlisted for this server` });
-      return;
-    }
-
-    cleanExpiredMcpApprovals();
-    const token = uuidv4();
-    const expiresAt = Date.now() + policy.approvalTtlSeconds * 1000;
-    mcpApprovalTokens.set(token, {
-      serverId,
-      toolName,
-      argsHash: argsSummary.argsHash,
-      expiresAt
-    });
-
-    void appendMcpAudit('approval_issued', {
-      serverId,
-      clientIp,
-      toolName,
-      approvalToken: token,
-      approvalExpiresAt: new Date(expiresAt).toISOString(),
-      ...argsSummary
-    });
-
-    res.json({
-      ok: true,
-      approvalToken: token,
-      expiresAt: new Date(expiresAt).toISOString(),
-      policy
-    });
-  } catch (error) {
-    void appendMcpAudit('approval_error', {
-      serverId,
-      clientIp,
-      toolName: String(toolName || ''),
-      error: error.message || 'unknown'
-    });
-    res.status(400).json({ error: error.message || 'Failed to create approval token' });
-  }
-});
-
-app.post('/api/mcp/servers/:id/tools/call', async (req, res) => {
-  const toolName = req.body?.name;
-  const args = req.body?.arguments || {};
-  const approvalToken = req.body?.approvalToken;
-  const serverId = req.params.id;
-  const clientIp = req.ip || req.socket?.remoteAddress || 'unknown';
-  const argsSummary = summarizeMcpArgs(args);
-  const startedAt = Date.now();
-
-  if (!toolName || typeof toolName !== 'string') {
-    void appendMcpAudit('tool_call_validation_failed', { serverId, clientIp, reason: 'missing_tool_name' });
-    res.status(400).json({ error: 'Tool name is required' });
-    return;
-  }
-
-  if (args && typeof args !== 'object') {
-    void appendMcpAudit('tool_call_validation_failed', { serverId, clientIp, toolName: String(toolName || ''), reason: 'arguments_not_object' });
-    res.status(400).json({ error: 'Tool arguments must be an object' });
-    return;
-  }
-
-  try {
-    await ensureMcpConnectorReady();
-    const policy = mcpConnector.getServerPolicy(serverId);
-
-    if (policy.enforceAllowlist && !policy.allowedTools.includes(toolName)) {
-      void appendMcpAudit('tool_call_blocked_allowlist', { serverId, clientIp, toolName, ...argsSummary });
-      res.status(403).json({ error: `Tool "${toolName}" is not allowlisted for this server` });
-      return;
-    }
-
-    if (policy.requireApproval) {
-      cleanExpiredMcpApprovals();
-      if (!approvalToken || typeof approvalToken !== 'string') {
-        void appendMcpAudit('tool_call_blocked_no_approval', { serverId, clientIp, toolName, ...argsSummary });
-        res.status(403).json({ error: 'approvalToken is required for this MCP server policy' });
-        return;
-      }
-      const entry = mcpApprovalTokens.get(approvalToken);
-      if (!entry) {
-        void appendMcpAudit('tool_call_blocked_invalid_approval', {
-          serverId,
-          clientIp,
-          toolName,
-          approvalToken,
-          ...argsSummary
-        });
-        res.status(403).json({ error: 'Invalid or expired approval token' });
-        return;
-      }
-      const incomingArgsHash = argsSummary.argsHash;
-      const match = entry.serverId === serverId && entry.toolName === toolName && entry.argsHash === incomingArgsHash;
-      if (!match) {
-        mcpApprovalTokens.delete(approvalToken);
-        void appendMcpAudit('tool_call_blocked_approval_mismatch', {
-          serverId,
-          clientIp,
-          toolName,
-          approvalToken,
-          ...argsSummary
-        });
-        res.status(403).json({ error: 'Approval token does not match this tool call' });
-        return;
-      }
-      mcpApprovalTokens.delete(approvalToken);
-    }
-
-    const timeoutMs = Math.max(1000, Math.min(Number(req.body?.timeoutMs) || 30000, 120000));
-    const result = await mcpConnector.callTool(serverId, toolName, args, timeoutMs);
-    void appendMcpAudit('tool_call_success', {
-      serverId,
-      clientIp,
-      toolName,
-      timeoutMs,
-      durationMs: Date.now() - startedAt,
-      ...argsSummary
-    });
-    res.json({ result });
-  } catch (error) {
-    void appendMcpAudit('tool_call_error', {
-      serverId,
-      clientIp,
-      toolName: String(toolName || ''),
-      durationMs: Date.now() - startedAt,
-      error: error.message || 'unknown',
-      ...argsSummary
-    });
-    res.status(503).json({ error: error.message || 'MCP tool call failed' });
-  }
-});
-
 const dataDir = dirname(config.chatStorePath);
 const memoryStorePath = join(dataDir, 'personal-memory.json');
 const trainingExamplesPath = join(dataDir, 'fine-tuning-examples.jsonl');
@@ -3534,6 +3239,27 @@ app.use((err, _req, res, next) => {
   next(err);
 });
 
+// Access decides what agent runs may do; connectors are MCP servers Mirabilis starts
+// and calls. Both are privileged: either one can make this machine run things.
+// The source root holds backend/ and frontend/: the repo, or the packaged app's resources.
+const sourceRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const accessStore = createAccessStore(dataDir);
+await accessStore.load();
+const connectors = createConnectorManager({ dataDir, isGoDark });
+connectors.init().catch((error) => {
+  console.error(`[connectors] could not load connectors.json: ${error?.message || error}`);
+});
+app.use('/api/access', createAccessRouter({
+  store: accessStore,
+  guard: makePrivilegedGuard(mcpToken, 'access settings'),
+  sourceRoot,
+  dataDir
+}));
+app.use('/api/connectors', createConnectorsRouter({
+  manager: connectors,
+  guard: makePrivilegedGuard(mcpToken, 'connectors')
+}));
+
 // Agent runs are privileged: a run can execute shell commands unattended for hours.
 app.use('/api/agent', createAgentRouter({
   config,
@@ -3542,7 +3268,11 @@ app.use('/api/agent', createAgentRouter({
   resolveTuning: ({ provider, model, baseUrl }) => resolveOllamaTuning({ provider, model, baseUrl }),
   chats: { getChat, saveChat, getEpoch, chatStorePath: config.chatStorePath, nowIso, uuid: uuidv4 },
   providerKeys,
-  guard: makePrivilegedGuard(mcpToken, 'agent runs')
+  guard: makePrivilegedGuard(mcpToken, 'agent runs'),
+  accessStore,
+  connectors,
+  sourceRoot,
+  dataDir
 }));
 
 // Local provider binary management
@@ -4207,9 +3937,13 @@ function shutdown(reason = 'signal', exitCode = 0) {
   isShuttingDown = true;
   console.log(`[backend] shutdown requested (${reason})`);
   clearReminderWorkerTimer();
+  // Connector programs are children of this process; stop them with their process groups.
+  const connectorsStopped = connectors.shutdown().catch(() => {});
   server.close(() => {
-    console.log('[backend] shutdown complete');
-    process.exit(exitCode);
+    connectorsStopped.finally(() => {
+      console.log('[backend] shutdown complete');
+      process.exit(exitCode);
+    });
   });
   setTimeout(() => {
     console.error('[backend] forced shutdown timeout reached');
@@ -4219,6 +3953,8 @@ function shutdown(reason = 'signal', exitCode = 0) {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+// Any other exit: the first step of shutdown() signals every connector synchronously.
+process.on('exit', () => { connectors.shutdown().catch(() => {}); });
 process.on('unhandledRejection', (error) => {
   console.error('[backend] unhandledRejection:', error);
 });

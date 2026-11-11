@@ -37,6 +37,13 @@
           "**/*",
           "!frontend/.next/cache/**/*"
         ]
+      },
+      {
+        "from": "docs",
+        "to": "docs",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {

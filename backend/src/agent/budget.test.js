@@ -148,3 +148,61 @@ test('only the agentic tiers may use tools or sub-agents', () => {
     }
   }
 });
+
+// waiting for a user approval must not burn the work budget
+
+test('pauseWhile excludes the awaited time from elapsed', async () => {
+  const clock = fakeClock();
+  const b = createBudget(resolveEffort('hour'), { now: clock.now });
+  clock.advance(60_000); // one minute of real work
+  assert.equal(b.elapsed(), 60_000);
+
+  // Wait ten minutes for the user; the clock advances while the promise is pending.
+  let release;
+  const gate = b.pauseWhile(new Promise((resolve) => { release = resolve; }));
+  clock.advance(10 * 60_000);
+  release('allow');
+  assert.equal(await gate, 'allow');
+  assert.equal(b.elapsed(), 60_000, 'the ten paused minutes are not charged');
+
+  clock.advance(60_000);
+  assert.equal(b.elapsed(), 120_000, 'the clock runs again after the pause');
+});
+
+test('a pause keeps a run from exhausting its wall clock while it waits', async () => {
+  const clock = fakeClock();
+  const b = createBudget(resolveEffort('high', { maxWallMs: 5 * 60_000 }), { now: clock.now });
+  let release;
+  const gate = b.pauseWhile(new Promise((resolve) => { release = resolve; }));
+  clock.advance(60 * 60_000); // an hour waiting for the user
+  release(null);
+  await gate;
+  assert.equal(b.canContinue(), true, 'an hour of waiting did not spend a five minute budget');
+});
+
+test('elapsed accounts for a pause still in progress', async () => {
+  const clock = fakeClock();
+  const b = createBudget(resolveEffort('hour'), { now: clock.now });
+  let release;
+  const pending = b.pauseWhile(new Promise((resolve) => { release = resolve; }));
+  clock.advance(5 * 60_000); // time passes while still waiting
+  assert.equal(b.elapsed(), 0, 'an ongoing pause is subtracted immediately');
+  release(null);
+  await pending;
+  assert.equal(b.elapsed(), 0);
+});
+
+test('concurrent pauses resume the clock only once all have settled', async () => {
+  const clock = fakeClock();
+  const b = createBudget(resolveEffort('hour'), { now: clock.now });
+  let r1; let r2;
+  const p1 = b.pauseWhile(new Promise((res) => { r1 = res; }));
+  const p2 = b.pauseWhile(new Promise((res) => { r2 = res; }));
+  clock.advance(2 * 60_000);
+  r1(null); await p1;
+  clock.advance(3 * 60_000); // still paused by p2
+  r2(null); await p2;
+  assert.equal(b.elapsed(), 0, 'no time is charged until the last pause ends');
+  clock.advance(60_000);
+  assert.equal(b.elapsed(), 60_000);
+});

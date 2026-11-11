@@ -93,6 +93,10 @@ rsync -a "$MIRABILIS/backend/" "$BUILD_DIR/backend/" \
 echo "==> Installing backend production deps..."
 cd "$BUILD_DIR/backend" && npm install --omit=dev --silent
 
+echo "==> Copying docs into staging..."
+# The self tools read docs/ARCHITECTURE.md from the packaged resources folder.
+rsync -a "$MIRABILIS/docs/" "$BUILD_DIR/docs/"
+
 echo "==> Syncing standalone frontend into staging..."
 # Create the full destination path first: old rsync (2.6.9, shipped on macOS
 # CI runners) does not create intermediate parent directories, so rsyncing into

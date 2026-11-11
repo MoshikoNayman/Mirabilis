@@ -15,7 +15,9 @@ const OTHER_FILES = [
   'personal-memory.json',
   'config-vault.json',
   'homelab-hosts.json',
-  'mcp-servers.json',
+  'access.json',
+  'connectors.json',
+  'go-dark.json',
   'mcp-token'
 ];
 

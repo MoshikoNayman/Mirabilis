@@ -14,9 +14,20 @@ const MAX_RESULT_CHARS = 1_000;
 const SECRET_RE = /\b(sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g;
 const SECRET_KEYVAL_RE = /\b(api[-_]?key|apikey|token|secret|password|passwd|authorization|bearer)\b(\s*[:=]\s*|\s+)("?)([^\s"']{6,})\3/gi;
 
+// Shapes SECRET_KEYVAL_RE misses on its own: it takes "Bearer" as the value of
+// "Authorization:", and \btoken\b never matches inside access_token or client_secret.
+const AUTH_HEADER_RE = /\b(authorization)("?\s*[:=]\s*)("?)(?:(?:Bearer|Basic|Token)\s+)?[^\s"',;]+/gi;
+const SCHEME_TOKEN_RE = /\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+const URL_PASSWORD_RE = /\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/]+):[^\s@/]+@/gi;
+const SUFFIX_KEY_RE = /\b([A-Za-z0-9_-]*(?:token|secret|password|passwd|api[-_]?key))("?\s*[:=]\s*)("?)([^\s"'&,;]{6,})\3/gi;
+
 /** @param {string} text */
 export function redact(text) {
   return String(text ?? '')
+    .replace(AUTH_HEADER_RE, '$1$2$3[redacted]')
+    .replace(SCHEME_TOKEN_RE, '$1 [redacted]')
+    .replace(URL_PASSWORD_RE, '$1:[redacted]@')
+    .replace(SUFFIX_KEY_RE, (_m, key, sep, q) => `${key}${sep}${q}[redacted]${q}`)
     .replace(SECRET_RE, '[redacted]')
     .replace(SECRET_KEYVAL_RE, (_m, key, sep, q) => `${key}${sep}${q}[redacted]${q}`);
 }

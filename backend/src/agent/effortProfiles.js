@@ -81,6 +81,16 @@ export const EFFORT_PROFILES = {
     agentic: true,
     maxWallMs: 5 * HOUR, maxIterations: 400, maxToolCalls: 2_500, maxOutputTokens: 1_500_000,
     plan: true, validate: true, maxRepairAttempts: 8, maxSubAgents: 6
+  },
+
+  // A single-shot effort with Access above Chat only: a short tool loop, no plan or
+  // validation. Not in EFFORT_ORDER; the route picks it and copies the effort's styleHint.
+  assist: {
+    id: 'assist', label: 'Assist',
+    description: 'A short tool-using loop for a question about this computer or Mirabilis.',
+    agentic: true,
+    maxWallMs: 10 * MIN, maxIterations: 16, maxToolCalls: 40, maxOutputTokens: 60_000,
+    plan: false, validate: false, maxRepairAttempts: 0, maxSubAgents: 0
   }
 };
 
@@ -88,6 +98,21 @@ export const DEFAULT_EFFORT_ID = 'balanced';
 
 /** Ordered for display: cheapest first, then the agentic tiers. */
 export const EFFORT_ORDER = ['instant', 'fast', 'balanced', 'thorough', 'high', 'hour', 'session'];
+
+/**
+ * The profile for a run: an agentic effort keeps its own; a single-shot effort with
+ * tools on gets `assist`, carrying the effort's styleHint. Overrides only lower limits.
+ * @param {string} [id]
+ * @param {Partial<EffortProfile>} [overrides]
+ * @returns {EffortProfile}
+ */
+export function resolveRunProfile(id, overrides = {}) {
+  if (isAgenticEffort(id)) return resolveEffort(id, overrides);
+  const chosen = EFFORT_PROFILES[String(id || '')] || EFFORT_PROFILES[DEFAULT_EFFORT_ID];
+  const profile = resolveEffort('assist', overrides);
+  if (chosen.styleHint) profile.styleHint = chosen.styleHint;
+  return profile;
+}
 
 /**
  * Resolve an effort id plus overrides into a concrete profile. Overrides can only

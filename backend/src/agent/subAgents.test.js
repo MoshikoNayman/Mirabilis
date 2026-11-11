@@ -6,7 +6,8 @@ import os from 'os';
 
 import { runAgent } from './agentLoop.js';
 import { resolveEffort } from './effortProfiles.js';
-import { createToolRegistry } from './tools.js';
+import { createToolRegistry, createRunRules } from './tools.js';
+import { createApprovalBroker } from './approvals.js';
 
 async function sandbox() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-fanout-'));
@@ -241,4 +242,70 @@ test('fan-out concurrency is capped so a weak machine is not stampeded', async (
   assert.equal(observed.spawned, 6, 'all six should still run');
   assert.ok(peak <= 2, `at most 2 should be mid-generation at once, peak was ${peak}`);
   assert.ok(peak >= 2, `they should still overlap rather than run one at a time, peak was ${peak}`);
+});
+
+test('a sub-agent asks through the run\'s broker, and the wait stops the parent\'s clock too', async () => {
+  const dir = await sandbox();
+  const savedConcurrency = process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY;
+  // One at a time, so each simulated wait falls while every other agent is idle.
+  process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY = '1';
+  let t = 5_000_000;
+  const requests = [];
+  // Each answer takes the user three hours; the parent's budget is one hour.
+  const broker = createApprovalBroker({
+    emit: (type, payload) => {
+      if (type !== 'approval-required') return;
+      requests.push(payload);
+      setImmediate(() => { t += 3 * 60 * 60_000; broker.resolve(payload.approvalId, 'allow'); });
+    }
+  });
+  const runRules = createRunRules();
+  const make = () => createToolRegistry({ level: 'ask', workDir: dir, gate: { broker, runRules } });
+  const tasks = ['create file one', 'create file two'];
+  const model = {
+    fn: async ({ messages, purpose }) => {
+      t += 1_000;
+      const prompt = messages.map((m) => m.content).join('\n');
+      if (purpose === 'validate') return { text: '{"pass":true}', tokens: 5 };
+      if (purpose === 'plan') return { text: 'split it', tokens: 5 };
+      const sub = tasks.find((x) => prompt.includes(`Goal:\n${x}`));
+      if (sub) {
+        if (prompt.includes('observed:')) return { text: JSON.stringify({ action: 'finish', summary: `${sub}: finished-ok` }), tokens: 5 };
+        const file = sub.endsWith('one') ? 'one.txt' : 'two.txt';
+        return { text: JSON.stringify({ action: 'tool', tool: 'run_command', args: { command: `touch ${file}` } }), tokens: 5 };
+      }
+      if (!prompt.includes('finished-ok')) {
+        return { text: JSON.stringify({ action: 'tool', tool: 'spawn_agents', args: { tasks } }), tokens: 5 };
+      }
+      return { text: '{"action":"finish","summary":"both files exist"}', tokens: 5 };
+    }
+  };
+  try {
+    const out = await runAgent({
+      goal: 'make two files', profile: resolveEffort('hour'),
+      registry: make(), makeRegistry: make, callModel: model.fn, now: () => t
+    });
+    assert.equal(out.stopReason, 'completed', `stopped: ${out.stopReason}`);
+    assert.equal(out.ok, true);
+    assert.deepEqual(requests.map((r) => r.subAgent).sort(), [0, 1], 'each sub-agent asked once, tagged with its index');
+    assert.ok(requests.every((r) => r.tool === 'run_command' && r.kind === 'command'));
+    assert.ok(out.budget.elapsedMs < 60 * 60_000, `the waits were charged to the parent: ${out.budget.elapsedMs}ms`);
+    await fs.access(path.join(dir, 'one.txt'));
+    await fs.access(path.join(dir, 'two.txt'));
+  } finally {
+    if (savedConcurrency === undefined) delete process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY;
+    else process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY = savedConcurrency;
+  }
+});
+
+test('spawn_agents is not offered in Chat only, at any effort', async () => {
+  const dir = await sandbox();
+  const registry = createToolRegistry({ level: 'chat', fsRoot: dir });
+  const model = { fn: async () => ({ text: '{"action":"finish","summary":"x"}', tokens: 5 }) };
+  await runAgent({
+    goal: 'g', profile: resolveEffort('session'), registry,
+    makeRegistry: () => createToolRegistry({ level: 'chat', fsRoot: dir }), callModel: model.fn
+  });
+  assert.ok(!registry.has('spawn_agents'));
+  assert.deepEqual(registry.names(), []);
 });

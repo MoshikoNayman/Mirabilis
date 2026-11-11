@@ -100,12 +100,27 @@ remote providers, web search, registry lookups and SSH to outside hosts are
 blocked, and the desktop app does not check for updates. The state is stored in
 the data folder and survives a restart.
 
+## Access and Connectors
+
+Access decides what the assistant may do on this computer. Set it from the
+Access chip in the composer or in Settings: Chat only (the default, no tools),
+Read only (reads files, inspects the system and runs read-only commands, never
+changes anything), Ask first (asks before every change) or Bypass (runs
+everything without asking). With tools on, Mirabilis can troubleshoot this
+computer and explain how it is built from its own source. Every action goes to
+the run log in the data folder, and every file change keeps a copy of the old
+file.
+
+Connectors add tools from MCP servers. Pick one from the catalog (Filesystem,
+Git, Fetch, Junos and more) or add any local command or remote URL, then set
+each tool to Allow, Ask or Off. See [docs/MCP.md](docs/MCP.md).
+
 ## Features
 
 - Streaming chat with local history, instruction profiles, branches and snapshots
 - Attachments, image input for vision models, LaTeX math
 - Answer styles (Instant to Deep) and autonomous runs (High effort, 1 hour,
-  5 hours) with a hard budget and read-only tools by default
+  5 hours) with a hard budget
 - Config Vault: cited local retrieval over a folder you choose
 - Recall over past chats and IntelLedger signals, on-device embeddings
 - Inference controls for Ollama models and per-reply tokens/sec
@@ -113,7 +128,7 @@ the data folder and survives a restart.
 - Web search through Tavily (needs `TAVILY_API_KEY`)
 - Local image generation (Stable Diffusion)
 - SSH remote execution and a homelab host list
-- MCP server and MCP client, see [docs/MCP.md](docs/MCP.md)
+- MCP server, and Connectors as an MCP client, see [docs/MCP.md](docs/MCP.md)
 
 ## Desktop app
 
@@ -141,8 +156,8 @@ Signing, updates and release details are in [docs/DESKTOP.md](docs/DESKTOP.md).
 All app data is in one folder: `../mirabilis-data` beside the repo when run from
 source, or the per-app data folder when run as the desktop app. Set
 `MIRABILIS_DATA_DIR` to move it. It holds chats, IntelLedger, the config vault
-index, personal memory, provider keys, agent run logs and the MCP token. Files
-are written `0600` and the folder `0700`.
+index, personal memory, provider keys, Access settings, connectors, agent run
+logs and the MCP token. Files are written `0600` and the folder `0700`.
 
 ## Configuration
 
@@ -153,9 +168,9 @@ commands.
 
 ## Docs
 
-- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): environment variables, agent tool policies, updates
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): environment variables, Access levels, data files
 - [docs/PROVIDERS.md](docs/PROVIDERS.md): providers, models, MCQ family
-- [docs/MCP.md](docs/MCP.md): MCP server and client
+- [docs/MCP.md](docs/MCP.md): MCP server and Connectors
 - [docs/DESKTOP.md](docs/DESKTOP.md): installers, building, signing, updates
 - [CHANGELOG.md](CHANGELOG.md)
 

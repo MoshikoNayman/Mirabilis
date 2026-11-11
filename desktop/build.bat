@@ -58,6 +58,10 @@ cd /d "%BUILD_DIR%\backend"
 call npm install --omit=dev --silent
 if errorlevel 1 goto cleanup_error
 
+echo =^> Copying docs into staging...
+REM The self tools read docs\ARCHITECTURE.md from the packaged resources folder.
+robocopy "%MIRABILIS%\docs" "%BUILD_DIR%\docs" /E /NFL /NDL /NJH /NJS >nul
+
 echo =^> Syncing standalone frontend...
 robocopy "%MIRABILIS%\frontend\.next\standalone" "%BUILD_DIR%\frontend\.next\standalone" /E /NFL /NDL /NJH /NJS >nul
 

@@ -1,4 +1,5 @@
-// Route-level tests for autonomous runs, against the real server process.
+// Route-level tests for agent runs against the real server process: Access levels,
+// the approval flow over SSE, and persisting a run into its chat.
 
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,10 +21,16 @@ async function freePort() {
   return port;
 }
 
-/** Fake Ollama that records the model each request asked for. */
+/**
+ * Fake Ollama. `script` picks each reply from the prompt; without one it replays
+ * REPLIES in order. Records the model and the prompt of every call.
+ */
 let engine, engineUrl;
 const seenModels = [];
+const seenPrompts = [];
 let replyIndex = 0;
+/** @type {null | ((p: {system: string, user: string}) => string)} */
+let script = null;
 const REPLIES = [
   'Plan: answer from knowledge.',
   '{"action":"finish","summary":"A 20,000 mAh pack with 65W USB-C PD."}',
@@ -44,9 +51,18 @@ async function startEngine() {
       let body = '';
       req.on('data', (c) => { body += c; });
       req.on('end', () => {
-        try { seenModels.push(JSON.parse(body).model); } catch { seenModels.push(null); }
+        let parsed = {};
+        try { parsed = JSON.parse(body); } catch { /* recorded as empty */ }
+        seenModels.push(parsed.model ?? null);
+        const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+        const prompt = {
+          system: messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n'),
+          user: messages.filter((m) => m.role !== 'system').map((m) => m.content).join('\n')
+        };
+        seenPrompts.push(prompt);
+        const text = script ? script(prompt) : REPLIES[Math.min(replyIndex++, REPLIES.length - 1)];
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-        res.write(ndjson({ message: { content: REPLIES[Math.min(replyIndex++, REPLIES.length - 1)] } }));
+        res.write(ndjson({ message: { content: text } }));
         res.end(ndjson({ done: true, eval_count: 10 }));
       });
       return;
@@ -58,11 +74,12 @@ async function startEngine() {
   engineUrl = `http://127.0.0.1:${port}`;
 }
 
-let child, baseUrl, dataDir, token;
+let child, baseUrl, dataDir, token, projDir;
 
 before(async () => {
   await startEngine();
   dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-agent-routes-'));
+  projDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-agent-project-'));
   const port = await freePort();
   baseUrl = `http://127.0.0.1:${port}`;
   child = spawn(process.execPath, [SERVER_ENTRY], {
@@ -83,29 +100,78 @@ before(async () => {
 after(async () => {
   if (child) child.kill('SIGKILL');
   if (engine) await new Promise((r) => engine.close(r));
-  if (dataDir) await fs.rm(dataDir, { recursive: true, force: true });
+  for (const dir of [dataDir, projDir]) if (dir) await fs.rm(dir, { recursive: true, force: true });
 });
 
-async function startRun(body) {
-  const res = await fetch(`${baseUrl}/api/agent/runs`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
-    body: JSON.stringify(body)
-  });
-  const raw = await res.text();
-  const frames = [];
-  let ev = '';
-  for (const line of raw.split('\n')) {
-    if (line.startsWith('event: ')) ev = line.slice(7).trim();
-    else if (line.startsWith('data: ')) {
-      try { frames.push({ event: ev, data: JSON.parse(line.slice(6)) }); } catch { /* skip */ }
-    }
-  }
-  return { status: res.status, frames };
+const authJson = () => ({ 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token });
+
+async function setAccess(patch) {
+  const res = await fetch(`${baseUrl}/api/access`, { method: 'PUT', headers: authJson(), body: JSON.stringify(patch) });
+  assert.equal(res.status, 200, await res.clone().text());
+  return res.json();
 }
 
+/**
+ * Start a run and read its SSE stream as it arrives. `onFrame` may act mid-run,
+ * for example answer an approval.
+ */
+async function runStream(body, onFrame = async () => {}) {
+  const res = await fetch(`${baseUrl}/api/agent/runs`, { method: 'POST', headers: authJson(), body: JSON.stringify(body) });
+  if (!res.ok || !res.body) return { status: res.status, body: await res.json().catch(() => null), frames: [], runId: null };
+  const frames = [];
+  let runId = null;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) buf += decoder.decode(value, { stream: true });
+    let cut;
+    while ((cut = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, cut);
+      buf = buf.slice(cut + 2);
+      let event = 'message';
+      let data = '';
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event: ')) event = line.slice(7).trim();
+        else if (line.startsWith('data: ')) data += line.slice(6);
+      }
+      let parsed;
+      try { parsed = JSON.parse(data); } catch { continue; }
+      if (event === 'run-accepted') runId = parsed.id;
+      const frame = { event, data: parsed };
+      frames.push(frame);
+      await onFrame(frame, runId);
+    }
+    if (done) break;
+  }
+  return { status: res.status, frames, runId };
+}
+
+const startRun = (body) => runStream(body);
+const progress = (frames, type) => frames.filter((f) => f.event === 'progress' && f.data?.type === type).map((f) => f.data);
+const resultOf = (frames) => frames.find((f) => f.event === 'result')?.data;
+const exists = (p) => fs.stat(p).then(() => true, () => false);
+
+/** Reply with each step in turn, one per tool result seen so far, then finish. */
+function steps(actions, summary = 'done') {
+  return ({ user }) => {
+    const done = (user.match(/\n {2}observed: /g) || []).length;
+    if (done < actions.length) return JSON.stringify({ action: 'tool', ...actions[done] });
+    return JSON.stringify({ action: 'finish', summary });
+  };
+}
+
+function answer(runId, approvalId, decision, note) {
+  return fetch(`${baseUrl}/api/agent/runs/${runId}/approvals/${approvalId}`, {
+    method: 'POST', headers: authJson(), body: JSON.stringify({ decision, ...(note ? { note } : {}) })
+  });
+}
+
+// the basics, at the default Chat only level
+
 test('a run with NO model resolves one instead of dying on "model is required"', async () => {
-  replyIndex = 0; seenModels.length = 0;
+  replyIndex = 0; seenModels.length = 0; script = null;
   const { frames } = await startRun({
     goal: 'testing how smart you are. what best phone battery pack you recommend?',
     effort: 'high',
@@ -125,24 +191,22 @@ test('a run with NO model resolves one instead of dying on "model is required"',
     assert.ok(m, 'every upstream call must carry a real model, never undefined');
   }
 
-  const result = frames.find((f) => f.event === 'result');
-  assert.equal(result.data.ok, true);
-  assert.match(result.data.answer, /mAh|battery|pack/i);
+  const result = resultOf(frames);
+  assert.equal(result.ok, true);
+  assert.match(result.answer, /mAh|battery|pack/i);
 });
 
 test('a knowledge question needs no tools and still completes', async () => {
-  replyIndex = 0; seenModels.length = 0;
-  const { frames } = await startRun({
-    goal: 'what is the best phone battery pack?', effort: 'high', provider: 'ollama'
-  });
-  const result = frames.find((f) => f.event === 'result').data;
+  replyIndex = 0; seenModels.length = 0; script = null;
+  const { frames } = await startRun({ goal: 'what is the best phone battery pack?', effort: 'high', provider: 'ollama' });
+  const result = resultOf(frames);
   assert.equal(result.ok, true);
   assert.equal(result.budget.toolCalls, 0, 'answering from knowledge should spend no tool budget');
   assert.equal(result.validated, true);
 });
 
 test('an explicit model is passed through unchanged', async () => {
-  replyIndex = 0; seenModels.length = 0;
+  replyIndex = 0; seenModels.length = 0; script = null;
   await startRun({ goal: 'x', effort: 'high', provider: 'ollama', model: 'installed-model:latest' });
   assert.ok(seenModels.every((m) => m === 'installed-model:latest'));
 });
@@ -169,14 +233,14 @@ async function newChat() {
 const readChat = async (id) => (await (await fetch(`${baseUrl}/api/chats/${id}`)).json()).chat;
 
 test('a run writes its goal and result into the chat it was given', async () => {
-  replyIndex = 0;
+  replyIndex = 0; script = null;
   const chatId = await newChat();
   const { frames } = await startRun({
     goal: 'what best phone battery pack you recommend?',
     effort: 'high', provider: 'ollama', chatId
   });
 
-  const result = frames.find((f) => f.event === 'result').data;
+  const result = resultOf(frames);
   assert.equal(result.persistedTo, chatId, 'the run should report where it saved');
 
   const chat = await readChat(chatId);
@@ -187,109 +251,298 @@ test('a run writes its goal and result into the chat it was given', async () => 
   const meta = chat.messages[1].agentRun;
   assert.ok(meta, 'the assistant turn should record that it came from a run');
   assert.equal(meta.effort, 'high');
+  assert.equal(meta.access, 'chat');
   assert.equal(meta.stopReason, 'completed');
   assert.equal(meta.validated, true);
 });
 
 test('a run with no chatId still succeeds and reports nothing persisted', async () => {
-  replyIndex = 0;
+  replyIndex = 0; script = null;
   const { frames } = await startRun({ goal: 'no chat', effort: 'high', provider: 'ollama' });
-  const result = frames.find((f) => f.event === 'result').data;
+  const result = resultOf(frames);
   assert.equal(result.ok, true);
   assert.equal(result.persistedTo, null);
 });
 
 test('an unknown chatId does not fail the run', async () => {
-  replyIndex = 0;
+  replyIndex = 0; script = null;
   const { frames } = await startRun({
     goal: 'ghost chat', effort: 'high', provider: 'ollama',
     chatId: '00000000-0000-0000-0000-000000000000'
   });
-  const result = frames.find((f) => f.event === 'result').data;
+  const result = resultOf(frames);
   assert.equal(result.ok, true, 'the work is done; a persistence miss must not undo it');
   assert.equal(result.persistedTo, null);
 });
 
 test('a stopped run still persists the partial work it managed', async () => {
-  replyIndex = 0;
+  replyIndex = 0; script = null;
   const chatId = await newChat();
   const { frames } = await startRun({
     goal: 'give up early', effort: 'high', provider: 'ollama', chatId,
     overrides: { maxIterations: 1, validate: false }
   });
-  const result = frames.find((f) => f.event === 'result').data;
+  const result = resultOf(frames);
   const chat = await readChat(chatId);
   assert.equal(chat.messages.length, 2, 'the goal and whatever came of it should both be recorded');
   assert.equal(chat.messages[1].agentRun.stopReason, result.stopReason);
 });
 
-// the full tool policy needs an explicit decision
+// Access
 
-test('the full policy is refused without an explicit acknowledgement', async () => {
-  // A default or remembered setting must never grant a background shell.
-  const res = await fetch(`${baseUrl}/api/agent/runs`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
-    body: JSON.stringify({ goal: 'x', effort: 'high', provider: 'ollama', toolPolicy: 'full' })
-  });
-  assert.equal(res.status, 400);
-  const body = await res.json();
-  assert.equal(body.requiresAcknowledgement, 'full-policy');
-  assert.match(body.error, /shell commands/i, 'the refusal must say what is being granted');
-});
-
-test('the full policy runs once acknowledged', async () => {
-  replyIndex = 0;
-  const { frames } = await startRun({
-    goal: 'x', effort: 'high', provider: 'ollama',
-    toolPolicy: 'full', acknowledgeFullPolicy: true, fsRoot: dataDir
-  });
-  const result = frames.find((f) => f.event === 'result');
-  assert.ok(result, 'an acknowledged run should proceed');
-  assert.equal(result.data.ok, true);
-});
-
-test('read-only and write need no acknowledgement', async () => {
-  for (const policy of ['read-only', 'write']) {
-    replyIndex = 0;
-    const { frames } = await startRun({ goal: 'x', effort: 'high', provider: 'ollama', toolPolicy: policy, fsRoot: dataDir });
-    assert.ok(frames.find((f) => f.event === 'result'), `${policy} should not be gated`);
+test('Access and Connectors refuse a caller without the session token', async () => {
+  for (const route of ['/api/access', '/api/connectors', '/api/connectors/catalog']) {
+    const res = await fetch(`${baseUrl}${route}`);
+    assert.equal(res.status, 401, route);
   }
+  const put = await fetch(`${baseUrl}/api/access`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level: 'bypass' })
+  });
+  assert.equal(put.status, 401, 'raising Access needs the token');
+  const access = await (await fetch(`${baseUrl}/api/access`, { headers: authJson() })).json();
+  assert.equal(access.level, 'chat', 'the default is Chat only');
+  const connectors = await (await fetch(`${baseUrl}/api/connectors`, { headers: authJson() })).json();
+  assert.deepEqual(connectors.connectors, []);
 });
 
-test('write and full runs are refused without a project folder', async () => {
-  for (const extra of [{ toolPolicy: 'write' }, { toolPolicy: 'full', acknowledgeFullPolicy: true }]) {
-    const res = await fetch(`${baseUrl}/api/agent/runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
-      body: JSON.stringify({ goal: 'x', effort: 'high', provider: 'ollama', ...extra })
-    });
-    assert.equal(res.status, 400);
-    const body = await res.json();
-    assert.equal(body.requiresFolder, true);
-    assert.match(body.error, /project folder/i);
+test('Chat only with a single-shot effort is sent back to the chat route', async () => {
+  await setAccess({ level: 'chat' });
+  const first = await runStream({ goal: 'hi', effort: 'balanced', provider: 'ollama' });
+  assert.equal(first.status, 400);
+  assert.equal(first.body.useChat, true);
+  assert.equal(first.body.error, 'Chat only: send this as a normal chat message, or change Access.');
+
+  await setAccess({ level: 'bypass' });
+  const lowered = await runStream({ goal: 'hi', effort: 'fast', access: 'chat', provider: 'ollama' });
+  assert.equal(lowered.status, 400, 'a request that lowers to Chat only is refused the same way');
+  assert.equal(lowered.body.useChat, true);
+  await setAccess({ level: 'chat' });
+});
+
+test('a request can lower the saved level but never raise it', async () => {
+  script = () => '{"action":"finish","summary":"ok"}';
+  await setAccess({ level: 'read' });
+  const accessOf = async (extra) => {
+    const { frames } = await runStream({ goal: 'level probe', effort: 'high', provider: 'ollama', overrides: { plan: false, validate: false }, ...extra });
+    return frames.find((f) => f.event === 'run-accepted').data.access;
+  };
+  assert.equal(await accessOf({}), 'read');
+  assert.equal(await accessOf({ access: 'bypass' }), 'read', 'a request cannot raise the level');
+  assert.equal(await accessOf({ access: 'ask' }), 'read');
+  assert.equal(await accessOf({ access: 'chat' }), 'chat');
+  assert.equal(await accessOf({ access: 'superuser' }), 'chat', 'an unknown level counts as Chat only');
+  script = null;
+  await setAccess({ level: 'chat' });
+});
+
+test('a single-shot effort with tools on runs the short assist loop, told where it is', async () => {
+  await setAccess({ level: 'read' });
+  seenPrompts.length = 0;
+  script = () => '{"action":"finish","summary":"assisted"}';
+  const { frames } = await runStream({ goal: 'what is using my CPU?', effort: 'fast', provider: 'ollama', fsRoot: projDir });
+  const accepted = frames.find((f) => f.event === 'run-accepted').data;
+  assert.equal(accepted.effort, 'assist');
+  assert.equal(accepted.access, 'read');
+  assert.equal(accepted.limits.maxIterations, 16);
+  assert.equal(accepted.limits.maxToolCalls, 40);
+  assert.equal(accepted.limits.maxWallMs, 10 * 60_000);
+  assert.equal(accepted.limits.plan, false);
+  assert.equal(accepted.limits.validate, false);
+  assert.equal(resultOf(frames).answer, 'assisted');
+
+  const system = seenPrompts[0].system;
+  assert.match(system, /^You are Mirabilis, an assistant running on this computer: .+ \(.+\), user .+, home .+, shell .+\./);
+  assert.match(system, /Access: Read only\./);
+  assert.match(system, /Your own source code is at .+\. For questions about how Mirabilis works, call mirabilis_architecture first/);
+  assert.ok(system.includes(`Project folder: ${projDir}.`), system);
+  assert.match(system, /You cannot change anything; when a fix needs a change, give the exact command or edit/);
+  assert.match(system, /Effort: fast\./, 'the chosen effort\'s style travels with the assist profile');
+  for (const tool of ['system_overview', 'list_processes', 'network_overview', 'read_log', 'mirabilis_status', 'mirabilis_logs', 'mirabilis_architecture', 'run_command']) {
+    assert.ok(system.includes(`- ${tool}:`), `${tool} should be offered`);
   }
+  script = null;
+  await setAccess({ level: 'chat' });
 });
 
 test('a project folder may not be the disk root or a missing path', async () => {
+  await setAccess({ level: 'read' });
   for (const fsRoot of ['/', '/definitely/not/here']) {
-    const res = await fetch(`${baseUrl}/api/agent/runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
-      body: JSON.stringify({ goal: 'x', effort: 'high', provider: 'ollama', toolPolicy: 'write', fsRoot })
-    });
+    const res = await runStream({ goal: 'x', effort: 'high', provider: 'ollama', fsRoot });
     assert.equal(res.status, 400, fsRoot);
   }
+  await setAccess({ level: 'chat' });
+});
+
+// the approval flow
+
+test('Ask first: a write waits for approval, then runs once allowed', async () => {
+  await setAccess({ level: 'bypass' });
+  const target = path.join(projDir, 'approved.txt');
+  script = steps([{ tool: 'write_file', args: { path: 'approved.txt', content: 'yes\n' } }], 'wrote it');
+  let pendingSeen = null;
+  let second = null;
+  const { frames, runId } = await runStream(
+    { goal: 'write approved.txt', effort: 'balanced', access: 'ask', provider: 'ollama', fsRoot: projDir },
+    async (frame, id) => {
+      if (frame.data?.type !== 'approval-required') return;
+      assert.equal(await exists(target), false, 'nothing is written before the user answers');
+      pendingSeen = await (await fetch(`${baseUrl}/api/agent/runs/${id}/approvals`, { headers: authJson() })).json();
+      const res = await answer(id, frame.data.approvalId, 'allow');
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+      second = await answer(id, frame.data.approvalId, 'deny');
+    }
+  );
+  assert.equal(frames.find((f) => f.event === 'run-accepted').data.access, 'ask');
+  const [req] = progress(frames, 'approval-required');
+  assert.ok(req, 'the run must ask before writing');
+  assert.equal(req.kind, 'write');
+  assert.equal(req.title, 'Write a file');
+  assert.equal(req.tool, 'write_file');
+  assert.equal(req.reasonCode, 'changes-files');
+  assert.equal(req.alwaysLabel, 'Allow file changes for the rest of this run');
+  assert.ok(req.detail.startsWith(`${target}\n`), req.detail);
+  assert.match(req.detail, /Creates a new file of 4 bytes/);
+  assert.equal(pendingSeen.pending.length, 1);
+  assert.equal(pendingSeen.pending[0].approvalId, req.approvalId);
+  assert.equal(second.status, 409, 'an answered approval cannot be answered again');
+  assert.deepEqual(progress(frames, 'approval-resolved').map((r) => r.decision), ['allow']);
+  assert.equal(resultOf(frames).ok, true);
+  assert.equal(await fs.readFile(target, 'utf8'), 'yes\n');
+  assert.ok(runId);
+  script = null;
+});
+
+test('a denial reaches the model as a denial, with the user\'s note', async () => {
+  await setAccess({ level: 'bypass' });
+  seenPrompts.length = 0;
+  script = steps([{ tool: 'run_command', args: { command: 'touch denied.txt' } }], 'the user said no');
+  const { frames } = await runStream(
+    { goal: 'touch denied.txt', effort: 'balanced', access: 'ask', provider: 'ollama', fsRoot: projDir },
+    async (frame, id) => {
+      if (frame.data?.type === 'approval-required') await answer(id, frame.data.approvalId, 'deny', 'not today');
+    }
+  );
+  const [req] = progress(frames, 'approval-required');
+  assert.equal(req.kind, 'command');
+  assert.equal(req.detail, 'touch denied.txt');
+  assert.equal(req.alwaysLabel, 'Always allow `touch`');
+  assert.ok(seenPrompts.some((p) => p.user.includes('ERROR: The user denied this action. Note: not today')),
+    'the model must be told it was denied, and why');
+  assert.equal(await exists(path.join(projDir, 'denied.txt')), false);
+  assert.equal(resultOf(frames).ok, true);
+  script = null;
+});
+
+test('Always allow saves the command rule, and the next run does not ask', async () => {
+  await setAccess({ level: 'bypass', allowCommands: [] });
+  script = steps([{ tool: 'run_command', args: { command: 'touch always-1.txt' } }]);
+  const first = await runStream(
+    { goal: 'touch always-1.txt', effort: 'balanced', access: 'ask', provider: 'ollama', fsRoot: projDir },
+    async (frame, id) => {
+      if (frame.data?.type === 'approval-required') await answer(id, frame.data.approvalId, 'always');
+    }
+  );
+  assert.equal(progress(first.frames, 'approval-required').length, 1);
+  assert.equal(await exists(path.join(projDir, 'always-1.txt')), true);
+
+  const access = await (await fetch(`${baseUrl}/api/access`, { headers: authJson() })).json();
+  assert.deepEqual(access.allowCommands, ['touch']);
+  const onDisk = JSON.parse(await fs.readFile(path.join(dataDir, 'access.json'), 'utf8'));
+  assert.deepEqual(onDisk.allowCommands, ['touch']);
+
+  script = steps([{ tool: 'run_command', args: { command: 'touch always-2.txt' } }]);
+  const second = await runStream({ goal: 'touch always-2.txt', effort: 'balanced', access: 'ask', provider: 'ollama', fsRoot: projDir });
+  assert.equal(progress(second.frames, 'approval-required').length, 0, 'the saved rule covers it');
+  assert.equal(await exists(path.join(projDir, 'always-2.txt')), true);
+  await setAccess({ allowCommands: [] });
+  script = null;
+});
+
+test('Bypass never asks, and a write still keeps the old bytes', async () => {
+  await setAccess({ level: 'bypass' });
+  const target = path.join(projDir, 'keep.txt');
+  await fs.writeFile(target, 'original\n', 'utf8');
+  script = steps([
+    { tool: 'write_file', args: { path: 'keep.txt', content: 'changed\n' } },
+    { tool: 'run_command', args: { command: 'touch bypass.txt' } }
+  ]);
+  const { frames, runId } = await runStream({ goal: 'change things', effort: 'balanced', provider: 'ollama', fsRoot: projDir });
+  assert.equal(frames.find((f) => f.event === 'run-accepted').data.access, 'bypass');
+  assert.equal(progress(frames, 'approval-required').length, 0);
+  assert.equal(await fs.readFile(target, 'utf8'), 'changed\n');
+  assert.equal(await exists(path.join(projDir, 'bypass.txt')), true);
+
+  const beforeDir = path.join(dataDir, 'agent-runs', runId, 'before');
+  const copies = await fs.readdir(beforeDir);
+  assert.equal(copies.length, 1);
+  assert.equal(await fs.readFile(path.join(beforeDir, copies[0]), 'utf8'), 'original\n');
+  const audit = (await fs.readFile(path.join(dataDir, 'agent-runs', `${runId}.jsonl`), 'utf8'))
+    .split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  assert.ok(audit.some((e) => e.kind === 'backup' && e.path === target), 'the copy is recorded in the run log');
+  script = null;
+});
+
+test('Read only denies writes and never asks', async () => {
+  await setAccess({ level: 'bypass' });
+  script = steps([{ tool: 'write_file', args: { path: 'read-only.txt', content: 'x' } }], 'could not write');
+  const { frames } = await runStream({ goal: 'write a file', effort: 'balanced', access: 'read', provider: 'ollama', fsRoot: projDir });
+  assert.equal(progress(frames, 'approval-required').length, 0);
+  const results = progress(frames, 'tool-result');
+  assert.equal(results[0].ok, false);
+  assert.match(results[0].observation, /Read only: changing files is off/);
+  assert.equal(await exists(path.join(projDir, 'read-only.txt')), false);
+  script = null;
+});
+
+test('approval routes answer 404, 400 and 409 plainly', async () => {
+  await setAccess({ level: 'bypass' });
+  const missing = await answer('00000000-0000-0000-0000-000000000000', 'x', 'allow');
+  assert.equal(missing.status, 404);
+  assert.equal((await fetch(`${baseUrl}/api/agent/runs/nope/approvals`, { headers: authJson() })).status, 404);
+
+  script = steps([{ tool: 'run_command', args: { command: 'touch codes.txt' } }]);
+  const statuses = {};
+  await runStream(
+    { goal: 'status codes', effort: 'balanced', access: 'ask', provider: 'ollama', fsRoot: projDir },
+    async (frame, id) => {
+      if (frame.data?.type !== 'approval-required') return;
+      statuses.bad = (await answer(id, frame.data.approvalId, 'maybe')).status;
+      statuses.unknown = (await answer(id, 'not-an-approval', 'allow')).status;
+      statuses.ok = (await answer(id, frame.data.approvalId, 'deny')).status;
+      statuses.again = (await answer(id, frame.data.approvalId, 'allow')).status;
+    }
+  );
+  assert.deepEqual(statuses, { bad: 400, unknown: 404, ok: 200, again: 409 });
+  script = null;
+});
+
+test('stopping a run cancels the approval it is waiting on', async () => {
+  await setAccess({ level: 'bypass' });
+  script = steps([{ tool: 'run_command', args: { command: 'touch stopped.txt' } }]);
+  const { frames } = await runStream(
+    { goal: 'stop while waiting', effort: 'balanced', access: 'ask', provider: 'ollama', fsRoot: projDir },
+    async (frame, id) => {
+      if (frame.data?.type !== 'approval-required') return;
+      const res = await fetch(`${baseUrl}/api/agent/runs/${id}/stop`, { method: 'POST', headers: authJson() });
+      assert.equal(res.status, 200);
+    }
+  );
+  assert.deepEqual(progress(frames, 'approval-resolved').map((r) => r.decision), ['cancelled']);
+  assert.equal(resultOf(frames).stopReason, 'cancelled');
+  assert.equal(await exists(path.join(projDir, 'stopped.txt')), false);
+  script = null;
+  await setAccess({ level: 'chat' });
 });
 
 test('concurrent runs are capped on the server, not just in the UI', async () => {
   // Any token holder can call this endpoint, so the UI guard is not enough.
-  replyIndex = 0;
+  replyIndex = 0; script = null;
   const slowGoal = 'concurrency probe';
   const attempts = await Promise.all(Array.from({ length: 6 }, () =>
     fetch(`${baseUrl}/api/agent/runs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-mirabilis-mcp-token': token },
+      headers: authJson(),
       body: JSON.stringify({ goal: slowGoal, effort: 'high', provider: 'ollama' })
     }).then(async (r) => ({ status: r.status, body: await r.text() }))
   ));
