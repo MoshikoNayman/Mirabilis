@@ -2,6 +2,7 @@
 // open overlays, workspace pins, Go Dark and the toast queue.
 
 import { useSyncExternalStore } from 'react';
+import { normalizeAccess } from '../lib/access';
 
 const GO_DARK_KEY = 'mirabilis-go-dark';
 const WS_PINS_KEY = 'mirabilis-workspace-pins';
@@ -52,6 +53,11 @@ let state = {
   // Go Dark: the UI blocks remote providers and every request is flagged
   // local-only so the backend refuses egress.
   goDark: readGoDark(),
+  // Settings sheet; ChatApp renders it so the Dock and the shortcut can open it anywhere.
+  settingsOpen: false,
+  settingsSection: 'access',
+  // Copy of the backend Access level for the composer chip; the backend decides.
+  access: 'chat',
   toasts: []
 };
 
@@ -259,6 +265,24 @@ export const appStore = {
   },
   getWorkspaceRoot() {
     return state.workspaceRoot;
+  },
+  openSettings(section = 'access') {
+    state.settingsOpen = true;
+    state.settingsSection = typeof section === 'string' && section ? section : 'access';
+    state.commandOpen = false;
+    state.searchOpen = false;
+    emit();
+  },
+  closeSettings() {
+    state.settingsOpen = false;
+    emit();
+  },
+  setAccess(level) {
+    state.access = normalizeAccess(level);
+    emit();
+  },
+  getAccess() {
+    return state.access;
   },
   closeAll() {
     state.commandOpen = false;

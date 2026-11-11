@@ -4,6 +4,7 @@
 // in a popover. No Stop button here: Send becomes Stop during a run.
 
 import { memo, useEffect, useRef, useState } from 'react';
+import { accessMeta } from '../../lib/access';
 
 const fmtMs = (ms) => {
   const s = Math.max(0, Math.floor((ms || 0) / 1000));
@@ -67,19 +68,26 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
   const live = status === 'running' || status === 'stopping';
   const limits = budget?.limits;
   const lastEvent = events.length ? events[events.length - 1].text : '';
+  // A stopping run's approvals are being cancelled, so only a running one waits.
+  const pending = status === 'running' && Array.isArray(run.approvals) ? run.approvals : [];
+  const waiting = pending.length > 0;
+  // accessNow is set when Access was lowered mid-run, which the backend applies at once.
+  const access = run.access ? accessMeta(run.accessNow || run.access) : null;
 
-  // Numbers only, e.g. "8m | 3/12 | 7/60"; the popover carries the labels.
+  // Short form, e.g. "8m left | 3/12 | 7/60"; the popover carries the labels.
   const summary = limits
     ? [
-      live ? fmtShort(limits.maxWallMs - (budget.elapsedMs || 0)) : (stopReason || status),
+      live ? `${fmtShort(limits.maxWallMs - (budget.elapsedMs || 0))} left` : (stopReason || status),
       `${budget.iterations}/${limits.maxIterations}`,
       `${budget.toolCalls}/${limits.maxToolCalls}`
     ].join(' | ')
     : (stopReason || status);
 
-  const headline = live
-    ? (PHASE_LABEL[run.phase] || 'Working')
-    : status === 'completed' ? 'Done' : 'Stopped';
+  const headline = waiting
+    ? 'Waiting for approval'
+    : live
+      ? (PHASE_LABEL[run.phase] || 'Working')
+      : status === 'completed' ? 'Done' : 'Stopped';
 
   return (
     <div ref={wrapRef} className="relative mx-1 flex min-w-0 flex-1 items-center justify-center sm:mx-2">
@@ -87,11 +95,17 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label={`Autonomous run: ${headline}. ${summary}. Click for details.`}
+        aria-label={`Run: ${headline}. ${summary}. Click for details.`}
         title={goal}
-        className="au-focus flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-full border border-[var(--hairline)] bg-black/[0.03] px-2 py-0.5 text-[10px] transition hover:bg-black/[0.06] dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
+        className={`au-focus flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-full border px-2 py-0.5 text-[10px] transition ${
+          waiting
+            ? 'border-amber-400/50 bg-amber-500/10 hover:bg-amber-500/15'
+            : 'border-[var(--hairline)] bg-black/[0.03] hover:bg-black/[0.06] dark:bg-white/[0.04] dark:hover:bg-white/[0.08]'
+        }`}
       >
-        {live
+        {waiting
+          ? <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-500" />
+          : live
           ? <span className="au-typing shrink-0" aria-hidden="true"><i /><i /><i /></span>
           : (
             <span
@@ -100,9 +114,9 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
             />
           )}
         {/* Parts appear by width so the strip never pushes Send off screen. */}
-        <span className="hidden shrink-0 font-medium text-[color:var(--text-main)] sm:inline">{headline}</span>
+        <span className={`hidden shrink-0 font-medium sm:inline ${waiting ? 'text-amber-700 dark:text-amber-300' : 'text-[color:var(--text-main)]'}`}>{headline}</span>
         <span className="hidden shrink-0 font-mono text-[color:var(--text-muted)] md:inline">{summary}</span>
-        {live && lastEvent && (
+        {live && !waiting && lastEvent && (
           <span className="hidden min-w-0 truncate text-[color:var(--text-muted)] opacity-70 lg:inline">
             | {lastEvent}
           </span>
@@ -134,13 +148,13 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
         <div
           className="absolute bottom-full left-1/2 z-30 mb-2 w-[min(30rem,85vw)] -translate-x-1/2 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur"
           role="dialog"
-          aria-label="Autonomous run details"
+          aria-label="Run details"
         >
           <div className="mb-2 flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-[11px] font-semibold text-[color:var(--text-main)]">{goal}</p>
               <p className="mt-0.5 text-[10px] text-[color:var(--text-muted)]">
-                {effort}{run.policy ? ` | ${run.policy}` : ''}{stopReason ? ` | ${stopReason}` : ''}
+                {effort}{access ? ` | Access: ${access.label}` : ''}{stopReason ? ` | ${stopReason}` : ''}
               </p>
             </div>
             {live && onStop && (
@@ -153,6 +167,13 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
               </button>
             )}
           </div>
+
+          {waiting && (
+            <p className="mb-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-800 dark:text-amber-200">
+              Needs your approval: {pending[0].title || 'an action'}.
+              {pending.length > 1 ? ` ${pending.length - 1} more waiting.` : ''} Answer it above the message box.
+            </p>
+          )}
 
           {limits && (
             <div className="mb-2 space-y-1">

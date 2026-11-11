@@ -177,7 +177,10 @@ export default function WatchedWorkspace({ open }) {
 
         <div className="flex flex-col gap-2 border-b px-4 py-3" style={{ borderColor: 'var(--hairline)' }}>
           <div className="flex items-center gap-1.5">
+            {/* Focus moves in on open: the picker can open over Settings, which otherwise keeps it. */}
             <input
+              autoFocus
+              aria-label="Folder to watch"
               className={fieldClass}
               placeholder="/absolute/path/to/folder"
               value={pathInput}

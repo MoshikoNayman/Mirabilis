@@ -41,14 +41,17 @@ export default function VoiceChat({
   onGenderChange,
   onOrbTap,
   srSupported = true,
-  note = ''
+  note = '',
+  // A pending agent approval, shown here because this panel covers the composer.
+  children = null
 }) {
-  const label = PHASE_LABEL[phase] || PHASE_LABEL.idle;
+  const waiting = Boolean(children);
+  const label = waiting ? 'Waiting for your approval' : (PHASE_LABEL[phase] || PHASE_LABEL.idle);
   const orbPhase = srSupported ? phase : 'idle';
 
   return (
     <Modal open={open} onClose={onClose} align="center" className="max-w-[560px]" labelledBy="voice-chat-title">
-      <div className="au-chrome au-hairline au-elev-3 relative overflow-hidden rounded-[var(--r-xl)]">
+      <div className="au-chrome au-hairline au-elev-3 relative flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-[var(--r-xl)]">
         <div
           className="flex items-center justify-between gap-2 border-b px-4 py-3"
           style={{ borderColor: 'var(--hairline)' }}
@@ -64,14 +67,16 @@ export default function VoiceChat({
           </IconButton>
         </div>
 
-        <div className="flex flex-col items-center gap-5 px-6 py-8">
+        {/* Scrolls on short windows, so an approval card never pushes the controls off screen. */}
+        <div className="au-scroll flex min-h-0 flex-col items-center gap-5 overflow-y-auto px-6 py-8">
           <button
             type="button"
+            data-voice-orb=""
             onClick={onOrbTap}
             disabled={!srSupported}
             aria-label={srSupported ? 'Tap to talk' : 'Speech recognition unavailable'}
             title={srSupported ? label : 'Speech recognition unavailable'}
-            className="au-focus relative inline-flex items-center justify-center rounded-full transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            className="au-focus relative inline-flex shrink-0 items-center justify-center rounded-full transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
             style={{ width: 180, height: 180 }}
           >
             <span
@@ -109,7 +114,7 @@ export default function VoiceChat({
             )}
 
             {/* Latest reply, shown while and after speaking */}
-            {replyText ? (
+            {replyText && !waiting ? (
               <p className="au-scroll mt-1 max-h-[22vh] w-full overflow-y-auto whitespace-pre-wrap rounded-[var(--r-md)] bg-[color:var(--hairline)] px-3 py-2 text-left text-[length:var(--text-sm)] text-[color:var(--text-main)]">
                 {replyText}
               </p>
@@ -119,6 +124,8 @@ export default function VoiceChat({
           {note ? (
             <p className="text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{note}</p>
           ) : null}
+
+          {waiting ? <div className="w-full text-left">{children}</div> : null}
         </div>
 
         <div

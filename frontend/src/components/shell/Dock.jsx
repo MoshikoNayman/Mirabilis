@@ -4,8 +4,8 @@
 import { useEffect, useRef, useState } from 'react';
 import StatusOrb from '../ui/StatusOrb';
 import {
-  IconButton, Panel, MenuDotsIcon, SearchIcon, RecallIcon, ServerIcon,
-  CommandIcon, MoonIcon, IncognitoIcon, BellIcon, FolderIcon
+  IconButton, Panel, Kbd, MenuDotsIcon, SearchIcon, RecallIcon, ServerIcon,
+  CommandIcon, MoonIcon, IncognitoIcon, BellIcon, FolderIcon, GearIcon
 } from '../ui/primitives';
 import { appStore, useAppStore } from '../../store/useAppStore';
 import {
@@ -46,6 +46,11 @@ function Divider() {
   return <div className="my-1 border-t" style={{ borderColor: 'var(--hairline)' }} />;
 }
 
+function settingsShortcut() {
+  if (typeof navigator === 'undefined') return 'Ctrl+,';
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '') ? '\u2318,' : 'Ctrl+,';
+}
+
 function ControlMenu({ onClose }) {
   useThemeTick();
   const ref = useRef(null);
@@ -79,6 +84,12 @@ function ControlMenu({ onClose }) {
             try { window.dispatchEvent(new CustomEvent('mirabilis:new-ephemeral-chat')); } catch { /* ignore */ }
           }, 60);
         })}
+      />
+      <MenuRow
+        icon={<GearIcon size={15} />}
+        label="Settings"
+        onClick={act(() => appStore.openSettings())}
+        right={<Kbd>{settingsShortcut()}</Kbd>}
       />
 
       <Divider />

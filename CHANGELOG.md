@@ -7,7 +7,23 @@ Versions use Junos-style tags. Newest first.
 - Autonomous runs (High effort, 1 hour, 5 hours): plan, act, validate, repair
   under a hard budget enforced in code. Answer styles stay single-shot.
 - Out of budget returns the work so far; failed validation is reported as such.
-- Read-only tools by default; `write` and `full` are explicit grants.
+- Access levels in the composer: Chat only (default), Read only, Ask first,
+  Bypass. Saved in `access.json`; replaces the `write` and `full` tool policies.
+- Ask first pauses the run on an approval card: allow once, allow file changes
+  for the run, always allow a command, or deny with a note.
+- Bypass runs any command or edit with no prompt and no blocklist.
+- A shell parser decides which commands are read-only: pipes, redirects,
+  substitution, and write flags such as `sort -o`, `rg --pre` and `git -c`.
+- Troubleshooting tools: system overview, processes, listening ports, logs.
+  Mirabilis reads its own source and `docs/ARCHITECTURE.md` to explain itself.
+- `edit_file`; every file is copied to `agent-runs/<id>/before/` before it changes.
+- Connectors: MCP servers over stdio or HTTP, a catalog (filesystem, memory,
+  git, fetch, time, Junos and more), per-tool Allow / Ask / Off, logs, restart.
+  Replaces the old MCP panel; `mcp-servers.json` entries are imported once.
+- Settings sheet (Cmd+,) replaces the Options menu: Access, Connectors,
+  Chat tools, Voice, Remote Control, Labs.
+- Desktop quits gracefully, so connector processes stop with the app.
+- Run log redaction covers bearer tokens, `*_token` keys and URL passwords.
 - Sub-agents share the parent budget, two at a time by default.
 - `POST /api/agent/runs` streams progress; stop kills the process group.
 - Run panel with tool calls and budget meters; context usage ring.

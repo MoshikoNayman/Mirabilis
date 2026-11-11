@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, memo, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -9,16 +9,30 @@ import 'katex/dist/katex.min.css';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 import { FlowerMark } from './ui/StatusOrb';
-import { IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon } from './ui/primitives';
+import {
+  Badge, Button, SegmentedControl, Spinner, Switch,
+  IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon, CheckIcon,
+  GearIcon, ShieldIcon, PlugIcon, MicIcon, TerminalIcon, FlaskIcon, AlertIcon
+} from './ui/primitives';
 import TabSwitch from './shell/TabSwitch';
 import CommitmentRadar from './shell/CommitmentRadar';
 import VoiceChat from './shell/VoiceChat';
 import AgentRunPanel from './shell/AgentRunPanel';
+import ApprovalCard from './shell/ApprovalCard';
+import SettingsSheet, { SettingsGroup, SettingsList, SettingsRow, SettingsNotice } from './settings/SettingsSheet';
+import AccessPane from './settings/AccessPane';
+import ConnectorsPane from './settings/ConnectorsPane';
 import { playSend, playReceive, playError } from '../lib/sounds';
 import { postJSON } from '../lib/api';
 import { getSessionToken } from '../lib/sessionToken';
 import { createSseParser } from '../lib/sseParser';
-import { restoreToolPolicy, needsFullAcknowledgement, describeRunError } from '../lib/agentRunPolicy';
+import {
+  chooseSendRoute, toApproval, addApproval, removeApproval, approvalEventType,
+  approvalNarration, approvalReplyOutcome, runRefusal, describeRunError,
+  isExplicitImagePrompt, toImagePrompt, accessChangeNotice,
+  contextMessages, conversationContext, buildRunContext, isTextAttachment
+} from '../lib/agentRunPolicy';
+import { ACCESS_LEVELS, ACCESS_TONE_COLOR, accessMeta, lowerAccess, fetchAccess, saveAccess, describeApiError } from '../lib/access';
 import { hasUsableKey, providerNeedsKey, missingKeyMessage, providerLabel } from '../lib/providerKeys';
 import { needsServerModelSwitch } from '../lib/providerCapabilities';
 import { appStore, useAppStore } from '../store/useAppStore';
@@ -54,12 +68,8 @@ const EFFORT_OPTIONS = [
 
 const AGENTIC_EFFORTS = new Set(EFFORT_OPTIONS.filter((o) => o.agentic).map((o) => o.value));
 
-// Read-only by default: long tiers run unattended, so write and exec must be granted.
-const TOOL_POLICY_OPTIONS = [
-  { value: 'read-only', label: 'Read only', hint: 'inspect files' },
-  { value: 'write',     label: 'Read + write', hint: 'can edit files' },
-  { value: 'full',      label: 'Full', hint: 'can run commands' }
-];
+/** The composer Access menu's width (w-80). */
+const ACCESS_MENU_WIDTH = 320;
 
 /** First line of the message, code removed, short enough to be a search query. */
 function searchQueryFrom(text) {
@@ -374,6 +384,63 @@ function isImageRequest(text) {
   return hasVerb && hasNoun;
 }
 
+/**
+ * Answer-mode lines for Guided Learning, an answer effort and Deep thinking.
+ * Agent runs pass no effort: their effort profile carries its own style.
+ */
+function answerModeLines({ guided, effort, deep }) {
+  const lines = [];
+  if (guided) {
+    lines.push(
+      'Teaching mode: Explain with a short, structured learning path.',
+      'Ask one clarifying question if needed, then provide step-by-step guidance.',
+      'Use examples and a tiny recap at the end.'
+    );
+  }
+  if (effort === 'instant') {
+    lines.push('Effort: instant. Give the shortest possible correct answer, one line if you can, no preamble.');
+  }
+  if (effort === 'fast') {
+    lines.push('Effort: fast. Answer concisely and directly, skip preamble.');
+  }
+  if (effort === 'thorough') {
+    lines.push('Effort: thorough. Work through the key considerations and give a complete, well-structured answer.');
+  }
+  // balanced: no extra instruction. Effort "deep" and the deep-thinking toggle
+  // share one set of lines so they do not double up.
+  if (deep || effort === 'deep') {
+    lines.push(
+      'Deep thinking mode: reason carefully, compare alternatives, and include key trade-offs.',
+      'Provide a concise executive answer first, then details.'
+    );
+  }
+  return lines;
+}
+
+/** Text of the readable files attached to these messages, by storedName. Unreadable files are left out. */
+async function fetchAttachmentTexts(messages) {
+  const files = [];
+  for (const m of messages) {
+    for (const a of (Array.isArray(m.attachments) ? m.attachments : [])) {
+      if (isTextAttachment(a)) files.push(a);
+    }
+  }
+  const texts = new Map();
+  await Promise.all(files.map(async (a) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(`${API_BASE}${a.url}`, { signal: ctrl.signal });
+      if (res.ok) texts.set(a.storedName, await res.text());
+    } catch {
+      // Named in the context as unreadable instead.
+    } finally {
+      clearTimeout(timer);
+    }
+  }));
+  return texts;
+}
+
 async function api(path, options = {}) {
   // Privileged routes need the session token; unguarded routes ignore the header.
   const token = await getSessionToken();
@@ -396,6 +463,19 @@ async function api(path, options = {}) {
   }
 
   return response.json();
+}
+
+// api() throws the raw response text; show the server's sentence when it sent
+// JSON, short plain text as is, and the fallback for pages or payloads.
+function plainError(message, fallback = 'Something went wrong.') {
+  const raw = String(message || '').trim();
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.error === 'string' && parsed.error.trim()) return parsed.error.trim();
+  } catch {
+    // Plain text already.
+  }
+  return raw && raw.length <= 300 && !/^[<{[]/.test(raw) ? raw : fallback;
 }
 
 // 'search' when the query needs live data, 'skip' when training knowledge suffices.
@@ -451,6 +531,13 @@ function estimateTokens(text) {
   return Math.max(1, Math.ceil(normalized.length / 4));
 }
 
+// Saved agent-run messages carry no estimate, so count their text; an explicit
+// estimate, zero included, stands.
+function messageTokens(message) {
+  const est = Number(message?.tokenEstimate);
+  return message?.tokenEstimate != null && Number.isFinite(est) ? est : estimateTokens(message?.content);
+}
+
 function formatTokenCount(value) {
   const amount = Number(value || 0);
   return `${amount.toLocaleString()} tok`;
@@ -482,14 +569,6 @@ function formatFileSize(bytes) {
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-function stringifyJson(value) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return '{}';
-  }
 }
 
 function plainTextForSpeech(text) {
@@ -1055,7 +1134,7 @@ const MessageRow = memo(function MessageRow({
       {message.role === 'user' && message.content && (
         <div className="mt-1.5 flex items-center justify-between border-t border-[var(--hairline)] pt-1">
           <span className="font-mono text-[9px] leading-none uppercase tracking-wide text-[color:var(--text-main)] opacity-70">
-            You | {(message.tokenEstimate || 0).toLocaleString()} tok
+            You | {messageTokens(message).toLocaleString()} tok
           </span>
           <CopyMessageButton
             text={message.content || ''}
@@ -1101,7 +1180,7 @@ const MessageRow = memo(function MessageRow({
                   // Exact count from Ollama eval metrics when present, else the char/4 estimate.
                   const p = message.performance;
                   const exactOut = p && p.source === 'ollama' && !p.isEstimate && p.tokens != null;
-                  const count = exactOut ? p.tokens : (message.tokenEstimate || 0);
+                  const count = exactOut ? p.tokens : messageTokens(message);
                   return `${Number(count).toLocaleString()} tok`;
                 })()}
                 {message.performance && message.performance.tokensPerSec != null ? (() => {
@@ -1180,6 +1259,445 @@ const MessageRow = memo(function MessageRow({
   prev.voiceEngine === next.voiceEngine &&
   prev.voiceSupported === next.voiceSupported
 ));
+
+/* Settings sections. They are views over ChatApp state, so every value and
+   handler comes in as a prop. Rows follow SettingsRow: label and one line on
+   the left, the control on the right. */
+
+const SETTINGS_FIELD =
+  'au-hairline au-focus h-8 min-w-0 rounded-[var(--r-sm)] bg-transparent px-3 text-[length:var(--text-xs)] text-[color:var(--text-main)] placeholder:text-[color:var(--text-muted)] placeholder:opacity-60 disabled:opacity-50';
+// Inputs and selects in the control column; narrower on phones.
+const CONTROL_WIDTH = 'w-44 sm:w-56';
+const SETTINGS_SELECT =
+  'au-hairline au-focus h-8 min-w-0 rounded-[var(--r-sm)] bg-[var(--material-thick)] px-2 text-[length:var(--text-xs)] text-[color:var(--text-main)] disabled:opacity-50';
+const SETTINGS_NOTE = 'text-[length:var(--text-2xs)] leading-snug text-[color:var(--text-muted)]';
+
+// Same hint as the Dock: the Command key symbol on Apple platforms.
+function settingsShortcutLabel() {
+  if (typeof navigator === 'undefined') return 'Ctrl+,';
+  return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '') ? '\u2318,' : 'Ctrl+,';
+}
+
+function RangeControl({ label, value, min, max, step, onChange }) {
+  return (
+    <div className="flex w-44 items-center gap-2">
+      <input
+        type="range"
+        aria-label={label}
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="min-w-0 flex-1 accent-[var(--accent)]"
+      />
+      <span className="w-9 shrink-0 text-right font-mono text-[length:var(--text-2xs)] tabular-nums text-[color:var(--text-muted)]">
+        {Number(value).toFixed(2)}
+      </span>
+    </div>
+  );
+}
+
+function BusyLabel({ busy, busyText, children }) {
+  return busy ? <><Spinner size={12} />{busyText}</> : children;
+}
+
+function ChatToolsSettings({
+  instructionsVisible, instructionsLabel, onInstructionsChange,
+  webSearch, webSearchStatus, goDark, onWebSearchChange,
+  imageReady, imageDevice, onCreateImage,
+  vaultEnabled, vaultStatus, vaultFolder, vaultBusy, vaultMessage,
+  onVaultEnabledChange, onVaultFolderChange, onIndexVault, onClearVault
+}) {
+  const uid = useId();
+  const indexed = (vaultStatus?.chunkCount || 0) > 0;
+  return (
+    <>
+      <SettingsGroup title="Answers">
+        <SettingsList>
+          <SettingsRow
+            label="Instructions"
+            description={`Shows the instruction editor in the sidebar. Profile: ${instructionsLabel}.`}
+          >
+            <Switch checked={instructionsVisible} onChange={onInstructionsChange} label="Show instructions" />
+          </SettingsRow>
+          <SettingsRow
+            label="Web search"
+            description="Adds web results when a question needs current facts. Same switch as www in the message bar."
+            detail={goDark ? (
+              <span className="text-[length:var(--text-2xs)] text-amber-700 dark:text-amber-300">
+                Go Dark is on, so no search leaves this computer.
+              </span>
+            ) : webSearchStatus === 'error' ? (
+              <span className="text-[length:var(--text-2xs)] text-rose-600 dark:text-rose-300">The last search failed.</span>
+            ) : null}
+          >
+            <Switch checked={webSearch} onChange={onWebSearchChange} label="Web search" />
+          </SettingsRow>
+          <SettingsRow
+            label="Create image"
+            description="Starts an image prompt in the message box. Images are made on this computer."
+            detail={
+              <Badge tone={imageReady ? 'success' : 'neutral'}>
+                {imageReady ? `Ready${imageDevice ? ` on ${imageDevice}` : ''}` : 'Image service offline'}
+              </Badge>
+            }
+          >
+            <Button size="sm" variant="soft" onClick={onCreateImage}>Start a prompt</Button>
+          </SettingsRow>
+        </SettingsList>
+      </SettingsGroup>
+
+      <SettingsGroup
+        title="Config Vault"
+        description="Cited answers from your own config files. Indexing and search run on this computer, so it works under Go Dark."
+      >
+        <SettingsList>
+          <SettingsRow
+            label="Use Config Vault"
+            description={indexed
+              ? `${vaultStatus.fileCount} files, ${vaultStatus.chunkCount} chunks indexed with ${vaultStatus.embedModel || 'a local model'}.`
+              : 'Nothing is indexed yet. Index a folder below first.'}
+          >
+            <Switch checked={vaultEnabled} onChange={onVaultEnabledChange} label="Use Config Vault" />
+          </SettingsRow>
+          <SettingsRow
+            label="Folder"
+            htmlFor={`${uid}-vault`}
+            description="Embeds the files with a local Ollama model. Pull nomic-embed-text for sharper retrieval."
+            detail={
+              <>
+                <form
+                  className="mt-2 flex items-center gap-2"
+                  onSubmit={(e) => { e.preventDefault(); if (!vaultBusy) onIndexVault(); }}
+                >
+                  <input
+                    id={`${uid}-vault`}
+                    type="text"
+                    value={vaultFolder}
+                    onChange={(e) => onVaultFolderChange(e.target.value)}
+                    placeholder="/path/to/your/configs"
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    className={`${SETTINGS_FIELD} w-full font-mono`}
+                  />
+                  {/* r-sm to match the field beside them; it sorts after the size's r-md. */}
+                  <Button type="submit" variant="soft" className="rounded-[var(--r-sm)]" disabled={vaultBusy || !String(vaultFolder || '').trim()}>
+                    <BusyLabel busy={vaultBusy} busyText="Working">Index</BusyLabel>
+                  </Button>
+                  {indexed ? (
+                    <Button variant="ghost" className="rounded-[var(--r-sm)]" onClick={onClearVault} disabled={vaultBusy}>Clear</Button>
+                  ) : null}
+                </form>
+                {vaultMessage ? <p role="status" className={`mt-2 ${SETTINGS_NOTE}`}>{vaultMessage}</p> : null}
+              </>
+            }
+          />
+        </SettingsList>
+      </SettingsGroup>
+    </>
+  );
+}
+
+function VoiceSettings({
+  voiceTools, settingUpStt, onSetupStt,
+  autoSpeak, onAutoSpeakChange,
+  voiceSupported, speaking, onPreview,
+  engine, onEngineChange,
+  voices, voiceUri, onVoiceUriChange,
+  rate, onRateChange, pitch, onPitchChange,
+  piperModels, piperModelId, onPiperModelChange,
+  settingUpPiper, onSetupPiper, downloadingPiperId, onDownloadPiper
+}) {
+  const uid = useId();
+  const stt = voiceTools?.stt;
+  const piperReady = Boolean(voiceTools?.voices?.localPiper);
+  const catalog = Array.isArray(piperModels) ? piperModels : [];
+  const installed = catalog.filter((m) => m.installed);
+  const sttText = stt?.ready
+    ? (stt.whisperCpp ? 'Local whisper.cpp, fully offline.' : stt.openai ? 'Uses OpenAI transcription.' : 'Local Whisper command line tool.')
+    : 'Install whisper.cpp to talk hands-free. A one-time download of about 150 MB that then runs offline.';
+  return (
+    <>
+      <SettingsGroup title="Talking" description="Dictation and voice chat turn your speech into text.">
+        <SettingsList>
+          <SettingsRow label="Speech to text" description={sttText}>
+            {stt?.ready ? (
+              <Badge tone="success">Ready</Badge>
+            ) : (
+              <Button size="sm" variant="primary" onClick={onSetupStt} disabled={settingUpStt}>
+                <BusyLabel busy={settingUpStt} busyText="Installing">Install</BusyLabel>
+              </Button>
+            )}
+          </SettingsRow>
+        </SettingsList>
+      </SettingsGroup>
+
+      <SettingsGroup title="Spoken replies">
+        <SettingsList>
+          <SettingsRow label="Read replies aloud" description="Speaks each new answer when it finishes.">
+            <Switch checked={autoSpeak} onChange={onAutoSpeakChange} label="Read replies aloud" />
+          </SettingsRow>
+          <SettingsRow
+            label="Voice engine"
+            description="Browser voices work at once. Piper neural voices sound more natural and run offline."
+          >
+            <SegmentedControl
+              size="sm"
+              value={engine}
+              onChange={onEngineChange}
+              options={[{ value: 'browser', label: 'Browser' }, { value: 'piper', label: 'Piper neural' }]}
+            />
+          </SettingsRow>
+          {engine === 'browser' ? (
+            <>
+              <SettingsRow
+                label="Voice"
+                htmlFor={`${uid}-voice`}
+                description={voiceTools?.platform === 'darwin'
+                  ? 'More voices: System Settings, Accessibility, Spoken Content, Manage Voices.'
+                  : 'Voices come from your system.'}
+              >
+                <select
+                  id={`${uid}-voice`}
+                  value={voiceUri}
+                  onChange={(e) => onVoiceUriChange(e.target.value)}
+                  className={`${SETTINGS_SELECT} ${CONTROL_WIDTH}`}
+                >
+                  {(voices || []).map((voice) => (
+                    <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name} ({voice.lang})</option>
+                  ))}
+                </select>
+              </SettingsRow>
+              <SettingsRow label="Rate">
+                <RangeControl label="Speaking rate" value={rate} min={0.8} max={1.5} step={0.05} onChange={onRateChange} />
+              </SettingsRow>
+              <SettingsRow label="Pitch">
+                <RangeControl label="Voice pitch" value={pitch} min={0.8} max={1.4} step={0.05} onChange={onPitchChange} />
+              </SettingsRow>
+            </>
+          ) : !piperReady ? (
+            <SettingsRow label="Piper" description="Free, high quality voices that run on this computer.">
+              <Button size="sm" variant="primary" onClick={onSetupPiper} disabled={settingUpPiper}>
+                <BusyLabel busy={settingUpPiper} busyText="Installing">Install Piper</BusyLabel>
+              </Button>
+            </SettingsRow>
+          ) : (
+            <>
+              {installed.length > 0 ? (
+                <SettingsRow label="Active voice" htmlFor={`${uid}-piper`}>
+                  <select
+                    id={`${uid}-piper`}
+                    value={piperModelId}
+                    onChange={(e) => onPiperModelChange(e.target.value)}
+                    className={`${SETTINGS_SELECT} ${CONTROL_WIDTH}`}
+                  >
+                    {installed.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  </select>
+                </SettingsRow>
+              ) : null}
+              <SettingsRow label="Speed">
+                <RangeControl label="Speaking speed" value={rate} min={0.8} max={1.5} step={0.05} onChange={onRateChange} />
+              </SettingsRow>
+            </>
+          )}
+          <SettingsRow
+            label="Preview"
+            description={voiceSupported || engine === 'piper'
+              ? 'Plays a short sample with these settings.'
+              : 'This browser cannot speak. Choose Piper neural instead.'}
+          >
+            <Button size="sm" variant="soft" onClick={onPreview} disabled={!voiceSupported && engine === 'browser'}>
+              {speaking ? 'Stop' : 'Preview'}
+            </Button>
+          </SettingsRow>
+        </SettingsList>
+      </SettingsGroup>
+
+      {engine === 'piper' && piperReady && catalog.length > 0 ? (
+        <SettingsGroup title="Piper voices" description="Free voices. Each one downloads once and then works offline.">
+          <SettingsList>
+            {catalog.map((m) => (
+              <SettingsRow key={m.id} label={m.label}>
+                {m.installed ? (
+                  <Badge tone="success">Installed</Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="soft"
+                    onClick={() => onDownloadPiper(m.id)}
+                    disabled={downloadingPiperId !== null}
+                  >
+                    <BusyLabel busy={downloadingPiperId === m.id} busyText="Downloading">
+                      {`Download${m.sizeMb ? ` ${m.sizeMb} MB` : ''}`}
+                    </BusyLabel>
+                  </Button>
+                )}
+              </SettingsRow>
+            ))}
+          </SettingsList>
+        </SettingsGroup>
+      ) : null}
+    </>
+  );
+}
+
+const SSH_AUTH_HINT = {
+  agent: 'Uses the keys loaded in your SSH agent.',
+  key: 'Uses a private key file on this computer.',
+  password: 'Typed each time you connect.'
+};
+
+function RemoteSettings({
+  connected, target, error,
+  type, onTypeChange, host, onHostChange, user, onUserChange, port, onPortChange,
+  authType, onAuthTypeChange, keyPath, onKeyPathChange, password, onPasswordChange,
+  connecting, onConnect, onDisconnect
+}) {
+  const uid = useId();
+  if (connected) {
+    return (
+      <SettingsGroup title="Connection">
+        <SettingsList>
+          <SettingsRow
+            label="Connected"
+            description="Shell code blocks in answers have a Run button for this target. Nothing runs until you click it."
+            detail={<span className="block truncate font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]" title={target}>{target}</span>}
+          >
+            <Button size="sm" variant="danger" onClick={onDisconnect}>Disconnect</Button>
+          </SettingsRow>
+        </SettingsList>
+      </SettingsGroup>
+    );
+  }
+  const ssh = type === 'ssh';
+  const ready = !connecting && (!ssh || (host.trim() && user.trim()));
+  return (
+    <SettingsGroup
+      title="Connection"
+      description="Once connected, shell code blocks in answers get a Run button. Nothing runs until you click it."
+    >
+      {error ? (
+        <SettingsNotice tone="danger" icon={<AlertIcon size={13} />} className="mb-3">
+          Could not connect. {error}
+        </SettingsNotice>
+      ) : null}
+      <SettingsList>
+        <SettingsRow label="Target" description={ssh ? 'A server you reach over SSH.' : 'This computer.'}>
+          <SegmentedControl
+            size="sm"
+            value={type}
+            onChange={onTypeChange}
+            options={[{ value: 'local', label: 'Localhost' }, { value: 'ssh', label: 'SSH' }]}
+          />
+        </SettingsRow>
+        {ssh ? (
+          <>
+            <SettingsRow label="Host" htmlFor={`${uid}-host`}>
+              <input id={`${uid}-host`} type="text" value={host} onChange={(e) => onHostChange(e.target.value)} placeholder="hostname or IP" spellCheck={false} autoCapitalize="off" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH}`} />
+            </SettingsRow>
+            <SettingsRow label="User" htmlFor={`${uid}-user`}>
+              <input id={`${uid}-user`} type="text" value={user} onChange={(e) => onUserChange(e.target.value)} placeholder="username" spellCheck={false} autoCapitalize="off" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH}`} />
+            </SettingsRow>
+            <SettingsRow label="Port" htmlFor={`${uid}-port`}>
+              <input id={`${uid}-port`} type="text" inputMode="numeric" value={port} onChange={(e) => onPortChange(e.target.value)} placeholder="22" className={`${SETTINGS_FIELD} w-20`} />
+            </SettingsRow>
+            <SettingsRow label="Sign in with" description={SSH_AUTH_HINT[authType]}>
+              <SegmentedControl
+                size="sm"
+                value={authType}
+                onChange={onAuthTypeChange}
+                options={[{ value: 'agent', label: 'Agent' }, { value: 'key', label: 'Key' }, { value: 'password', label: 'Password' }]}
+              />
+            </SettingsRow>
+            {authType === 'key' ? (
+              <SettingsRow label="Key file" htmlFor={`${uid}-key`}>
+                <input id={`${uid}-key`} type="text" value={keyPath} onChange={(e) => onKeyPathChange(e.target.value)} placeholder="/path/to/id_rsa" spellCheck={false} autoCapitalize="off" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH} font-mono`} />
+              </SettingsRow>
+            ) : null}
+            {authType === 'password' ? (
+              <SettingsRow label="Password" htmlFor={`${uid}-password`}>
+                <input id={`${uid}-password`} type="password" value={password} onChange={(e) => onPasswordChange(e.target.value)} placeholder="password" autoComplete="new-password" className={`${SETTINGS_FIELD} ${CONTROL_WIDTH}`} />
+              </SettingsRow>
+            ) : null}
+          </>
+        ) : null}
+      </SettingsList>
+      <div className="mt-3 flex justify-end">
+        <Button variant="primary" onClick={onConnect} disabled={!ready}>
+          <BusyLabel busy={connecting} busyText="Connecting">{ssh ? 'Connect over SSH' : 'Connect to this computer'}</BusyLabel>
+        </Button>
+      </div>
+    </SettingsGroup>
+  );
+}
+
+const TRAINING_OPTIONS = [
+  { value: 'off', label: 'Off' },
+  { value: 'fine-tuning', label: 'Quick' },
+  { value: 'full-training', label: 'Deep' }
+];
+
+const TRAINING_HINT = {
+  off: 'Chats are not used for learning.',
+  'fine-tuning': 'Quick Learning captures your exchanges as learning examples.',
+  'full-training': 'Deep Training is plan only: export the examples and train a LoRA offline.'
+};
+
+function LabsSettings({
+  canvas, onCanvasChange, guided, onGuidedChange, deepThinking, onDeepThinkingChange,
+  openClaw, onOpenClawChange,
+  trainingMode, onTrainingModeChange, examples, onExportExamples,
+  personalMemory, onPersonalMemoryChange, memoryItems, onManageMemory
+}) {
+  return (
+    <>
+      <SettingsGroup title="Answer modes" description="Each mode changes how answers are written.">
+        <SettingsList>
+          <SettingsRow label="Canvas" description="A notes pad above the chat. Its text goes with every message as working context.">
+            <Switch checked={canvas} onChange={onCanvasChange} label="Canvas" />
+          </SettingsRow>
+          <SettingsRow label="Guided Learning" description="Teaches step by step, with examples and a short recap.">
+            <Switch checked={guided} onChange={onGuidedChange} label="Guided Learning" />
+          </SettingsRow>
+          <SettingsRow label="Deep Thinking" description="Weighs alternatives and trade-offs, then leads with a short answer.">
+            <Switch checked={deepThinking} onChange={onDeepThinkingChange} label="Deep Thinking" />
+          </SettingsRow>
+          <SettingsRow label="OpenClaw" description="Uncensored, no personal memory and no app instructions. Turning it off restores them.">
+            <Switch checked={openClaw} onChange={onOpenClawChange} label="OpenClaw" />
+          </SettingsRow>
+        </SettingsList>
+      </SettingsGroup>
+
+      <SettingsGroup title="Training">
+        <SettingsList>
+          <SettingsRow label="Learning mode" description={TRAINING_HINT[trainingMode] || TRAINING_HINT.off}>
+            <SegmentedControl size="sm" value={trainingMode} onChange={onTrainingModeChange} options={TRAINING_OPTIONS} />
+          </SettingsRow>
+          <SettingsRow
+            label="Learning examples"
+            description={`${examples} captured. Export them as JSONL for fine-tuning.`}
+          >
+            <Button size="sm" variant="soft" onClick={onExportExamples}>Export</Button>
+          </SettingsRow>
+        </SettingsList>
+      </SettingsGroup>
+
+      <SettingsGroup title="Personal memory">
+        <SettingsList>
+          <SettingsRow
+            label="Use personal memory"
+            description={`Adds your saved notes to every conversation. ${memoryItems} saved.`}
+          >
+            <Button size="sm" variant="ghost" onClick={onManageMemory}>Manage</Button>
+            <Switch checked={personalMemory} onChange={onPersonalMemoryChange} label="Use personal memory" />
+          </SettingsRow>
+        </SettingsList>
+      </SettingsGroup>
+    </>
+  );
+}
 
 export default function ChatApp() {
   const fileInputRef = useRef(null);
@@ -1305,7 +1823,6 @@ export default function ChatApp() {
   });
   const [utilization, setUtilization] = useState({ cpuPct: 0, memPct: 0 });
   const [openHardwarePopover, setOpenHardwarePopover] = useState(null);
-  const [isEngineMenuOpen, setIsEngineMenuOpen] = useState(false);
   const [isSystemPromptVisible, setIsSystemPromptVisible] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') return safeStorageGet('mirabilis-sidebar-open', 'true') !== 'false';
@@ -1326,24 +1843,32 @@ export default function ChatApp() {
   const [llamacppLaunchable, setLlamacppLaunchable] = useState([]); // models you can run
   const [isLlamacppBusy, setIsLlamacppBusy] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
-  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false);
-  const [isTrainingMenuOpen, setIsTrainingMenuOpen] = useState(false);
   const [isEffortMenuOpen, setIsEffortMenuOpen] = useState(false);
-  // Autonomous run state. Null when no run is in flight or finished.
+  const [isAccessMenuOpen, setIsAccessMenuOpen] = useState(false);
+  // Where the Access menu sits so it stays inside the window: a left shift and a height cap.
+  const [accessMenuPlace, setAccessMenuPlace] = useState({ left: 0, maxHeight: undefined });
+  // Level id while a composer change is being saved.
+  const [accessSaving, setAccessSaving] = useState('');
+  // Backend-owned Access level, mirrored in the store for the chip and the send route.
+  const accessLevel = useAppStore((s) => s.access);
+  const settingsOpen = useAppStore((s) => s.settingsOpen);
+  const settingsSection = useAppStore((s) => s.settingsSection);
+  const workspaceRoot = useAppStore((s) => s.workspaceRoot);
+  const goDarkOn = useAppStore((s) => s.goDark);
+  // Read by SSE handlers, which outlive the render that created them.
+  const settingsOpenRef = useRef(false);
+  settingsOpenRef.current = settingsOpen;
+  // Agent run state. Null when no run is in flight or finished.
   const [agentRun, setAgentRun] = useState(null);
   const agentAbortRef = useRef(null);
   const agentRunRef = useRef(null);
-  // Never restore `full`: its acknowledgement is per session, so the backend
-  // would refuse every run with no way to recover.
-  const [toolPolicy, setToolPolicy] = useState(() => restoreToolPolicy(safeStorageGet('mirabilis-tool-policy', 'read-only')));
-  // Not persisted: granting shell access is a per-session decision.
-  const [fullPolicyAcknowledged, setFullPolicyAcknowledged] = useState(false);
+  // Approval id whose decision is being posted.
+  const [approvalBusyId, setApprovalBusyId] = useState('');
 
   // Masked hints for keys the backend holds; the page never sees a value.
   const [keyHints, setKeyHints] = useState({});
   // What the user is currently typing, before it is saved. Never persisted.
   const [keyDraft, setKeyDraft] = useState('');
-  const [isOptionsMenuOpen, setIsOptionsMenuOpen] = useState(false);
   const [canvasEnabled, setCanvasEnabled] = useState(false);
   const [canvasText, setCanvasText] = useState('');
   const [guidedLearningEnabled, setGuidedLearningEnabled] = useState(false);
@@ -1363,7 +1888,6 @@ export default function ChatApp() {
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingMessageId, setSpeakingMessageId] = useState(null);
-  const [isVoiceMenuOpen, setIsVoiceMenuOpen] = useState(false);
   const [availableVoices, setAvailableVoices] = useState([]);
   const [selectedVoiceUri, setSelectedVoiceUri] = useState(() => {
     if (typeof window !== 'undefined') return safeStorageGet('mirabilis-voice-uri', '');
@@ -1398,6 +1922,12 @@ export default function ChatApp() {
   // Voice chat. The overlay is only a view; the listen, send, speak loop runs
   // here because capture, the streaming send and TTS live in this component.
   const voiceChatOpen = useAppStore((s) => s.voiceChatOpen);
+  // Read after awaits, where the render's value may be stale.
+  const voiceChatOpenRef = useRef(false);
+  voiceChatOpenRef.current = voiceChatOpen;
+  // Stable: Modal moves focus to its first button whenever onClose changes,
+  // which would pull focus out of an approval card on every render.
+  const closeVoiceChat = useCallback(() => appStore.closeVoiceChat(), []);
   const [voicePhase, setVoicePhase] = useState('idle'); // idle | listening | thinking | speaking
   const [voiceInterim, setVoiceInterim] = useState('');
   const [voiceReply, setVoiceReply] = useState('');
@@ -1464,7 +1994,6 @@ export default function ChatApp() {
   const [configVaultFolder, setConfigVaultFolder] = useState(() => (typeof window !== 'undefined' ? safeStorageGet('mirabilis-config-vault-folder', '') || '' : ''));
   const [configVaultBusy, setConfigVaultBusy] = useState(false);
   const [configVaultMsg, setConfigVaultMsg] = useState('');
-  const [isVaultPanelOpen, setIsVaultPanelOpen] = useState(false);
   // modelId -> { pct: number|null, status: string, ctrl: AbortController } while pulling
   const [pullingModels, setPullingModels] = useState({});
   // Free-text "pull any Ollama model" field in the model menu.
@@ -1519,7 +2048,6 @@ export default function ChatApp() {
   const workspacePins = useAppStore((s) => s.workspacePins);
 
   // Remote Control
-  const [isControlPanelOpen, setIsControlPanelOpen] = useState(false);
   const [remoteConnected, setRemoteConnected] = useState(false);
   const [remoteTarget, setRemoteTarget] = useState('');
   const [remoteType, setRemoteType] = useState('local');   // 'local' | 'ssh'
@@ -1530,10 +2058,9 @@ export default function ChatApp() {
   const [remotePassword, setRemotePassword] = useState('');
   const [remoteKeyPath, setRemoteKeyPath] = useState('');
   const [remoteConnecting, setRemoteConnecting] = useState(false);
+  const [remoteError, setRemoteError] = useState('');
   const [execResults, setExecResults] = useState({}); // codeBlockKey -> { stdout, stderr, exitCode, running }
   const [uncensoredMode, setUncensoredMode] = useState(false);
-  const [isMcpPanelOpen, setIsMcpPanelOpen] = useState(false);
-  const [isParamsPanelOpen, setIsParamsPanelOpen] = useState(false);
   const [chatSearch, setChatSearch] = useState('');
   const [pinnedChatIds, setPinnedChatIds] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -1573,28 +2100,10 @@ export default function ChatApp() {
     }
     return 20;
   });
-  const [mcpServers, setMcpServers] = useState([]);
-  const [mcpSelectedServerId, setMcpSelectedServerId] = useState('');
-  const [mcpForm, setMcpForm] = useState({
-    id: '',
-    name: '',
-    url: '',
-    transport: 'streamable-http',
-    authToken: ''
-  });
-  const [mcpTools, setMcpTools] = useState([]);
-  const [mcpPolicy, setMcpPolicy] = useState({
-    enforceAllowlist: false,
-    requireApproval: true,
-    approvalTtlSeconds: 300,
-    allowedTools: []
-  });
-  const [mcpToolName, setMcpToolName] = useState('');
-  const [mcpToolArgsText, setMcpToolArgsText] = useState('{}');
-  const [mcpCallResultText, setMcpCallResultText] = useState('');
-  const [mcpLoading, setMcpLoading] = useState(false);
-  const [mcpCalling, setMcpCalling] = useState(false);
   const promptAutosaveTimerRef = useRef(null);
+  // Hidden on the Ledger tab; approvals raised then also get a toast.
+  const mainRef = useRef(null);
+  const composerInputRef = useRef(null);
 
   const promptProfiles = useMemo(
     () => buildPromptProfiles(provider, customPromptProfiles),
@@ -1610,11 +2119,6 @@ export default function ChatApp() {
   const selectedPromptProfile = useMemo(
     () => findPromptProfile(promptProfiles, selectedPromptProfileId),
     [promptProfiles, selectedPromptProfileId]
-  );
-
-  const selectedMcpServer = useMemo(
-    () => mcpServers.find((item) => item.id === mcpSelectedServerId) || null,
-    [mcpServers, mcpSelectedServerId]
   );
 
   const selectedModelRecord = useMemo(() => models.find((item) => item.id === model) || null, [model, models]);
@@ -2552,7 +3056,7 @@ export default function ChatApp() {
         stopVoiceRecognition();
         const msg = String(err?.message || '');
         setVoiceNote(/speech-to-text|speech to text|whisper/i.test(msg)
-          ? 'Local speech-to-text is not installed yet. Open Voice Settings to set it up.'
+          ? 'Local speech-to-text is not installed yet. Set it up in Settings, Voice.'
           : `Voice error: ${msg || 'transcription failed'}`);
         setVoicePhaseBoth('idle');
       }
@@ -2671,7 +3175,7 @@ export default function ChatApp() {
       if (s?.ready) {
         startVoiceListening();
       } else {
-        setVoiceNote('Local speech-to-text is not installed. Open Voice Settings to enable talking.');
+        setVoiceNote('Local speech-to-text is not installed. Turn it on in Settings, Voice.');
         setVoicePhaseBoth('idle');
       }
     }).catch(() => {
@@ -2933,9 +3437,16 @@ export default function ChatApp() {
     safeStorageSet('mirabilis-effort-level', effortLevel);
   }, [effortLevel]);
 
+  // Access replaced the per-run tool policy; drop its stored value. The backend
+  // owns Access, so the chip loads the level from there.
   useEffect(() => {
-    safeStorageSet('mirabilis-tool-policy', toolPolicy);
-  }, [toolPolicy]);
+    safeStorageRemove('mirabilis-tool-policy');
+    let cancelled = false;
+    fetchAccess()
+      .then((a) => { if (!cancelled) appStore.setAccess(a.level); })
+      .catch(() => { /* older backend: stay on Chat only */ });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     safeStorageSet('local-ai-training-mode', trainingMode);
@@ -3003,6 +3514,7 @@ export default function ChatApp() {
 
   async function connectRemote() {
     setRemoteConnecting(true);
+    setRemoteError('');
     try {
       const body = remoteType === 'local'
         ? { type: 'local' }
@@ -3015,10 +3527,10 @@ export default function ChatApp() {
       });
       setRemoteConnected(payload.connected || false);
       setRemoteTarget(payload.target || '');
-      setIsControlPanelOpen(false);
       setRemotePassword(''); // don't keep password in state after connecting
     } catch (err) {
-      setStatusText(`Remote: ${err.message}`);
+      setRemoteError(plainError(err.message));
+      setStatusText(`Remote: ${plainError(err.message)}`);
     } finally {
       setRemoteConnecting(false);
     }
@@ -3062,208 +3574,24 @@ export default function ChatApp() {
     && !lastMessage.content
     && !lastMessage.imageGenerating;
 
-  async function refreshMcpServers() {
-    try {
-      const payload = await api('/api/mcp/servers');
-      const servers = Array.isArray(payload?.servers) ? payload.servers : [];
-      setMcpServers(servers);
-      setMcpSelectedServerId((current) => {
-        if (current && servers.find((item) => item.id === current)) return current;
-        return servers[0]?.id || '';
-      });
-    } catch (error) {
-      setStatusText(`MCP: ${error.message}`);
-      setMcpServers([]);
-    }
-  }
-
-  async function saveMcpServer() {
-    const id = mcpForm.id.trim();
-    const name = mcpForm.name.trim();
-    const url = mcpForm.url.trim();
-    if (!id || !name || !url) {
-      setStatusText('MCP: id, name, and url are required');
-      return;
-    }
-    setMcpLoading(true);
-    try {
-      await api('/api/mcp/servers', {
-        method: 'POST',
-        body: JSON.stringify({
-          id,
-          name,
-          url,
-          transport: 'streamable-http',
-          authToken: mcpForm.authToken
-        })
-      });
-      await refreshMcpServers();
-      setMcpSelectedServerId(id);
-      setStatusText(`MCP server ${id} saved`);
-    } catch (error) {
-      setStatusText(`MCP: ${error.message}`);
-    } finally {
-      setMcpLoading(false);
-    }
-  }
-
-  async function deleteMcpServer() {
-    if (!mcpSelectedServerId) return;
-    setMcpLoading(true);
-    try {
-      await api(`/api/mcp/servers/${encodeURIComponent(mcpSelectedServerId)}`, { method: 'DELETE' });
-      setMcpTools([]);
-      setMcpToolName('');
-      setMcpCallResultText('');
-      await refreshMcpServers();
-      setStatusText('MCP server removed');
-    } catch (error) {
-      setStatusText(`MCP: ${error.message}`);
-    } finally {
-      setMcpLoading(false);
-    }
-  }
-
-  async function testMcpServer() {
-    if (!mcpSelectedServerId) return;
-    setMcpLoading(true);
-    try {
-      await api(`/api/mcp/servers/${encodeURIComponent(mcpSelectedServerId)}/test`, {
-        method: 'POST',
-        body: JSON.stringify({ timeoutMs: 15000 })
-      });
-      setStatusText(`MCP ${mcpSelectedServerId} test succeeded`);
-    } catch (error) {
-      setStatusText(`MCP test failed: ${error.message}`);
-    } finally {
-      setMcpLoading(false);
-    }
-  }
-
-  async function loadMcpPolicy(serverId) {
-    if (!serverId) {
-      setMcpPolicy({ enforceAllowlist: false, requireApproval: true, approvalTtlSeconds: 300, allowedTools: [] });
-      return;
-    }
-    try {
-      const payload = await api(`/api/mcp/servers/${encodeURIComponent(serverId)}/policy`);
-      const policy = payload?.policy || {};
-      setMcpPolicy({
-        enforceAllowlist: !!policy.enforceAllowlist,
-        requireApproval: policy.requireApproval !== false,
-        approvalTtlSeconds: Number(policy.approvalTtlSeconds) || 300,
-        allowedTools: Array.isArray(policy.allowedTools) ? policy.allowedTools : []
-      });
-    } catch (error) {
-      setStatusText(`MCP policy: ${error.message}`);
-    }
-  }
-
-  async function saveMcpPolicy(nextPolicy) {
-    if (!mcpSelectedServerId) return;
-    setMcpPolicy(nextPolicy);
-    try {
-      const payload = await api(`/api/mcp/servers/${encodeURIComponent(mcpSelectedServerId)}/policy`, {
-        method: 'PUT',
-        body: JSON.stringify(nextPolicy)
-      });
-      if (payload?.policy) {
-        setMcpPolicy(payload.policy);
-      }
-    } catch (error) {
-      setStatusText(`MCP policy: ${error.message}`);
-    }
-  }
-
-  async function loadMcpTools() {
-    if (!mcpSelectedServerId) return;
-    setMcpLoading(true);
-    try {
-      const payload = await api(`/api/mcp/servers/${encodeURIComponent(mcpSelectedServerId)}/tools/list`, {
-        method: 'POST',
-        body: JSON.stringify({ timeoutMs: 15000 })
-      });
-      const tools = Array.isArray(payload?.tools) ? payload.tools : [];
-      setMcpTools(tools);
-      if (!mcpToolName && tools.length > 0) {
-        setMcpToolName(String(tools[0].name || ''));
-      }
-      setStatusText(`Loaded ${tools.length} MCP tools`);
-    } catch (error) {
-      setStatusText(`MCP tools: ${error.message}`);
-      setMcpTools([]);
-    } finally {
-      setMcpLoading(false);
-    }
-  }
-
-  async function callMcpTool() {
-    if (!mcpSelectedServerId || !mcpToolName.trim()) {
-      setStatusText('MCP: choose a server and tool first');
-      return;
-    }
-
-    let parsedArgs = {};
-    try {
-      parsedArgs = JSON.parse(mcpToolArgsText || '{}');
-    } catch {
-      setStatusText('MCP: tool arguments must be valid JSON');
-      return;
-    }
-
-    setMcpCalling(true);
-    try {
-      let approvalToken;
-      if (mcpPolicy.requireApproval) {
-        const approval = await api(`/api/mcp/servers/${encodeURIComponent(mcpSelectedServerId)}/tools/request-approval`, {
-          method: 'POST',
-          body: JSON.stringify({ name: mcpToolName.trim(), arguments: parsedArgs })
-        });
-        approvalToken = approval?.approvalToken;
-      }
-
-      const payload = await api(`/api/mcp/servers/${encodeURIComponent(mcpSelectedServerId)}/tools/call`, {
-        method: 'POST',
-        body: JSON.stringify({
-          name: mcpToolName.trim(),
-          arguments: parsedArgs,
-          approvalToken,
-          timeoutMs: 30000
-        })
-      });
-      setMcpCallResultText(stringifyJson(payload?.result || {}));
-      setStatusText(`MCP tool ${mcpToolName.trim()} executed`);
-    } catch (error) {
-      setMcpCallResultText(stringifyJson({ error: error.message }));
-      setStatusText(`MCP call failed: ${error.message}`);
-    } finally {
-      setMcpCalling(false);
-    }
-  }
-
-  function useLocalMcpPreset() {
-    setMcpForm({
-      id: 'mcp-local',
-      name: 'Local MCP Endpoint',
-      url: 'http://127.0.0.1:30030/mcp',
-      transport: 'streamable-http',
-      authToken: ''
-    });
+  // Settings opens on either tab, and these actions act on the chat view.
+  function showChatTab() {
+    try { window.dispatchEvent(new CustomEvent('mirabilis:set-tab', { detail: { tab: 'chat' } })); } catch { /* ignore */ }
   }
 
   function handleCreateImageTool() {
-    setIsToolsMenuOpen(false);
-    setInput((current) => {
-      const trimmed = current.trim();
-      if (trimmed && !isImageRequest(trimmed)) {
-        return `Generate an image of ${trimmed}`;
-      }
-      if (!trimmed) {
-        return 'Generate an image of ';
-      }
-      return current;
-    });
+    // An explicit prompt reaches the image service at any Access level.
+    setInput((current) => toImagePrompt(current));
     setStatusText(imageServiceAvailable ? 'Ready to generate image prompt' : 'Image service offline');
+    // Started from Settings: hand the prompt to the message box.
+    showChatTab();
+    appStore.closeSettings();
+    requestAnimationFrame(() => {
+      const el = composerInputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
   }
 
   async function uploadFiles(selectedFiles) {
@@ -4074,6 +4402,19 @@ export default function ChatApp() {
     }
   }
 
+  // Throws a plain sentence and opens the endpoint config when a cloud key is
+  // missing. A key counts whether the backend or the page holds it.
+  async function ensureProviderKey() {
+    const pageKey = String(providerConfigs[provider]?.apiKey || '').trim();
+    if (!providerNeedsKey(provider) || hasUsableKey(provider, { pageKey, hints: keyHints })) return;
+    // Confirm with the server before refusing; hints may not have loaded yet.
+    const fresh = await refreshKeyHints();
+    if (!hasUsableKey(provider, { pageKey, hints: fresh || {} })) {
+      setIsProviderConfigOpen(true);
+      throw new Error(missingKeyMessage(provider));
+    }
+  }
+
   async function resolveProviderForSend() {
     if (provider === 'ollama') {
       const forcedUncensored = uncensoredMode ? pickMostUncensoredModel(models) : null;
@@ -4091,16 +4432,8 @@ export default function ChatApp() {
       ? (firstAvailableModel || (provider === 'openai' ? 'gpt-4o-mini' : provider === 'grok' ? 'grok-3-mini' : provider === 'groq' ? 'llama-3.3-70b-versatile' : provider === 'openrouter' ? 'meta-llama/llama-3.3-70b-instruct:free' : provider === 'gemini' ? 'gemini-2.5-flash' : provider === 'cerebras' ? 'llama-3.3-70b' : provider === 'claude' ? 'claude-3-5-sonnet-latest' : provider === 'gpuaas' ? 'model.gguf' : ''))
       : model;
 
-    // A key counts whether the backend or the page holds it; nothing writes the page copy.
+    await ensureProviderKey();
     const configuredApiKey = String(providerConfigs[provider]?.apiKey || '').trim();
-    if (providerNeedsKey(provider) && !hasUsableKey(provider, { pageKey: configuredApiKey, hints: keyHints })) {
-      // Confirm with the server before refusing; hints may not have loaded yet.
-      const fresh = await refreshKeyHints();
-      if (!hasUsableKey(provider, { pageKey: configuredApiKey, hints: fresh || {} })) {
-        setIsProviderConfigOpen(true);
-        throw new Error(missingKeyMessage(provider));
-      }
-    }
 
     const configuredBaseUrl = provider === 'gemini'
       ? normalizeGeminiBaseUrl(providerConfigs[provider]?.baseUrl || '')
@@ -4263,36 +4596,15 @@ export default function ChatApp() {
       setIsProviderMenuOpen(false);
       setIsProviderConfigOpen(false);
       setIsModelMenuOpen(false);
-      setIsTrainingMenuOpen(false);
-      setIsToolsMenuOpen(false);
-      setIsVoiceMenuOpen(false);
       setIsContextPanelOpen(false);
-      setIsEngineMenuOpen(false);
       setOpenHardwarePopover(null);
-      setIsControlPanelOpen(false);
-      setIsMcpPanelOpen(false);
-      setIsParamsPanelOpen(false);
       setIsEffortMenuOpen(false);
-      setIsOptionsMenuOpen(false);
+      setIsAccessMenuOpen(false);
       setOpenChatMenuId(null);
     }
 
-    // Options badge count. Uncensored counts too: it is also in the Options Modes list.
-    const optionsActiveCount =
-      (uncensoredMode ? 1 : 0) +
-      (openClawMode ? 1 : 0) +
-      (remoteConnected ? 1 : 0) +
-      (selectedMcpServer ? 1 : 0) +
-      (guidedLearningEnabled ? 1 : 0) +
-      (deepThinkingEnabled ? 1 : 0) +
-      (canvasEnabled ? 1 : 0) +
-      (configVaultEnabled ? 1 : 0) +
-      (trainingMode !== 'off' ? 1 : 0);
-
-    const anyDropdownOpen = isProviderMenuOpen || isProviderConfigOpen || isModelMenuOpen || isTrainingMenuOpen || isToolsMenuOpen ||
-      isVoiceMenuOpen || isContextPanelOpen || isEngineMenuOpen ||
-      openHardwarePopover !== null || isControlPanelOpen || isMcpPanelOpen || isParamsPanelOpen ||
-      isEffortMenuOpen || isOptionsMenuOpen;
+    const anyDropdownOpen = isProviderMenuOpen || isProviderConfigOpen || isModelMenuOpen ||
+      isContextPanelOpen || openHardwarePopover !== null || isEffortMenuOpen || isAccessMenuOpen;
 
     const activeMenuKey = isProviderMenuOpen
       ? 'provider'
@@ -4300,32 +4612,12 @@ export default function ChatApp() {
       ? 'model'
       : isEffortMenuOpen
       ? 'effort'
-      : isVoiceMenuOpen
-      ? 'voice'
-      : isControlPanelOpen
-      ? 'control'
-      : isMcpPanelOpen
-      ? 'mcp'
-      : isOptionsMenuOpen
-      ? 'options'
-      : isTrainingMenuOpen
-      ? 'training'
-      : isToolsMenuOpen
-      ? 'tools'
-      : isVoiceMenuOpen
-      ? 'voice'
+      : isAccessMenuOpen
+      ? 'access'
       : isContextPanelOpen
       ? 'context'
-      : isEngineMenuOpen
-      ? 'engine'
       : openHardwarePopover
       ? `hardware-${openHardwarePopover}`
-      : isControlPanelOpen
-      ? 'control'
-      : isMcpPanelOpen
-      ? 'mcp'
-      : isParamsPanelOpen
-      ? 'params'
       : null;
 
     function getFocusableElements(container) {
@@ -4347,8 +4639,12 @@ export default function ChatApp() {
 
       if (panel instanceof HTMLElement) {
         requestAnimationFrame(() => {
+          // A menu with a current choice opens on it.
+          const current = panel.querySelector('[aria-checked="true"]');
           const focusable = getFocusableElements(panel);
-          if (focusable.length > 0) {
+          if (current instanceof HTMLElement) {
+            current.focus();
+          } else if (focusable.length > 0) {
             focusable[0].focus();
           } else {
             panel.focus();
@@ -4511,35 +4807,47 @@ export default function ChatApp() {
   }, []);
 
   useEffect(() => {
-    if (!isMcpPanelOpen) return;
-    refreshMcpServers();
-  }, [isMcpPanelOpen]);
-
-  useEffect(() => {
-    if (!mcpSelectedServerId) return;
-    loadMcpPolicy(mcpSelectedServerId);
-  }, [mcpSelectedServerId]);
-
-  useEffect(() => {
-    if (!selectedMcpServer) return;
-    setMcpForm((current) => ({
-      ...current,
-      id: selectedMcpServer.id || '',
-      name: selectedMcpServer.name || '',
-      url: selectedMcpServer.url || '',
-      transport: selectedMcpServer.transport || 'streamable-http',
-      authToken: ''
-    }));
-  }, [selectedMcpServer]);
-
-  useEffect(() => {
     safeStorageSet('mirabilis-engine-option', selectedEngine);
   }, [selectedEngine]);
 
-  // One scroll per frame while streaming. autoScrollRef is re-checked inside the rAF
-  // because the user can scroll up between queueing and firing.
+  // Settings is a dialog: composer menus close so their focus traps do not fight it.
   useEffect(() => {
-    if (!isStreaming || !messagesScrollRef.current) return;
+    if (settingsOpen) shortcutRef.current.closeAllDropdowns?.();
+  }, [settingsOpen]);
+
+  // Each section refreshes what it shows when it opens.
+  useEffect(() => {
+    if (!settingsOpen) return;
+    if (settingsSection === 'voice') {
+      checkVoiceTools();
+      fetchPiperModels();
+    } else if (settingsSection === 'remote') {
+      checkRemoteStatus();
+    } else if (settingsSection === 'labs') {
+      refreshTrainingStats();
+    } else if (settingsSection === 'chat-tools') {
+      checkImageService();
+      refreshVaultStatus();
+    }
+  }, [settingsOpen, settingsSection]);
+
+  // Cmd+, (Ctrl+, elsewhere) opens Settings from either tab.
+  useEffect(() => {
+    function onKey(e) {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key !== ',') return;
+      e.preventDefault();
+      shortcutRef.current.openSettings?.();
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Follow new content while the user is at the bottom. Agent runs land their whole
+  // answer at once, after streaming ends, so this cannot be limited to streaming.
+  // autoScrollRef is re-checked inside the rAF because the user can scroll up between
+  // queueing and firing.
+  useEffect(() => {
+    if (!messagesScrollRef.current) return;
     const el = messagesScrollRef.current;
     const raf = requestAnimationFrame(() => {
       if (!autoScrollRef.current) return; // re-check right before touching the DOM
@@ -4584,7 +4892,7 @@ export default function ChatApp() {
     let uncategorizedTokens = 0;
 
     for (const message of messages) {
-      const tokenCount = Number(message.tokenEstimate || 0);
+      const tokenCount = messageTokens(message);
       if (message.role === 'user') {
         inputTokens += tokenCount;
         userTokens += tokenCount;
@@ -4691,7 +4999,7 @@ export default function ChatApp() {
           '       .venv/bin/pip install -r requirements.txt',
           '       .venv/bin/python server.py',
           '',
-          'Once running, use Tools -> Create Image from the chat bar.'
+          'Once running, ask for an image in chat, or use Settings, Chat tools, Create image.'
         ].join('\n'),
         createdAt: new Date().toISOString(),
         tokenEstimate: 0
@@ -4883,8 +5191,10 @@ export default function ChatApp() {
   }
 
 
-  // Autonomous runs. An agentic tier starts a backend job and streams progress to
-  // the run panel; the transcript gets only the goal and the final result.
+  // Agent runs. An agentic effort is a budgeted job; with Access above Chat only,
+  // every message runs this way so it can use tools. Progress goes to the run
+  // panel and approvals to the card above the composer; the transcript shows the
+  // goal at once and the saved result when the run ends.
   function stopAgentRun() {
     const run = agentRunRef.current;
     if (run?.id) {
@@ -4895,60 +5205,212 @@ export default function ChatApp() {
     setAgentRun((prev) => (prev ? { ...prev, status: 'stopping' } : prev));
   }
 
-  // Shared by the policy menu and the send path so the wording cannot drift.
-  function confirmFullPolicy() {
-    const ok = window.confirm(
-      'Full access lets an autonomous run execute shell commands on this machine '
-      + 'with nobody watching.\n\n'
-      + 'The filesystem root only sets where a command starts, not what it can reach. '
-      + 'Every command is recorded in the run\'s audit log.\n\n'
-      + 'Enable full access for this session?'
-    );
-    if (ok) setFullPolicyAcknowledged(true);
-    return ok;
+  // Web results for a message as one block, or '' when search is off, blocked,
+  // empty or failed. doneStatus is the status line to leave behind.
+  async function webSearchContext(content, doneStatus) {
+    // Go Dark blocks web search for any model: the raw query would go to a
+    // third-party API, and the provider check covers only the model call.
+    if (deepWebEnabled && appStore.getGoDark()) {
+      appStore.toast('Go Dark is on - web search is off, so this answer uses local knowledge only.', { kind: 'warn' });
+    }
+    if (!deepWebEnabled || appStore.getGoDark() || classifyWebSearch(content) !== 'search') return '';
+    setStatusText('Searching the web...');
+    setWebSearchStatus('searching');
+    try {
+      const query = searchQueryFrom(content);
+      const payload = await api('/api/web-search', {
+        method: 'POST',
+        body: JSON.stringify({ query, maxResults: 5, localOnly: appStore.getGoDark() })
+      });
+      const sources = Array.isArray(payload.sources) ? payload.sources : [];
+      if (payload.needsKey) {
+        appStore.toast(payload.error, { kind: 'info' });
+        setWebSearchStatus('idle');
+        return '';
+      }
+      if (sources.length === 0) {
+        // Search succeeded but no results - treat as soft error
+        setWebSearchStatus('error');
+        setTimeout(() => setWebSearchStatus('idle'), 4000);
+        return '';
+      }
+      const context = sources
+        .map((item, index) => `${index + 1}. ${item.title || 'Untitled'}\nURL: ${item.url}\nSnippet: ${item.snippet || ''}`)
+        .join('\n\n');
+      const answerHint = payload.answer ? `High-level answer: ${payload.answer}\n\n` : '';
+      setStatusText(`Searched: ${query}`);
+      setWebSearchStatus('idle');
+      return [`Web results for "${query}". Use them when relevant and cite their URLs.`, '', answerHint + context].join('\n');
+    } catch (error) {
+      setStatusText(`Web search unavailable: ${error.message}`);
+      setWebSearchStatus('error');
+      setTimeout(() => setWebSearchStatus('idle'), 4000);
+      return '';
+    } finally {
+      setStatusText(doneStatus);
+    }
   }
 
+  // Pinned workspace files read fresh from disk, as one block within budgetChars.
+  // Files that cannot be read or do not fit are skipped and listed in skipped.
+  async function readPinnedFiles(budgetChars) {
+    const pins = appStore.getWorkspacePins ? appStore.getWorkspacePins() : [];
+    const blocks = [];
+    const skipped = [];
+    let used = 0;
+    for (const relPath of pins) {
+      try {
+        const payload = await api(`/api/workspace/file?path=${encodeURIComponent(relPath)}`);
+        const text = typeof payload?.content === 'string' ? payload.content : '';
+        if (used + text.length > budgetChars) { skipped.push(relPath); continue; }
+        used += text.length;
+        blocks.push(`--- ${payload?.path || relPath} ---\n${text}`);
+      } catch {
+        skipped.push(relPath); // renamed / deleted / oversize / jailed - skip, keep sending
+      }
+    }
+    if (blocks.length === 0) {
+      if (skipped.length > 0) {
+        appStore.toast(
+          `None of the ${skipped.length} pinned workspace file(s) could be read, so they were not sent. Reopen Workspace and re-pick the folder.`,
+          { kind: 'warn' }
+        );
+      }
+      return { text: '', skipped };
+    }
+    const header = [
+      '[Watched workspace files - live context read fresh from disk. Treat these as the authoritative current contents of the named files.]',
+      skipped.length > 0 ? `(${skipped.length} pinned file(s) skipped: unavailable or over the context budget.)` : ''
+    ].filter(Boolean).join('\n');
+    return { text: `${header}\n\n${blocks.join('\n\n')}`, skipped };
+  }
+
+  // Config Vault excerpts for a message, or ''. Retrieval uses local Ollama
+  // embeddings, so Go Dark allows it, and a failure never blocks a send.
+  async function vaultContext(content, doneStatus) {
+    if (!(configVaultEnabled && configVaultStatus && configVaultStatus.chunkCount > 0)) return '';
+    try {
+      setStatusText('Searching your config vault...');
+      const vr = await api('/api/vault/query', { method: 'POST', body: JSON.stringify({ query: content, limit: 4 }) });
+      const results = Array.isArray(vr?.results) ? vr.results : [];
+      if (results.length === 0) return '';
+      const context = results.map((r) => `[${r.citation}]\n${r.snippet}`).join('\n\n');
+      return [
+        '[Config Vault - cited excerpts retrieved locally from your own config files. Treat as authoritative; cite the exact file:line label in square brackets when you use one.]',
+        '',
+        context
+      ].join('\n');
+    } catch {
+      return '';
+    } finally {
+      setStatusText(doneStatus);
+    }
+  }
+
+  // What a run needs from the chat side: the earlier turns with their files, and
+  // the modes the chat path would apply. The backend reads none of it from the chat.
+  async function gatherRunContext(goal) {
+    const earlier = contextMessages(messages);
+    const loadMemory = async () => {
+      // Same rule as the chat route: personal memory stays out of Uncensored chats.
+      if (!usePersonalMemory || uncensoredMode) return [];
+      try {
+        const payload = await api('/api/training/memory');
+        return (Array.isArray(payload?.items) ? payload.items : []).map((item) => String(item?.text || ''));
+      } catch {
+        return [];
+      }
+    };
+    const [attachmentTexts, pinned, memory] = await Promise.all([
+      fetchAttachmentTexts(earlier), readPinnedFiles(12 * 1024), loadMemory()
+    ]);
+    // One after the other, so the status line reads in order.
+    const web = await webSearchContext(goal, 'Ready');
+    const vault = await vaultContext(goal, 'Ready');
+    // The project folder is the run's working folder, so a pin that did not fit is one read_file away.
+    const unshown = pinned.skipped.length
+      ? `Pinned files not shown here: ${pinned.skipped.slice(0, 20).join(', ')}. Read them with read_file; the paths are relative to the project folder.`
+      : '';
+    return buildRunContext({
+      conversation: conversationContext(earlier, { attachmentTexts }),
+      remoteTarget: remoteConnected ? remoteTarget : '',
+      canvas: canvasEnabled ? canvasText : '',
+      pinned: [pinned.text, unshown].filter(Boolean).join('\n'),
+      vault,
+      web,
+      memory,
+      instructions: answerModeLines({ guided: guidedLearningEnabled, effort: '', deep: deepThinkingEnabled })
+    });
+  }
+
+  // Resolves 'use-chat' when the backend's Access is Chat only, so the caller can
+  // send the message as plain chat instead.
   async function runAgentGoal(goal) {
     // One run at a time: runs share agentRunRef, so an older one could not be stopped.
     if (agentAbortRef.current) {
       appStore.toast('A run is already in progress. Stop it before starting another.', { kind: 'warn' });
-      return;
+      return 'busy';
     }
-
-    // Ask here instead of letting the server refuse. Declining falls back to
-    // 'write', which still works without a shell.
-    let policyForRun = toolPolicy;
-    let acknowledged = fullPolicyAcknowledged;
-    if (needsFullAcknowledgement(policyForRun, acknowledged)) {
-      if (confirmFullPolicy()) {
-        acknowledged = true;
-      } else {
-        policyForRun = 'write';
-        setToolPolicy('write');
-        appStore.toast('Running without shell access.', { kind: 'info' });
-      }
-    }
+    // Claim the slot before any await, so a second Send cannot start a second run.
     const controller = new AbortController();
     agentAbortRef.current = controller;
+    try {
+      await ensureProviderKey();
+    } catch (err) {
+      agentAbortRef.current = null;
+      appStore.toast(err.message, { kind: 'error', ttl: 5200 });
+      return 'refused';
+    }
+    // A request can lower the stored level but never raise it, so a stale copy is safe.
+    const access = appStore.getAccess();
 
     const started = {
-      id: null, goal, effort: effortLevel, policy: policyForRun,
-      status: 'running', phase: 'plan', events: [], budget: null, answer: '', stopReason: null, error: ''
+      id: null, goal, effort: effortLevel, access,
+      status: 'running', phase: AGENTIC_EFFORTS.has(effortLevel) ? 'plan' : 'act',
+      events: [], budget: null, answer: '', stopReason: null, error: '', approvals: []
     };
     setAgentRun(started);
     agentRunRef.current = started;
     setIsStreaming(true);
 
-    const pushEvent = (text, at) => setAgentRun((prev) => (
-      prev ? { ...prev, events: [...prev.events, { text, at: at || 0 }].slice(-200) } : prev
-    ));
+    // An event without a time keeps the previous one, so the log stays in order.
+    const pushEvent = (text, at) => setAgentRun((prev) => {
+      if (!prev) return prev;
+      const last = prev.events[prev.events.length - 1];
+      const when = Number.isFinite(at) ? at : (last ? last.at : 0);
+      return { ...prev, events: [...prev.events, { text, at: when }].slice(-200) };
+    });
+
+    // Fills the reply bubble in place. After a switch to another chat the bubble
+    // is gone and this does nothing.
+    const replyId = `local-assistant-${Date.now()}`;
+    const settleReply = (patch) => setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === replyId);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...patch };
+      return next;
+    });
+    let accepted = false;
+    let settled = false;
+    let outcome = 'done';
 
     try {
-      // Create the chat up front so the backend can write the result into it.
+      // Uncensored runs on the model the chat path would force.
+      const forced = uncensoredMode && provider === 'ollama' ? pickMostUncensoredModel(models) : null;
+
+      // Create the chat up front so the backend can write the result into it. It
+      // carries the same modes as a chat-path chat, or reloading it would reset them.
       let targetChatId = activeChatIdRef.current;
       if (!targetChatId) {
         const created = await api('/api/chats', {
-          method: 'POST', body: JSON.stringify({ title: goal.slice(0, 60) })
+          method: 'POST',
+          body: JSON.stringify({
+            title: goal.slice(0, 60),
+            uncensoredMode,
+            systemPrompt,
+            promptProfileId: selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? '' : selectedPromptProfileId
+          })
         }).catch(() => null);
         targetChatId = created?.chat?.id || null;
         if (targetChatId) {
@@ -4957,6 +5419,8 @@ export default function ChatApp() {
         }
       }
 
+      // The goal is only the new message, so earlier turns, files and chat modes ride along here.
+      const runContext = await gatherRunContext(goal);
       const token = await getSessionToken();
       const res = await fetch(`${API_BASE}/api/agent/runs`, {
         method: 'POST',
@@ -4969,27 +5433,40 @@ export default function ChatApp() {
           goal,
           chatId: targetChatId || undefined,
           effort: effortLevel,
+          access,
           provider,
-          model: model || undefined,
+          model: forced?.id || model || undefined,
           providerBaseUrl: providerConfigs[provider]?.baseUrl || undefined,
-          providerApiKey: undefined, // held by the backend; never sent from the page
-          toolPolicy: policyForRun,
           // The watched workspace folder is the run's project folder.
-          fsRoot: appStore.getWorkspaceRoot?.() || undefined,
-          acknowledgeFullPolicy: policyForRun === 'full' ? acknowledged : undefined,
+          fsRoot: appStore.getWorkspaceRoot() || undefined,
           localOnly: appStore.getGoDark(),
-          systemPrompt
+          // Uncensored sends no app instructions, as in chat; the chat context still goes.
+          systemPrompt: [uncensoredMode ? '' : systemPrompt, runContext]
+            .filter((part) => typeof part === 'string' && part.trim())
+            .join('\n\n')
         })
       });
 
       if (!res.ok || !res.body) {
         // Show the server's `error` sentence, not the raw JSON body.
-        const detail = await res.text().catch(() => '');
-        throw new Error(describeRunError(res.status, detail));
+        const refusal = runRefusal(res.status, await res.text().catch(() => ''));
+        if (refusal.useChat) {
+          appStore.setAccess('chat');
+          outcome = 'use-chat';
+          return outcome;
+        }
+        throw new Error(refusal.message);
       }
 
       // Clear only after the server accepts the run, so a refusal keeps the text.
       setInput('');
+      accepted = true;
+      const createdAt = new Date().toISOString();
+      setMessages((prev) => [
+        ...prev,
+        { id: `local-user-${Date.now()}`, role: 'user', content: goal, createdAt, tokenEstimate: estimateTokens(goal) },
+        { id: replyId, role: 'assistant', content: '', createdAt, tokenEstimate: 0 }
+      ]);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -5008,15 +5485,19 @@ export default function ChatApp() {
           try { payload = JSON.parse(frame.data); } catch { continue; }
 
           if (currentEvent === 'run-accepted') {
-            setAgentRun((prev) => (prev ? { ...prev, id: payload.id } : prev));
-            agentRunRef.current = { ...agentRunRef.current, id: payload.id };
+            setAgentRun((prev) => (prev ? { ...prev, id: payload.id, access: payload.access || prev.access } : prev));
+            // The level the backend gave this run; an Access change mid-run is judged against it.
+            agentRunRef.current = { ...agentRunRef.current, id: payload.id, access: payload.access || agentRunRef.current?.access };
             continue;
           }
           if (currentEvent === 'error') {
+            settled = true;
             setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: payload.error } : prev));
+            settleReply({ content: `Error: ${payload.error || 'the run failed.'}`, failed: true });
             continue;
           }
           if (currentEvent === 'result') {
+            settled = true;
             setAgentRun((prev) => (prev ? {
               ...prev,
               status: payload.ok ? 'completed' : 'stopped',
@@ -5029,14 +5510,41 @@ export default function ChatApp() {
             if (!payload.ok && payload.error) {
               appStore.toast(payload.error, { kind: 'error' });
             }
-            // The backend writes the run into the chat; reload to show it.
-            if (payload.persistedTo) {
-              // Reload only if the user is still in the run's chat, so a draft elsewhere survives.
-              if (activeChatIdRef.current === payload.persistedTo) {
-                await loadChat(payload.persistedTo).catch(() => {});
-              }
-              await refreshChats().catch(() => {});
+            // The backend writes the run into the chat. Reload only if the user is
+            // still in it, so a draft elsewhere survives; otherwise fill the bubble.
+            if (payload.persistedTo && activeChatIdRef.current === payload.persistedTo) {
+              await loadChat(payload.persistedTo).catch(() => {});
+            } else {
+              const answer = String(payload.answer || '');
+              settleReply(answer
+                ? { content: answer, tokenEstimate: estimateTokens(answer) }
+                : payload.error
+                  ? { content: `Error: ${payload.error}`, failed: true }
+                  : { content: `(no result: ${payload.stopReason || 'stopped'})` });
             }
+            if (payload.persistedTo) await refreshChats().catch(() => {});
+            continue;
+          }
+
+          const approvalType = approvalEventType(currentEvent, payload);
+          if (approvalType === 'approval-required') {
+            const approval = toApproval(payload);
+            if (approval) {
+              setAgentRun((prev) => (prev ? { ...prev, approvals: addApproval(prev.approvals, approval) } : prev));
+              const what = approval.title || approval.tool || 'an action';
+              pushEvent(`waiting for approval: ${what}`, payload.at);
+              // The card is out of sight behind Settings or on the Ledger tab.
+              if (settingsOpenRef.current || mainRef.current?.offsetParent === null) {
+                appStore.toast(`Mirabilis is waiting for your approval: ${what}.`, { kind: 'warn', ttl: 8000 });
+              }
+            }
+            continue;
+          }
+          if (approvalType === 'approval-resolved') {
+            if (typeof payload.approvalId === 'string') {
+              setAgentRun((prev) => (prev ? { ...prev, approvals: removeApproval(prev.approvals, payload.approvalId) } : prev));
+            }
+            pushEvent(approvalNarration(payload.decision), payload.at);
             continue;
           }
           if (currentEvent !== 'progress') continue;
@@ -5054,7 +5562,11 @@ export default function ChatApp() {
             case 'plan': pushEvent(`plan: ${String(payload.plan).slice(0, 120)}`, at); break;
             case 'iteration': setAgentRun((prev) => (prev ? { ...prev, phase: 'act' } : prev)); break;
             case 'tool-call': pushEvent(`${payload.tool}(${JSON.stringify(payload.args).slice(0, 60)})`, at); break;
-            case 'tool-result': pushEvent(`  ${payload.ok ? 'ok' : 'ERROR'}: ${String(payload.observation).slice(0, 90)}`, at); break;
+            case 'tool-result':
+              pushEvent(payload.ok
+                ? `  ${payload.tool} done`
+                : `  ${payload.tool} failed: ${String(payload.observation).replace(/^ERROR:\s*/, '').slice(0, 90)}`, at);
+              break;
             case 'invalid-action': pushEvent(`  retrying: ${payload.error}`, at); break;
             case 'finish-proposed': pushEvent('proposed a result', at); break;
             case 'validation': pushEvent(`validation ${payload.passed ? 'passed' : 'failed'}${payload.reason ? `: ${String(payload.reason).slice(0, 70)}` : ''}`, at); break;
@@ -5066,34 +5578,155 @@ export default function ChatApp() {
         }
         if (done) break;
       }
+      if (!settled) {
+        // The stream closed with neither a result nor an error.
+        const lost = 'The run ended without a result.';
+        setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: prev.error || lost } : prev));
+        settleReply({ content: `Error: ${lost}`, failed: true });
+      }
     } catch (err) {
       if (err?.name !== 'AbortError') {
         setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: err.message } : prev));
-        appStore.toast(`Agent run failed: ${err.message}`, { kind: 'error' });
+        if (accepted) settleReply({ content: `Error: ${err.message}`, failed: true });
+        else appStore.toast(err.message, { kind: 'error', ttl: 5200 });
       } else {
         setAgentRun((prev) => (prev ? { ...prev, status: 'stopped', stopReason: 'cancelled' } : prev));
+        // Stopped before an answer: keep the goal, drop the empty bubble.
+        setMessages((prev) => prev.filter((m) => m.id !== replyId || m.content));
       }
     } finally {
       setIsStreaming(false);
       agentAbortRef.current = null;
+      setApprovalBusyId('');
+      // The backend cancels open approvals when a run ends.
+      if (outcome === 'use-chat') setAgentRun(null);
+      else setAgentRun((prev) => (prev && prev.approvals?.length ? { ...prev, approvals: [] } : prev));
+    }
+    return outcome;
+  }
+
+  // Posts the answer to one approval. 404 and 409 mean the card is stale; any
+  // other failure keeps it so the user can answer again.
+  async function decideApproval(approval, decision, note) {
+    const runId = agentRunRef.current?.id;
+    if (!approval || !runId || approvalBusyId) return;
+    setApprovalBusyId(approval.approvalId);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const token = await getSessionToken();
+      const res = await fetch(
+        `${API_BASE}/api/agent/runs/${encodeURIComponent(runId)}/approvals/${encodeURIComponent(approval.approvalId)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'x-mirabilis-mcp-token': token } : {})
+          },
+          body: JSON.stringify(note ? { decision, note } : { decision }),
+          signal: ctrl.signal
+        }
+      );
+      if (approvalReplyOutcome(res.status) === 'failed') {
+        const body = await res.text().catch(() => '');
+        throw new Error(plainError(body, `The backend answered ${res.status}.`));
+      }
+      setAgentRun((prev) => (prev ? { ...prev, approvals: removeApproval(prev.approvals, approval.approvalId) } : prev));
+    } catch (err) {
+      const reason = err?.name === 'AbortError' ? 'Mirabilis did not answer in time.' : (err?.message || 'Something went wrong.');
+      appStore.toast(`Your answer was not sent. ${reason} Try again.`, { kind: 'error', ttl: 5200 });
+    } finally {
+      clearTimeout(timer);
+      setApprovalBusyId('');
     }
   }
 
-  async function sendMessageWithContent(content) {
-    // An agentic tier is a job for the run panel. Checked before the image-wording
-    // heuristic because goals often contain image words; an explicit tier wins.
-    if (AGENTIC_EFFORTS.has(effortLevel)) {
-      // Do not clear the composer: runAgentGoal clears it once the run is accepted.
-      playSend();
-      runAgentGoal(content);
-      return;
-    }
+  // Keeps focus on the chip when its menu closes, so Settings returns it there.
+  function focusAccessChip() {
+    const trigger = document.querySelector('[data-menu-trigger="access"]');
+    if (trigger instanceof HTMLElement) trigger.focus();
+  }
 
+  // The composer's Access menu. The chip changes at once and goes back if the save fails.
+  async function chooseAccess(level) {
+    focusAccessChip();
+    setIsAccessMenuOpen(false);
+    const previous = appStore.getAccess();
+    if (accessSaving || level === previous) return;
+    setAccessSaving(level);
+    appStore.setAccess(level);
+    try {
+      const saved = await saveAccess({ level });
+      appStore.setAccess(saved.level);
+      if (saved.level === 'bypass') {
+        appStore.toast('Bypass is on. Commands and file changes run without asking.', { kind: 'warn', ttl: 5200 });
+      }
+      if (agentAbortRef.current) {
+        // The backend lowers a live run at once and never raises it past its start level.
+        const runLevel = agentRunRef.current?.access || previous;
+        appStore.toast(accessChangeNotice(runLevel, saved.level), { kind: 'info' });
+        setAgentRun((prev) => (prev ? { ...prev, accessNow: lowerAccess(runLevel, saved.level) } : prev));
+      }
+    } catch (err) {
+      appStore.setAccess(previous);
+      appStore.toast(`Access was not changed. ${describeApiError(err, 'Access settings')}`, { kind: 'error', ttl: 5200 });
+    } finally {
+      setAccessSaving('');
+    }
+  }
+
+  function openAccessMenu() {
+    const open = !isAccessMenuOpen;
+    closeAllDropdowns();
+    if (open) {
+      // The menu is wider than the chip and opens upward: shift it left as far as it
+      // needs, and cap its height at the room above the chip (it scrolls past that).
+      const trigger = document.querySelector('[data-menu-trigger="access"]');
+      if (trigger instanceof HTMLElement) {
+        const rect = trigger.getBoundingClientRect();
+        const width = Math.min(ACCESS_MENU_WIDTH, window.innerWidth - 32);
+        const overflow = rect.left + width - (window.innerWidth - 16);
+        setAccessMenuPlace({
+          left: overflow > 0 ? -Math.min(overflow, Math.max(0, rect.left - 16)) : 0,
+          // 8px gap above the chip (bottom-9 on a 28px chip); the top 56px hold the floating Dock.
+          maxHeight: Math.max(160, Math.floor(rect.top - 64))
+        });
+      }
+    }
+    setIsAccessMenuOpen(open);
+    // Another window may have changed it; skip while a save is in flight.
+    if (open && !accessSaving) {
+      fetchAccess().then((a) => appStore.setAccess(a.level)).catch(() => {});
+    }
+  }
+
+  // Up and Down move between the levels; Home and End jump to the ends.
+  function onAccessMenuKeyDown(e) {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+    const items = Array.from(e.currentTarget.querySelectorAll('[role="menuitemradio"], [role="menuitem"]'));
+    if (items.length === 0) return;
+    e.preventDefault();
+    const idx = items.indexOf(document.activeElement);
+    let next = 0;
+    if (e.key === 'ArrowDown') next = idx < 0 ? 0 : Math.min(idx + 1, items.length - 1);
+    else if (e.key === 'ArrowUp') next = idx < 0 ? items.length - 1 : Math.max(idx - 1, 0);
+    else if (e.key === 'End') next = items.length - 1;
+    items[next].focus();
+  }
+
+  async function sendMessageWithContent(content) {
     // A recently attached image means vision, so skip the image-generation heuristic.
     const recentImage = (messages || []).slice(-4).some(
       (m) => Array.isArray(m.attachments) && m.attachments.some((a) => /^image\//i.test(a?.mimeType || ''))
     );
-    if (isImageRequest(content) && !recentImage) {
+    // An explicit agentic tier wins over image wording, since goals often contain image words.
+    const route = chooseSendRoute({
+      agentic: AGENTIC_EFFORTS.has(effortLevel),
+      access: appStore.getAccess(),
+      imageRequest: isImageRequest(content) && !recentImage,
+      explicitImage: isExplicitImagePrompt(content)
+    });
+    if (route === 'image') {
       await handleImageGeneration(content);
       return;
     }
@@ -5108,42 +5741,21 @@ export default function ChatApp() {
       }
     }
 
-    setInput('');
     playSend(); // ICQ send cue (no-ops on mute / reduced-motion)
+    if (route === 'agent') {
+      // Awaited so the voice loop settles when the reply is in, not at once.
+      // runAgentGoal clears the composer once the run is accepted.
+      if ((await runAgentGoal(content)) !== 'use-chat') return;
+      appStore.toast('Access is Chat only here, so this went out as a normal chat message.', { kind: 'info' });
+    }
+
+    setInput('');
 
     let outboundContent = content;
 
-    const behaviorInstructions = [];
-    if (guidedLearningEnabled) {
-      behaviorInstructions.push(
-        'Teaching mode: Explain with a short, structured learning path.',
-        'Ask one clarifying question if needed, then provide step-by-step guidance.',
-        'Use examples and a tiny recap at the end.'
-      );
-    }
-    if (effortLevel === 'instant') {
-      behaviorInstructions.push(
-        'Effort: instant. Give the shortest possible correct answer, one line if you can, no preamble.'
-      );
-    }
-    if (effortLevel === 'fast') {
-      behaviorInstructions.push(
-        'Effort: fast. Answer concisely and directly, skip preamble.'
-      );
-    }
-    if (effortLevel === 'thorough') {
-      behaviorInstructions.push(
-        'Effort: thorough. Work through the key considerations and give a complete, well-structured answer.'
-      );
-    }
-    // balanced: no extra instruction. Effort "deep" and the deep-thinking toggle
-    // share one set of lines so they do not double up.
-    if (deepThinkingEnabled || effortLevel === 'deep') {
-      behaviorInstructions.push(
-        'Deep thinking mode: reason carefully, compare alternatives, and include key trade-offs.',
-        'Provide a concise executive answer first, then details.'
-      );
-    }
+    const behaviorInstructions = answerModeLines({
+      guided: guidedLearningEnabled, effort: effortLevel, deep: deepThinkingEnabled
+    });
     if (behaviorInstructions.length > 0) {
       outboundContent = [content, '', ...behaviorInstructions].join('\n');
     }
@@ -5163,113 +5775,16 @@ export default function ChatApp() {
       ].join(' ');
       outboundContent = `${outboundContent}\n\n[System: ${disclaimer}]`;
     }
-    // Go Dark blocks web search for any model: the raw query would go to a
-    // third-party API, and the provider check above covers only the model call.
-    if (deepWebEnabled && appStore.getGoDark()) {
-      appStore.toast('Go Dark is on - web search is off, so this answer uses local knowledge only.', { kind: 'warn' });
-    }
-    if (deepWebEnabled && !appStore.getGoDark() && classifyWebSearch(content) === 'search') {
-      setStatusText('Searching the web...');
-      setWebSearchStatus('searching');
-      try {
-        const query = searchQueryFrom(content);
-        const payload = await api('/api/web-search', {
-          method: 'POST',
-          body: JSON.stringify({ query, maxResults: 5, localOnly: appStore.getGoDark() })
-        });
-
-        const sources = Array.isArray(payload.sources) ? payload.sources : [];
-        if (payload.needsKey) {
-          appStore.toast(payload.error, { kind: 'info' });
-          setWebSearchStatus('idle');
-        } else if (sources.length > 0) {
-          const context = sources
-            .map((item, index) => `${index + 1}. ${item.title || 'Untitled'}\nURL: ${item.url}\nSnippet: ${item.snippet || ''}`)
-            .join('\n\n');
-          const answerHint = payload.answer ? `High-level answer: ${payload.answer}\n\n` : '';
-          // Appended, so effort, canvas and remote notes added above are kept.
-          outboundContent = [
-            outboundContent,
-            '',
-            `Web results for "${query}". Use them when relevant and cite their URLs.`,
-            '',
-            answerHint + context
-          ].join('\n');
-          setStatusText(`Searched: ${query}`);
-          setWebSearchStatus('idle');
-        } else {
-          // Search succeeded but no results - treat as soft error
-          setWebSearchStatus('error');
-          setTimeout(() => setWebSearchStatus('idle'), 4000);
-        }
-      } catch (error) {
-        setStatusText(`Web search unavailable: ${error.message}`);
-        setWebSearchStatus('error');
-        setTimeout(() => setWebSearchStatus('idle'), 4000);
-      } finally {
-        setStatusText('Streaming response...');
-      }
-    }
+    // Appended, so effort, canvas and remote notes added above are kept.
+    const webContext = await webSearchContext(content, 'Streaming response...');
+    if (webContext) outboundContent = [outboundContent, '', webContext].join('\n');
 
     // Pinned files are read from disk at send time; only their paths persist.
-    // Capped so a large pin set cannot blow up the prompt; failures are skipped.
-    const pins = appStore.getWorkspacePins ? appStore.getWorkspacePins() : [];
-    if (pins.length > 0) {
-      const MAX_WORKSPACE_CONTEXT = 40 * 1024; // ~40 KB combined budget
-      const blocks = [];
-      let used = 0;
-      let skipped = 0;
-      for (const relPath of pins) {
-        try {
-          const payload = await api(`/api/workspace/file?path=${encodeURIComponent(relPath)}`);
-          const text = typeof payload?.content === 'string' ? payload.content : '';
-          if (used + text.length > MAX_WORKSPACE_CONTEXT) { skipped += 1; continue; }
-          used += text.length;
-          blocks.push(`--- ${payload?.path || relPath} ---\n${text}`);
-        } catch {
-          skipped += 1; // renamed / deleted / oversize / jailed - skip, keep sending
-        }
-      }
-      if (blocks.length > 0) {
-        const header = [
-          '[Watched workspace files - live context read fresh from disk. Treat these as the authoritative current contents of the named files.]',
-          skipped > 0 ? `(${skipped} pinned file(s) skipped: unavailable or over the context budget.)` : ''
-        ].filter(Boolean).join('\n');
-        outboundContent = `${header}\n\n${blocks.join('\n\n')}\n\n${outboundContent}`;
-      }
-      // Every pin failed; the header above renders only when one succeeds.
-      if (blocks.length === 0 && skipped > 0) {
-        appStore.toast(
-          `None of the ${skipped} pinned workspace file(s) could be read, so they were not sent. Reopen Workspace and re-pick the folder.`,
-          { kind: 'warn' }
-        );
-      }
-    }
+    const pinned = await readPinnedFiles(40 * 1024);
+    if (pinned.text) outboundContent = `${pinned.text}\n\n${outboundContent}`;
 
-    // Config Vault uses local Ollama embeddings, so it is allowed under Go Dark.
-    if (configVaultEnabled && configVaultStatus && configVaultStatus.chunkCount > 0) {
-      try {
-        setStatusText('Searching your config vault...');
-        const vr = await api('/api/vault/query', { method: 'POST', body: JSON.stringify({ query: content, limit: 4 }) });
-        const results = Array.isArray(vr?.results) ? vr.results : [];
-        if (results.length > 0) {
-          const context = results
-            .map((r) => `[${r.citation}]\n${r.snippet}`)
-            .join('\n\n');
-          outboundContent = [
-            '[Config Vault - cited excerpts retrieved locally from your own config files. Treat as authoritative; cite the exact file:line label in square brackets when you use one.]',
-            '',
-            context,
-            '',
-            outboundContent
-          ].join('\n');
-        }
-      } catch {
-        /* vault retrieval is best-effort - never block a send */
-      } finally {
-        setStatusText('Streaming response...');
-      }
-    }
+    const vault = await vaultContext(content, 'Streaming response...');
+    if (vault) outboundContent = [vault, '', outboundContent].join('\n');
 
     // Throws on a missing key or failed health check; the composer is already
     // cleared, so restore the draft.
@@ -5597,9 +6112,211 @@ export default function ChatApp() {
   // Refreshed every render so the shell event listeners never call a stale closure.
   shortcutRef.current.createChat = createChat;
   shortcutRef.current.loadChat = loadChat;
+  shortcutRef.current.closeAllDropdowns = closeAllDropdowns;
+  // Reopens the section the user last viewed.
+  shortcutRef.current.openSettings = () => {
+    closeAllDropdowns();
+    appStore.openSettings(settingsSection);
+  };
+
+  const currentAccess = accessMeta(accessLevel);
+  const bypassOn = currentAccess.id === 'bypass';
+  const shortcutLabel = settingsShortcutLabel();
+  // Only a live run can take an answer; a stopping run's approvals are being cancelled.
+  const pendingApprovals = agentRun?.status === 'running' && Array.isArray(agentRun.approvals) ? agentRun.approvals : [];
+  const pendingApproval = pendingApprovals[0] || null;
+
+  // The card is keyed by approval, so an answered one unmounts with focus on it.
+  // Focus goes to the next card itself, never one of its buttons, so a second
+  // Enter cannot approve an action the user has not read; with none left, to the composer.
+  const shownApprovalId = pendingApproval?.approvalId || '';
+  const lastApprovalIdRef = useRef('');
+  useEffect(() => {
+    const before = lastApprovalIdRef.current;
+    lastApprovalIdRef.current = shownApprovalId;
+    if (!before || before === shownApprovalId) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    if (shownApprovalId) {
+      const card = document.querySelector(`[data-approval-card="${CSS.escape(shownApprovalId)}"]`);
+      if (card instanceof HTMLElement) card.focus();
+    } else if (voiceChatOpenRef.current) {
+      // The orb is disabled without speech recognition; the panel's first button then.
+      const target = document.querySelector('[data-voice-orb]:not([disabled])')
+        || document.querySelector('[aria-labelledby="voice-chat-title"] button:not([disabled])');
+      if (target instanceof HTMLElement) target.focus();
+    } else if (!settingsOpenRef.current && mainRef.current?.offsetParent !== null) {
+      composerInputRef.current?.focus();
+    }
+  }, [shownApprovalId]);
+
+  const approvalCard = pendingApproval ? (
+    <>
+      <ApprovalCard
+        key={pendingApproval.approvalId}
+        approval={pendingApproval}
+        busy={approvalBusyId === pendingApproval.approvalId}
+        onDecide={(decision, note) => decideApproval(pendingApproval, decision, note)}
+      />
+      {pendingApprovals.length > 1 && (
+        <p className="mt-1.5 px-1 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
+          {pendingApprovals.length - 1} more waiting after this one.
+        </p>
+      )}
+    </>
+  ) : null;
+
+  // Settings sections, in the order the sheet lists them.
+  const settingsSections = [
+    {
+      id: 'access',
+      label: 'Access',
+      icon: ShieldIcon,
+      description: 'How much Mirabilis may do on this computer.',
+      render: () => <AccessPane workspaceRoot={workspaceRoot} onOpenWorkspace={() => appStore.openWorkspace()} />
+    },
+    {
+      id: 'connectors',
+      label: 'Connectors',
+      icon: PlugIcon,
+      description: 'Tools from MCP servers, and how other apps reach Mirabilis.',
+      render: () => <ConnectorsPane />
+    },
+    {
+      id: 'chat-tools',
+      label: 'Chat tools',
+      icon: SlidersIcon,
+      description: 'Instructions, web search, Config Vault and images.',
+      render: () => (
+        <ChatToolsSettings
+          instructionsVisible={isSystemPromptVisible}
+          instructionsLabel={selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? 'Custom' : (selectedPromptProfile?.label || 'Default')}
+          onInstructionsChange={(on) => {
+            setIsSystemPromptVisible(on);
+            // The editor lives in the sidebar, so make sure it can be seen.
+            if (on && !sidebarOpen) {
+              setSidebarOpen(true);
+              safeStorageSet('mirabilis-sidebar-open', 'true');
+            }
+          }}
+          webSearch={deepWebEnabled}
+          webSearchStatus={webSearchStatus}
+          goDark={goDarkOn}
+          onWebSearchChange={setDeepWebEnabled}
+          imageReady={imageServiceAvailable}
+          imageDevice={imageServiceDevice}
+          onCreateImage={handleCreateImageTool}
+          vaultEnabled={configVaultEnabled}
+          vaultStatus={configVaultStatus}
+          vaultFolder={configVaultFolder}
+          vaultBusy={configVaultBusy}
+          vaultMessage={configVaultMsg}
+          onVaultEnabledChange={setConfigVaultEnabled}
+          onVaultFolderChange={setConfigVaultFolder}
+          onIndexVault={indexConfigVault}
+          onClearVault={clearConfigVault}
+        />
+      )
+    },
+    {
+      id: 'voice',
+      label: 'Voice',
+      icon: MicIcon,
+      description: 'Speech to text and spoken replies.',
+      render: () => (
+        <VoiceSettings
+          voiceTools={voiceTools}
+          settingUpStt={isSettingUpStt}
+          onSetupStt={setupStt}
+          autoSpeak={autoSpeakEnabled}
+          onAutoSpeakChange={setAutoSpeakEnabled}
+          voiceSupported={voiceSupported}
+          speaking={isSpeaking}
+          onPreview={() => (isSpeaking ? stopSpeaking() : speakText('Voice preview from Mirabilis.'))}
+          engine={voiceEngine}
+          onEngineChange={setVoiceEngine}
+          voices={availableVoices}
+          voiceUri={selectedVoiceUri}
+          onVoiceUriChange={setSelectedVoiceUri}
+          rate={voiceRate}
+          onRateChange={setVoiceRate}
+          pitch={voicePitch}
+          onPitchChange={setVoicePitch}
+          piperModels={piperModels}
+          piperModelId={selectedPiperModelId}
+          onPiperModelChange={setSelectedPiperModelId}
+          settingUpPiper={isSettingUpVoiceTools}
+          onSetupPiper={setupVoiceTools}
+          downloadingPiperId={downloadingPiperModelId}
+          onDownloadPiper={downloadPiperModel}
+        />
+      )
+    },
+    {
+      id: 'remote',
+      label: 'Remote Control',
+      icon: TerminalIcon,
+      description: 'Run the commands in answers on this computer or a server.',
+      render: () => (
+        <RemoteSettings
+          connected={remoteConnected}
+          target={remoteTarget}
+          error={remoteError}
+          type={remoteType}
+          onTypeChange={(t) => { setRemoteType(t); setRemoteError(''); }}
+          host={remoteHost}
+          onHostChange={setRemoteHost}
+          user={remoteUser}
+          onUserChange={setRemoteUser}
+          port={remotePort}
+          onPortChange={setRemotePort}
+          authType={remoteAuthType}
+          onAuthTypeChange={setRemoteAuthType}
+          keyPath={remoteKeyPath}
+          onKeyPathChange={setRemoteKeyPath}
+          password={remotePassword}
+          onPasswordChange={setRemotePassword}
+          connecting={remoteConnecting}
+          onConnect={connectRemote}
+          onDisconnect={disconnectRemote}
+        />
+      )
+    },
+    {
+      id: 'labs',
+      label: 'Labs',
+      icon: FlaskIcon,
+      description: 'Experimental answer modes, training and personal memory.',
+      render: () => (
+        <LabsSettings
+          canvas={canvasEnabled}
+          onCanvasChange={setCanvasEnabled}
+          guided={guidedLearningEnabled}
+          onGuidedChange={setGuidedLearningEnabled}
+          deepThinking={deepThinkingEnabled}
+          onDeepThinkingChange={setDeepThinkingEnabled}
+          openClaw={openClawMode}
+          onOpenClawChange={() => { toggleOpenClawMode(); }}
+          trainingMode={trainingMode}
+          onTrainingModeChange={setTrainingMode}
+          examples={trainingStats.fineTuningExamples}
+          onExportExamples={exportTrainingExamples}
+          personalMemory={usePersonalMemory}
+          onPersonalMemoryChange={setUsePersonalMemory}
+          memoryItems={trainingStats.memoryItems}
+          onManageMemory={() => {
+            showChatTab();
+            setIsTeachPanelOpen(true);
+            loadMemoryItems();
+            appStore.closeSettings();
+          }}
+        />
+      )
+    }
+  ];
 
   return (
-    <main className="relative h-screen w-screen p-3 sm:p-6">
+    <main ref={mainRef} className="relative h-screen w-screen p-3 sm:p-6">
       <div className="mx-auto flex h-full max-w-7xl gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
         <aside className={`flex shrink-0 flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--panel-border)] bg-[var(--material-thin)] p-2 sm:p-4 transition-all duration-200 ${sidebarOpen ? 'w-28 sm:w-72' : 'hidden'}`}>
           <div className="flex items-center justify-between">
@@ -5844,8 +6561,6 @@ export default function ChatApp() {
                           aria-expanded={openHardwarePopover === key}
                           onClick={() => {
                             setIsContextPanelOpen(false);
-                            setIsEngineMenuOpen(false);
-                            setIsVoiceMenuOpen(false);
                             setOpenHardwarePopover((current) => (current === key ? null : key));
                           }}
                           className={`relative inline-flex items-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-wide transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)] ${
@@ -5914,9 +6629,7 @@ export default function ChatApp() {
                     aria-haspopup="true"
                     aria-expanded={isContextPanelOpen}
                     onClick={() => {
-                      setIsEngineMenuOpen(false);
                       setOpenHardwarePopover(null);
-                      setIsVoiceMenuOpen(false);
                       setIsContextPanelOpen((prev) => !prev);
                     }}
                     className="group inline-flex items-center justify-center rounded-full p-0.5 transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
@@ -6266,9 +6979,41 @@ export default function ChatApp() {
             </section>
           )}
 
-          <footer className="mt-3 border-t border-black/10 pt-3">
-            {/* Toolbar. Left: model, effort, options. Right: status + tokens. */}
-            <div className="mb-2 flex items-center justify-between gap-3">
+          <footer className="relative mt-3 border-t border-black/10 pt-3">
+            {/* Sits just above the composer, whatever its height. */}
+            {(showScrollDown || !autoScrollEnabled) && (
+              <div className="pointer-events-none absolute bottom-full left-0 right-0 z-20 mb-3 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = messagesScrollRef.current;
+                    if (!el) return;
+                    autoScrollRef.current = true;
+                    setAutoScrollEnabled(true);
+                    setShowScrollDown(false);
+                    isProgrammaticScrollRef.current = true;
+                    lastScrollTopRef.current = el.scrollHeight; // set baseline to destination now
+                    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                    setTimeout(() => { isProgrammaticScrollRef.current = false; }, 600);
+                  }}
+                  className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full border border-accent/30 bg-accentSoft px-3 text-[11px] font-semibold text-ink shadow-[0_4px_16px_-4px_rgba(15,23,42,0.18)] backdrop-blur-sm transition hover:bg-accent/20 dark:border-accent/30 dark:bg-accent/15 dark:text-accent dark:hover:bg-accent/25"
+                  title="Jump to latest messages"
+                  aria-label="Scroll to bottom"
+                >
+                  {isStreaming && !autoScrollEnabled ? <span className="inline-flex items-center gap-1">New messages <ArrowDownIcon size={12} /></span> : <ArrowDownIcon size={14} />}
+                </button>
+              </div>
+            )}
+            {/* An action waiting for the user sits on top, nearest the transcript.
+                During voice chat it shows in the voice panel instead, which covers this. */}
+            {pendingApproval && !voiceChatOpen && (
+              <div className="mb-3">
+                {approvalCard}
+              </div>
+            )}
+            {/* Toolbar. Left: model, effort, access and settings. Right: active modes + tokens,
+                which drop to their own line before the controls would wrap. */}
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
               <div className="flex flex-wrap items-center gap-1.5">
                 {/* Model unit: provider and model triggers read as one pill */}
                 <div className="flex items-center gap-0.5 rounded-[var(--r-md)] au-hairline au-material px-0.5">
@@ -6281,13 +7026,9 @@ export default function ChatApp() {
                     aria-expanded={isProviderMenuOpen}
                     onClick={() => {
                       setIsModelMenuOpen(false);
-                      setIsTrainingMenuOpen(false);
-                      setIsToolsMenuOpen(false);
-                      setIsControlPanelOpen(false);
-                      setIsMcpPanelOpen(false);
+                      setIsEffortMenuOpen(false);
+                      setIsAccessMenuOpen(false);
                       setOpenHardwarePopover(null);
-                      setIsEngineMenuOpen(false);
-                      setIsVoiceMenuOpen(false);
                       setIsContextPanelOpen(false);
                       setProviderSearch('');
                       setIsProviderMenuOpen((prev) => !prev);
@@ -6685,7 +7426,7 @@ export default function ChatApp() {
                     data-menu-trigger="model"
                     aria-haspopup="true"
                     aria-expanded={isModelMenuOpen}
-                    onClick={() => { setIsProviderMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsModelMenuOpen((prev) => !prev); }}
+                    onClick={() => { setIsProviderMenuOpen(false); setIsEffortMenuOpen(false); setIsAccessMenuOpen(false); setOpenHardwarePopover(null); setIsModelMenuOpen((prev) => !prev); }}
                     className="inline-flex h-7 items-center gap-1 rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
                     title="Choose model"
                   >
@@ -7137,6 +7878,25 @@ export default function ChatApp() {
                       <div className="mt-1 border-t border-[var(--hairline)] px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
                         Autonomous work
                       </div>
+                      {/* These run for up to hours; under Chat only they would do so with no tools. */}
+                      {currentAccess.id === 'chat' && (
+                        <p className="max-w-[13rem] px-2 pb-1.5 text-[10px] leading-snug text-[color:var(--text-muted)]">
+                          Access is Chat only, so these runs cannot use tools.{' '}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              // The menu unmounts; Settings returns focus to the chip.
+                              const chip = document.querySelector('[data-menu-trigger="effort"]');
+                              if (chip instanceof HTMLElement) chip.focus();
+                              setIsEffortMenuOpen(false);
+                              appStore.openSettings('access');
+                            }}
+                            className="au-focus rounded-[var(--r-xs)] font-medium text-[color:var(--accent)] underline underline-offset-2"
+                          >
+                            Change Access
+                          </button>
+                        </p>
+                      )}
                       {EFFORT_OPTIONS.filter((o) => o.agentic).map((opt) => (
                         <button
                           key={opt.value}
@@ -7152,38 +7912,102 @@ export default function ChatApp() {
                           <span className="text-[10px] opacity-60">{opt.hint}</span>
                         </button>
                       ))}
-
-                      {AGENTIC_EFFORTS.has(effortLevel) && (
-                        <div className="mt-1 border-t border-[var(--hairline)] pt-1.5">
-                          <div className="px-2 pb-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
-                            What it may touch
-                          </div>
-                          {TOOL_POLICY_OPTIONS.map((opt) => (
-                            <button
-                              key={opt.value}
-                              type="button"
-                              onClick={() => {
-                                if (needsFullAcknowledgement(opt.value, fullPolicyAcknowledged)) {
-                                  if (!confirmFullPolicy()) return;
-                                }
-                                setToolPolicy(opt.value);
-                              }}
-                              className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
-                                toolPolicy === opt.value
-                                  ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                                  : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                              }`}
-                            >
-                              <span>{opt.label}</span>
-                              <span className="text-[10px] opacity-60">{opt.hint}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
-                {/* Uncensored is a plain on/off, so it gets a toolbar toggle; other modes stay in Options. */}
+                {/* Access: what the assistant may do on this computer. The backend owns the level. */}
+                <div data-menu-container="true" className="relative">
+                  <button
+                    type="button"
+                    data-menu-trigger="access"
+                    aria-haspopup="menu"
+                    aria-expanded={isAccessMenuOpen}
+                    onClick={openAccessMenu}
+                    aria-label={`Access: ${currentAccess.label}`}
+                    title={`Access: ${currentAccess.label}. ${currentAccess.description}`}
+                    className={`inline-flex h-7 items-center gap-1.5 rounded-[var(--r-md)] px-2.5 text-[length:var(--text-2xs)] font-medium transition hover:brightness-105 ${
+                      bypassOn ? 'border text-rose-600 dark:text-rose-300' : 'au-hairline au-material text-[color:var(--text-main)]'
+                    }`}
+                    style={bypassOn ? { borderColor: 'rgba(244,63,94,0.45)', background: 'rgba(244,63,94,0.12)' } : undefined}
+                  >
+                    {accessSaving ? (
+                      <Spinner size={10} />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ background: ACCESS_TONE_COLOR[currentAccess.tone] }}
+                      />
+                    )}
+                    <span><span className="hidden sm:inline">Access: </span>{currentAccess.short}</span>
+                    <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
+                      <path d="M5.25 7.5L10 12.25 14.75 7.5" />
+                    </svg>
+                  </button>
+                  {isAccessMenuOpen && (
+                    <div
+                      data-menu-panel="access"
+                      role="menu"
+                      aria-label="Access"
+                      tabIndex={-1}
+                      onKeyDown={onAccessMenuKeyDown}
+                      style={accessMenuPlace}
+                      className="au-scroll absolute bottom-9 z-20 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur"
+                    >
+                      <div className="px-2 pb-1 pt-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
+                        What Mirabilis may do on this computer
+                      </div>
+                      {ACCESS_LEVELS.map((level) => {
+                        const checked = level.id === currentAccess.id;
+                        const danger = level.tone === 'danger';
+                        return (
+                          <button
+                            key={level.id}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={checked}
+                            onClick={() => chooseAccess(level.id)}
+                            className={`au-focus flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition ${
+                              checked ? 'bg-black/[0.05] dark:bg-white/[0.07]' : 'hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                            }`}
+                          >
+                            <span
+                              aria-hidden="true"
+                              className="mt-[5px] h-2 w-2 shrink-0 rounded-full"
+                              style={{ background: ACCESS_TONE_COLOR[level.tone] }}
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center justify-between gap-2">
+                                <span className={`text-xs font-semibold ${danger ? 'text-rose-600 dark:text-rose-300' : 'text-[color:var(--text-main)]'}`}>
+                                  {level.label}
+                                </span>
+                                {checked ? <CheckIcon size={13} className="shrink-0 text-[color:var(--text-main)]" /> : null}
+                              </span>
+                              <span className="mt-0.5 block text-[11px] leading-snug text-[color:var(--text-muted)]">
+                                {level.description}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                      <div className="my-1 border-t border-[var(--hairline)]" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          focusAccessChip();
+                          setIsAccessMenuOpen(false);
+                          appStore.openSettings('access');
+                        }}
+                        className="au-focus flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
+                      >
+                        <ShieldIcon size={13} className="shrink-0 text-[color:var(--text-muted)]" />
+                        <span>Access settings...</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {/* Uncensored is a plain on/off, so it gets a toolbar toggle; other modes live in Settings. */}
                 <button
                   type="button"
                   onClick={toggleUncensoredMode}
@@ -7223,870 +8047,57 @@ export default function ChatApp() {
                 >
                   www
                 </button>
-                {/* Options dropdown: tools, training, modes and voice */}
-                <div data-menu-container="true" className="relative">
+                {/* Everything that is not a per-message choice lives in Settings. */}
+                <button
+                  type="button"
+                  onClick={() => shortcutRef.current.openSettings?.()}
+                  aria-haspopup="dialog"
+                  aria-label="Settings"
+                  title={`Settings (${shortcutLabel})`}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
+                >
+                  <GearIcon size={13} />
+                  <span className="hidden sm:inline">Settings</span>
+                </button>
+              </div>
+              <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+              {/* Modes that change every answer. Each chip opens the setting that turns it off. */}
+              <div className="flex flex-wrap justify-end gap-1.5">
+                {[
+                  deepThinkingEnabled && { key: 'deep-thinking', label: 'Deep Thinking', section: 'labs' },
+                  guidedLearningEnabled && { key: 'guided', label: 'Guided', section: 'labs' },
+                  trainingMode === 'fine-tuning' && { key: 'quick-learning', label: 'Quick Learning', section: 'labs' },
+                  trainingMode === 'full-training' && { key: 'deep-training', label: 'Deep Training', section: 'labs', tone: 'warn' },
+                  canvasEnabled && { key: 'canvas', label: 'Canvas', section: 'labs' },
+                  openClawMode && { key: 'openclaw', label: 'OpenClaw', section: 'labs', tone: 'danger' },
+                  configVaultEnabled && { key: 'vault', label: 'Config Vault', section: 'chat-tools' }
+                ].filter(Boolean).map((chip) => (
+                  <button
+                    key={chip.key}
+                    type="button"
+                    onClick={() => appStore.openSettings(chip.section)}
+                    title={`${chip.label} is on. Click to change it in Settings.`}
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition ${
+                      chip.tone === 'warn'
+                        ? 'border-amber-300/60 bg-amber-100 text-amber-800 hover:brightness-95 dark:border-amber-400/40 dark:bg-amber-900/30 dark:text-amber-200'
+                        : chip.tone === 'danger'
+                        ? 'border-rose-300/60 bg-rose-50 text-rose-700 hover:brightness-95 dark:border-rose-400/40 dark:bg-rose-900/20 dark:text-rose-300'
+                        : 'border-[var(--hairline)] bg-[var(--material-thin)] text-[color:var(--text-main)] hover:bg-[color:var(--hairline)]'
+                    }`}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+                {remoteConnected && (
                   <button
                     type="button"
-                    data-menu-trigger="options"
-                    aria-haspopup="true"
-                    aria-expanded={isOptionsMenuOpen}
-                    onClick={() => { const open = !isOptionsMenuOpen; closeAllDropdowns(); setIsOptionsMenuOpen(open); }}
-                    className="inline-flex h-7 items-center gap-1.5 rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
-                    title="Tools, training, modes, and voice"
+                    onClick={() => appStore.openSettings('remote')}
+                    title={`Remote Control is connected to ${remoteTarget}. Click to manage it.`}
+                    className="inline-flex items-center gap-1 rounded-full border border-emerald-300/50 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:brightness-95 dark:border-emerald-400/30 dark:bg-emerald-900/20 dark:text-emerald-300"
                   >
-                    <SlidersIcon size={13} />
-                    Options
-                    {optionsActiveCount > 0 && (
-                      <span className="ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-medium text-white" style={{ background: 'var(--accent)' }}>{optionsActiveCount}</span>
-                    )}
-                    <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
-                      <path d="M5.25 7.5L10 12.25 14.75 7.5" />
-                    </svg>
-                  </button>
-                  {isOptionsMenuOpen && (
-                    <div data-menu-panel="options" role="group" aria-label="Tools, training, modes and voice" tabIndex={-1} className="absolute bottom-9 left-0 z-20 max-h-[70vh] w-80 overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1.5 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                      <div className="px-1 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Tools</div>
-                      <button
-                        type="button"
-                        onClick={() => { setIsSystemPromptVisible((v) => !v); setIsOptionsMenuOpen(false); }}
-                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          isSystemPromptVisible
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        <span>Instructions</span>
-                        <span className="max-w-[9rem] truncate text-[10px] opacity-70">
-                          {selectedPromptProfileId === UNSAVED_PROMPT_PROFILE_ID ? 'custom' : (selectedPromptProfile?.label || 'default')}
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCreateImageTool}
-                        className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                      >
-                        <span>Create Image</span>
-                        <span className="text-[10px] opacity-70">{imageServiceAvailable ? imageServiceDevice || 'ready' : 'offline'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setDeepWebEnabled((prev) => !prev)}
-                        title={webSearchStatus === 'error' ? 'Web search failed - results unavailable' : deepWebEnabled ? 'Web search on' : 'Web search off'}
-                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          deepWebEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        <span>Web search</span>
-                        <span className="text-[10px] opacity-70">{webSearchStatus === 'searching' ? 'searching' : webSearchStatus === 'error' ? 'error' : deepWebEnabled ? 'on' : 'off'}</span>
-                      </button>
-
-                      <div className="rounded-lg">
-                        <button
-                          type="button"
-                          onClick={() => setConfigVaultEnabled((prev) => !prev)}
-                          title="Config Vault: cited local RAG over your own config files. Fully offline, allowed under Go Dark."
-                          className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                            configVaultEnabled
-                              ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                              : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                          }`}
-                        >
-                          <span>Config Vault</span>
-                          <span className="text-[10px] opacity-70">{(configVaultStatus?.chunkCount || 0) > 0 ? `${configVaultStatus.fileCount} files | ${configVaultEnabled ? 'on' : 'off'}` : (configVaultEnabled ? 'on | not indexed' : 'off')}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsVaultPanelOpen((v) => !v)}
-                          className="px-2 pb-1 text-[10px] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]"
-                        >
-                          {isVaultPanelOpen ? 'Hide setup' : 'Setup / index a folder'}
-                        </button>
-                        {isVaultPanelOpen && (
-                          <div className="px-2 pb-2">
-                            <input
-                              type="text"
-                              value={configVaultFolder}
-                              onChange={(e) => setConfigVaultFolder(e.target.value)}
-                              placeholder="/path/to/your/configs"
-                              spellCheck={false}
-                              className="w-full rounded border border-[var(--hairline)] bg-[var(--material-thick)] px-1.5 py-1 text-[10px] outline-none focus:border-accent"
-                            />
-                            <div className="mt-1.5 flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                disabled={configVaultBusy}
-                                onClick={indexConfigVault}
-                                className="rounded-[var(--r-md)] px-2 py-1 text-[10px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
-                                style={{ background: 'var(--accent)' }}
-                              >
-                                {configVaultBusy ? 'Working...' : 'Index'}
-                              </button>
-                              {(configVaultStatus?.chunkCount || 0) > 0 && (
-                                <button
-                                  type="button"
-                                  disabled={configVaultBusy}
-                                  onClick={clearConfigVault}
-                                  className="au-hairline rounded-[var(--r-md)] px-2 py-1 text-[10px] text-[color:var(--text-muted)] transition hover:text-[color:var(--text-main)] disabled:opacity-40"
-                                >
-                                  Clear
-                                </button>
-                              )}
-                            </div>
-                            {(configVaultStatus?.chunkCount || 0) > 0 && (
-                              <p className="mt-1 text-[9px] leading-tight text-[color:var(--text-muted)]">{configVaultStatus.fileCount} files, {configVaultStatus.chunkCount} chunks via {configVaultStatus.embedModel}</p>
-                            )}
-                            {configVaultMsg && <p className="mt-1 text-[9px] leading-tight text-[color:var(--text-muted)]">{configVaultMsg}</p>}
-                            <p className="mt-1 text-[9px] leading-tight text-[color:var(--text-muted)]">Embeds locally. Pull nomic-embed-text for sharper retrieval.</p>
-                          </div>
-                        )}
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCanvasEnabled((prev) => !prev);
-                          setIsToolsMenuOpen(false);
-                        }}
-                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          canvasEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        <span>Canvas</span>
-                        <span className="text-[10px] opacity-70">{canvasEnabled ? 'on' : 'off'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setGuidedLearningEnabled((prev) => !prev);
-                          setIsToolsMenuOpen(false);
-                        }}
-                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          guidedLearningEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        <span>Guided Learning</span>
-                        <span className="text-[10px] opacity-70">{guidedLearningEnabled ? 'on' : 'off'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDeepThinkingEnabled((prev) => !prev);
-                          setIsToolsMenuOpen(false);
-                        }}
-                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          deepThinkingEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        <span>Deep Thinking</span>
-                        <span className="text-[10px] opacity-70">{deepThinkingEnabled ? 'on' : 'off'}</span>
-                      </button>
-                      <div className="mt-2 border-t border-[var(--hairline)] px-1 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Training</div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTrainingMode('off');
-                          setIsTrainingMenuOpen(false);
-                        }}
-                        className={`mb-1 flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          trainingMode === 'off'
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        <span>Training Off</span>
-                        <span className="opacity-70">default</span>
-                      </button>
-                      <button
-                        type="button"
-                          onClick={() => {
-                          setTrainingMode('fine-tuning');
-                          setIsTrainingMenuOpen(false);
-                        }}
-                        className={`mb-1 flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          trainingMode === 'fine-tuning'
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        <span>Quick Learning</span>
-                        <span className="opacity-70">capture examples</span>
-                      </button>
-                      <button
-                        type="button"
-                          onClick={() => {
-                          setTrainingMode('full-training');
-                          setIsTrainingMenuOpen(false);
-                        }}
-                        className={`mb-1 flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          trainingMode === 'full-training'
-                            ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        <span>Deep Training</span>
-                        <span className="opacity-70">plan only</span>
-                      </button>
-
-                      <label className="mt-2 flex items-center gap-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-2 text-xs text-[color:var(--text-main)]">
-                        <input
-                          type="checkbox"
-                          checked={usePersonalMemory}
-                          onChange={(event) => setUsePersonalMemory(event.target.checked)}
-                          className="h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent"
-                        />
-                        <span>Use personal memory context</span>
-                      </label>
-
-                      <div className="mt-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-2 text-[11px] text-[color:var(--text-main)]">
-                        <div>Memory items: {trainingStats.memoryItems}</div>
-                        <div>Learning examples: {trainingStats.fineTuningExamples}</div>
-                        {trainingMode === 'full-training' ? (
-                          <div className="mt-1 text-amber-700 dark:text-amber-300">
-                            Deep Training runs offline. Export examples below for LoRA training.
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-2 flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsTeachPanelOpen(true); setIsOptionsMenuOpen(false);
-                            setIsTrainingMenuOpen(false);
-                            loadMemoryItems();
-                          }}
-                          className="flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                        >
-                          Teach
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { exportTrainingExamples(); setIsTrainingMenuOpen(false); }}
-                          className="flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                        >
-                          Export
-                        </button>
-                      </div>
-                      <div className="mt-2 border-t border-[var(--hairline)] px-1 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Modes</div>
-                      <button
-                        type="button"
-                        onClick={toggleUncensoredMode}
-                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          uncensoredMode
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                        title="Toggle uncensored mode for this chat"
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className={`h-2 w-2 rounded-full ${uncensoredMode ? 'bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.55)]' : 'bg-transparent border border-slate-400/40'}`} />
-                          Uncensored
-                        </span>
-                        <span className="text-[10px] opacity-60">{uncensoredMode ? 'on' : 'off'}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={toggleOpenClawMode}
-                        className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs transition ${
-                          openClawMode
-                            ? 'bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-300'
-                            : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                        title="OpenClaw preset: uncensored mode, no personal memory, empty app system prompt"
-                      >
-                        <span className="flex min-w-0 flex-col">
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${openClawMode ? 'bg-rose-400 shadow-[0_0_6px_2px_rgba(244,63,94,0.5)]' : 'bg-transparent border border-slate-400/40'}`} />
-                            OpenClaw
-                          </span>
-                          <span className="mt-0.5 pl-4 text-[10px] leading-tight text-[color:var(--text-muted)]">Uncensored, no personal memory, empty system prompt</span>
-                        </span>
-                        <span className="text-[10px] opacity-60">{openClawMode ? 'on' : 'off'}</span>
-                      </button>
-                      <div data-menu-container="true" className="relative">
-                        <button
-                          type="button"
-                          data-menu-trigger="control"
-                    aria-haspopup="true"
-                    aria-expanded={isControlPanelOpen}
-                          onClick={() => { setIsProviderMenuOpen(false); setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsMcpPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsControlPanelOpen((prev) => !prev); }}
-                          className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                          title="Remote Control"
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className={`h-1.5 w-1.5 rounded-full ${remoteConnected ? 'bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.55)]' : 'bg-transparent border border-slate-400/40'}`} />
-                            Remote Control
-                          </span>
-                          <span className="text-[10px] opacity-60">{remoteConnected ? 'connected' : 'off'}</span>
-                        </button>
-                  {isControlPanelOpen && (
-                    <div data-menu-panel="control" role="group" aria-label="Inference controls" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Remote Control</span>
-                        {remoteConnected && (
-                          <button
-                            type="button"
-                            onClick={() => { disconnectRemote(); setIsControlPanelOpen(false); }}
-                            className="text-[10px] text-red-400 hover:text-red-600"
-                          >Disconnect</button>
-                        )}
-                      </div>
-
-                      {remoteConnected ? (
-                        <div className="flex items-center gap-2 rounded-lg border border-emerald-300/40 bg-emerald-50/60 px-2 py-1.5 dark:border-emerald-500/30 dark:bg-emerald-900/20">
-                          <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 shadow-[0_0_6px_2px_rgba(52,211,153,0.55)]" />
-                          <span className="truncate text-[11px] font-medium text-emerald-800 dark:text-emerald-300">{remoteTarget}</span>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          {/* Connection type */}
-                          <div className="flex gap-1">
-                            {['local', 'ssh'].map((t) => (
-                              <button
-                                key={t}
-                                type="button"
-                                onClick={() => setRemoteType(t)}
-                                className={`flex-1 rounded-lg px-2 py-1 text-[11px] font-medium transition ${remoteType === t ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'border border-[var(--hairline)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'}`}
-                              >{t === 'local' ? 'Localhost' : 'SSH'}</button>
-                            ))}
-                          </div>
-
-                          {remoteType === 'ssh' && (
-                            <>
-                              <input
-                                type="text"
-                                value={remoteHost}
-                                onChange={(e) => setRemoteHost(e.target.value)}
-                                placeholder="hostname or IP"
-                                className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                              />
-                              <div className="flex gap-1.5">
-                                <input
-                                  type="text"
-                                  value={remoteUser}
-                                  onChange={(e) => setRemoteUser(e.target.value)}
-                                  placeholder="username"
-                                  className="flex-1 rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                                />
-                                <input
-                                  type="text"
-                                  value={remotePort}
-                                  onChange={(e) => setRemotePort(e.target.value)}
-                                  placeholder="22"
-                                  className="w-14 rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                                />
-                              </div>
-                              {/* Auth type */}
-                              <div className="flex gap-1">
-                                {['agent', 'key', 'password'].map((a) => (
-                                  <button
-                                    key={a}
-                                    type="button"
-                                    onClick={() => setRemoteAuthType(a)}
-                                    className={`flex-1 rounded-lg px-1 py-0.5 text-[10px] font-medium transition capitalize ${remoteAuthType === a ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'border border-[var(--hairline)] text-[color:var(--text-main)] hover:bg-black/5'}`}
-                                  >{a}</button>
-                                ))}
-                              </div>
-                              {remoteAuthType === 'key' && (
-                                <input
-                                  type="text"
-                                  value={remoteKeyPath}
-                                  onChange={(e) => setRemoteKeyPath(e.target.value)}
-                                  placeholder="/path/to/id_rsa"
-                                  className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                                />
-                              )}
-                              {remoteAuthType === 'password' && (
-                                <input
-                                  type="password"
-                                  value={remotePassword}
-                                  onChange={(e) => setRemotePassword(e.target.value)}
-                                  placeholder="password"
-                                  autoComplete="new-password"
-                                  className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                                />
-                              )}
-                            </>
-                          )}
-                          <button
-                            type="button"
-                            onClick={connectRemote}
-                            disabled={remoteConnecting || (remoteType === 'ssh' && (!remoteHost.trim() || !remoteUser.trim()))}
-                            className="w-full rounded-xl bg-accent py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
-                          >
-                            {remoteConnecting ? 'Connecting...' : remoteType === 'local' ? 'Connect to Localhost' : 'Connect via SSH'}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                      </div>
-                      <div data-menu-container="true" className="relative">
-                        <button
-                          type="button"
-                          data-menu-trigger="mcp"
-                    aria-haspopup="true"
-                    aria-expanded={isMcpPanelOpen}
-                          onClick={() => { setIsModelMenuOpen(false); setIsTrainingMenuOpen(false); setIsToolsMenuOpen(false); setIsControlPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsVoiceMenuOpen(false); setIsMcpPanelOpen((prev) => !prev); }}
-                          className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                          title="MCP Connector"
-                        >
-                          <span className="flex items-center gap-2">
-                            <span className={`h-2 w-2 rounded-full ${selectedMcpServer ? 'bg-cyan-400 shadow-[0_0_6px_2px_rgba(34,211,238,0.45)]' : 'bg-transparent border border-slate-400/40'}`} />
-                            MCP Connector
-                          </span>
-                          <span className="text-[10px] opacity-60">{selectedMcpServer ? selectedMcpServer.id : 'off'}</span>
-                        </button>
-                  {isMcpPanelOpen && (
-                    <div data-menu-panel="mcp" role="group" aria-label="MCP servers" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-3 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                      <div className="mb-2 flex items-center justify-between">
-                        <span className="text-[11px] font-semibold text-[color:var(--text-main)]">MCP Connector</span>
-                        <button
-                          type="button"
-                          onClick={refreshMcpServers}
-                          className="rounded-md border border-[var(--hairline)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                        >
-                          Refresh
-                        </button>
-                      </div>
-
-                      <div className="mb-2 grid grid-cols-[1fr_auto_auto] gap-1.5">
-                        <select
-                          value={mcpSelectedServerId}
-                          onChange={(event) => setMcpSelectedServerId(event.target.value)}
-                          className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                        >
-                          <option value="">Select server...</option>
-                          {mcpServers.map((server) => (
-                            <option key={server.id} value={server.id}>{server.name} ({server.id})</option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={testMcpServer}
-                          disabled={!mcpSelectedServerId || mcpLoading}
-                          className="rounded-lg border border-[var(--hairline)] px-2 py-1.5 text-[10px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 disabled:opacity-40 dark:hover:bg-[var(--material-thin)]"
-                        >
-                          Test
-                        </button>
-                        <button
-                          type="button"
-                          onClick={deleteMcpServer}
-                          disabled={!mcpSelectedServerId || mcpLoading}
-                          className="rounded-lg border border-red-300/50 px-2 py-1.5 text-[10px] font-medium text-red-500 transition hover:bg-red-50 disabled:opacity-40 dark:border-red-500/30 dark:text-red-300 dark:hover:bg-red-900/20"
-                        >
-                          Delete
-                        </button>
-                      </div>
-
-                      <div className="mb-2 grid grid-cols-2 gap-1.5">
-                        <input
-                          type="text"
-                          value={mcpForm.id}
-                          onChange={(event) => setMcpForm((prev) => ({ ...prev, id: event.target.value }))}
-                          placeholder="server id"
-                          className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                        />
-                        <input
-                          type="text"
-                          value={mcpForm.name}
-                          onChange={(event) => setMcpForm((prev) => ({ ...prev, name: event.target.value }))}
-                          placeholder="display name"
-                          className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                        />
-                      </div>
-                      <input
-                        type="text"
-                        value={mcpForm.url}
-                        onChange={(event) => setMcpForm((prev) => ({ ...prev, url: event.target.value }))}
-                        placeholder="http://127.0.0.1:30030/mcp"
-                        className="mb-1.5 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                      />
-                      <input
-                        type="password"
-                        value={mcpForm.authToken}
-                        onChange={(event) => setMcpForm((prev) => ({ ...prev, authToken: event.target.value }))}
-                        placeholder="bearer token (optional)"
-                        className="mb-2 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                      />
-
-                      <div className="mb-2 flex gap-1.5">
-                        <button
-                          type="button"
-                          onClick={saveMcpServer}
-                          disabled={mcpLoading}
-                          className="flex-1 rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
-                        >
-                          Save Server
-                        </button>
-                        <button
-                          type="button"
-                          onClick={useLocalMcpPreset}
-                          className="flex-1 rounded-lg border border-[var(--hairline)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                        >
-                          Local MCP Preset
-                        </button>
-                      </div>
-
-                      {mcpSelectedServerId && (
-                        <>
-                          <div className="mb-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2">
-                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Policy</div>
-                            <div className="mb-1.5 grid grid-cols-2 gap-1.5">
-                              <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-main)]">
-                                <input
-                                  type="checkbox"
-                                  checked={mcpPolicy.enforceAllowlist}
-                                  onChange={(event) => saveMcpPolicy({ ...mcpPolicy, enforceAllowlist: event.target.checked })}
-                                  className="h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent"
-                                />
-                                Enforce allowlist
-                              </label>
-                              <label className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-main)]">
-                                <input
-                                  type="checkbox"
-                                  checked={mcpPolicy.requireApproval}
-                                  onChange={(event) => saveMcpPolicy({ ...mcpPolicy, requireApproval: event.target.checked })}
-                                  className="h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent"
-                                />
-                                Require approval
-                              </label>
-                            </div>
-                            <div className="flex items-center gap-2 text-[10px] text-[color:var(--text-main)]">
-                              <span>Approval TTL</span>
-                              <input
-                                type="number"
-                                min="30"
-                                max="3600"
-                                value={mcpPolicy.approvalTtlSeconds}
-                                onChange={(event) => saveMcpPolicy({ ...mcpPolicy, approvalTtlSeconds: Number(event.target.value || 300) })}
-                                className="w-20 rounded border border-[var(--hairline)] bg-[var(--material-thick)] px-1.5 py-0.5 text-[10px] outline-none focus:border-accent"
-                              />
-                              <span>seconds</span>
-                            </div>
-                          </div>
-
-                          <div className="mb-2 rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2">
-                            <div className="mb-1.5 flex items-center justify-between">
-                              <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Tools</span>
-                              <button
-                                type="button"
-                                onClick={loadMcpTools}
-                                disabled={mcpLoading}
-                                className="rounded-md border border-[var(--hairline)] px-1.5 py-0.5 text-[10px] text-[color:var(--text-main)] transition hover:bg-black/5 disabled:opacity-40 dark:hover:bg-[var(--material-thin)]"
-                              >
-                                Fetch
-                              </button>
-                            </div>
-                            <div className="max-h-28 space-y-1 overflow-y-auto pr-1">
-                              {mcpTools.length === 0 && <div className="text-[10px] text-[color:var(--text-muted)]">No tools loaded yet.</div>}
-                              {mcpTools.map((tool) => {
-                                const name = String(tool?.name || '');
-                                const checked = mcpPolicy.allowedTools.includes(name);
-                                return (
-                                  <label key={name} className="flex items-center justify-between gap-2 rounded-md border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1 text-[10px]">
-                                    <span className="truncate text-[color:var(--text-main)]">{name}</span>
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={(event) => {
-                                        const next = event.target.checked
-                                          ? Array.from(new Set([...mcpPolicy.allowedTools, name])).sort((a, b) => a.localeCompare(b))
-                                          : mcpPolicy.allowedTools.filter((item) => item !== name);
-                                        saveMcpPolicy({ ...mcpPolicy, allowedTools: next });
-                                      }}
-                                      className="h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent"
-                                    />
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          </div>
-
-                          <div className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2">
-                            <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Run Tool</div>
-                            <div className="mb-1.5 grid grid-cols-[1fr_auto] gap-1.5">
-                              <select
-                                value={mcpToolName}
-                                onChange={(event) => setMcpToolName(event.target.value)}
-                                className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] outline-none focus:border-accent"
-                              >
-                                <option value="">Select tool...</option>
-                                {mcpTools.map((tool) => {
-                                  const name = String(tool?.name || '');
-                                  return <option key={name} value={name}>{name}</option>;
-                                })}
-                              </select>
-                              <button
-                                type="button"
-                                onClick={callMcpTool}
-                                disabled={mcpCalling || !mcpToolName}
-                                className="rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white disabled:opacity-40"
-                              >
-                                {mcpCalling ? 'Running...' : 'Run'}
-                              </button>
-                            </div>
-                            <textarea
-                              value={mcpToolArgsText}
-                              onChange={(event) => setMcpToolArgsText(event.target.value)}
-                              rows={4}
-                              placeholder={'{\n  "arg": "value"\n}'}
-                              className="mb-1.5 w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 font-mono text-[10px] outline-none focus:border-accent"
-                            />
-                            <pre className="max-h-28 overflow-y-auto rounded-lg border border-[var(--hairline)] bg-slate-950/90 p-2 font-mono text-[10px] text-emerald-300">
-                              {mcpCallResultText || '{ }'}
-                            </pre>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                      </div>
-                      <div className="mt-2 border-t border-[var(--hairline)] px-1 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Voice</div>
-                      <div data-menu-container="true" className="relative">
-                        <button
-                          type="button"
-                          data-menu-trigger="voice"
-                    aria-haspopup="true"
-                    aria-expanded={isVoiceMenuOpen}
-                          onClick={() => { setIsContextPanelOpen(false); setOpenHardwarePopover(null); setIsEngineMenuOpen(false); setIsControlPanelOpen(false); setIsMcpPanelOpen(false); checkVoiceTools(); fetchPiperModels(); setIsVoiceMenuOpen((prev) => !prev); }}
-                          className="flex w-full items-center justify-between rounded-lg px-2 py-2 text-left text-xs text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
-                          title="Voice settings"
-                        >
-                          <span className="flex items-center gap-2">
-                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <path d="M4 12h1" /><path d="M8 9v6" /><path d="M12 7v10" /><path d="M16 9v6" /><path d="M20 11v2" />
-                            </svg>
-                            Voice settings
-                          </span>
-                          <span className="text-[10px] opacity-60">{voiceEngine === 'piper' ? 'Piper' : 'Browser'}</span>
-                        </button>
-                {isVoiceMenuOpen && (
-                  <div data-menu-panel="voice" role="group" aria-label="Voice settings" tabIndex={-1} className="mt-1 w-full rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] p-2 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-[color:var(--text-main)]">Voice Settings</span>
-                      <span className="text-[10px] text-[color:var(--text-muted)]">{voiceSupported ? 'TTS ready' : 'Unavailable'}</span>
-                    </div>
-
-                    {/* Speech-to-text runs on local whisper.cpp; Web Speech does not work in the desktop app. */}
-                    <div className="mb-2 rounded-lg border border-[var(--hairline)] p-2">
-                      <div className="mb-1 flex items-center justify-between">
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Speech to Text (talking)</span>
-                        <span className={`text-[10px] font-medium ${voiceTools?.stt?.ready ? 'text-emerald-600 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-300'}`}>
-                          {voiceTools?.stt?.ready ? 'Ready' : 'Not installed'}
-                        </span>
-                      </div>
-                      <p className="mb-1.5 text-[10px] leading-relaxed text-[color:var(--text-muted)]">
-                        {voiceTools?.stt?.ready
-                          ? (voiceTools?.stt?.whisperCpp ? 'Local whisper.cpp - fully offline.' : voiceTools?.stt?.openai ? 'Using OpenAI transcription.' : 'Local Whisper CLI.')
-                          : 'Install local speech-to-text (whisper.cpp) to talk hands-free. One-time ~150MB download, runs offline.'}
-                      </p>
-                      {!voiceTools?.stt?.ready && (
-                        <button
-                          type="button"
-                          onClick={setupStt}
-                          disabled={isSettingUpStt}
-                          className="w-full rounded-lg bg-accent px-2 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-50"
-                        >
-                          {isSettingUpStt ? 'Installing...' : 'Install local speech-to-text'}
-                        </button>
-                      )}
-                    </div>
-
-                    <div className="mb-2 grid grid-cols-2 gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setAutoSpeakEnabled((prev) => !prev)}
-                        className={`rounded-lg px-2 py-1.5 text-[11px] font-medium transition ${
-                          autoSpeakEnabled
-                            ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                            : 'border border-[var(--hairline)] text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                        }`}
-                      >
-                        Auto-speak {autoSpeakEnabled ? 'on' : 'off'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => (isSpeaking ? stopSpeaking() : speakText('Voice preview from Mirabilis.'))}
-                        disabled={!voiceSupported && voiceEngine === 'browser'}
-                        className="rounded-lg border border-[var(--hairline)] px-2 py-1.5 text-[11px] font-medium text-[color:var(--text-main)] transition hover:bg-black/5 disabled:opacity-40 dark:hover:bg-[var(--material-thin)]"
-                      >
-                        {isSpeaking ? 'Stop' : 'Preview'}
-                      </button>
-                    </div>
-
-                    {/* Voice engine toggle */}
-                    <div className="mb-2">
-                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Voice Engine</div>
-                      <div className="flex overflow-hidden rounded-lg border border-[var(--hairline)]">
-                        <button
-                          type="button"
-                          onClick={() => setVoiceEngine('browser')}
-                          className={`flex-1 px-2 py-1.5 text-[10px] font-medium transition ${voiceEngine === 'browser' ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'}`}
-                        >
-                          Browser
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setVoiceEngine('piper')}
-                          className={`flex-1 border-l border-black/10 px-2 py-1.5 text-[10px] font-medium transition ${voiceEngine === 'piper' ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent' : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'}`}
-                        >
-                          Piper neural
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Browser engine */}
-                    {voiceEngine === 'browser' && (
-                      <>
-                        <div className="mb-2 space-y-1">
-                          <label className="block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Voice</label>
-                          <select
-                            value={selectedVoiceUri}
-                            onChange={(e) => setSelectedVoiceUri(e.target.value)}
-                            className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] text-[color:var(--text-main)] outline-none focus:border-accent"
-                          >
-                            {availableVoices.map((voice) => (
-                              <option key={voice.voiceURI} value={voice.voiceURI}>
-                                {voice.name} ({voice.lang})
-                              </option>
-                            ))}
-                          </select>
-                          {voiceTools?.platform === 'darwin' && (
-                            <p className="text-[10px] text-[color:var(--text-muted)]">
-                              More voices: System Settings, Accessibility, Spoken Content, Manage Voices
-                            </p>
-                          )}
-                        </div>
-                        <div className="mb-1 grid grid-cols-2 gap-2">
-                          <label className="text-[10px] text-[color:var(--text-muted)]">
-                            Rate {voiceRate.toFixed(2)}
-                            <input type="range" min="0.8" max="1.5" step="0.05" value={voiceRate} onChange={(e) => setVoiceRate(Number(e.target.value))} className="mt-1 w-full" />
-                          </label>
-                          <label className="text-[10px] text-[color:var(--text-muted)]">
-                            Pitch {voicePitch.toFixed(2)}
-                            <input type="range" min="0.8" max="1.4" step="0.05" value={voicePitch} onChange={(e) => setVoicePitch(Number(e.target.value))} className="mt-1 w-full" />
-                          </label>
-                        </div>
-                      </>
-                    )}
-
-                    {/* Piper neural engine */}
-                    {voiceEngine === 'piper' && (
-                      <div className="space-y-2">
-                        {!voiceTools?.voices?.localPiper && (
-                          <div className="rounded-lg border border-[var(--hairline)] bg-[var(--material-thin)] p-2 text-[10px]">
-                            <div className="mb-0.5 font-semibold text-[color:var(--text-main)]">Piper Neural TTS</div>
-                            <div className="mb-2 text-[color:var(--text-muted)]">
-                              Free, high-quality local voices that run offline. Runs on your device - no cloud.
-                            </div>
-                            <button
-                              type="button"
-                              onClick={setupVoiceTools}
-                              disabled={isSettingUpVoiceTools}
-                              className="w-full rounded-md bg-accent px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40"
-                            >
-                              {isSettingUpVoiceTools ? 'Installing...' : 'Install Piper'}
-                            </button>
-                          </div>
-                        )}
-
-                        {voiceTools?.voices?.localPiper && (
-                          <>
-                            {(voiceTools.voices.piperModels || []).length > 0 && (
-                              <div className="space-y-1">
-                                <label className="block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Active voice</label>
-                                <select
-                                  value={selectedPiperModelId}
-                                  onChange={(e) => setSelectedPiperModelId(e.target.value)}
-                                  className="w-full rounded-lg border border-[var(--hairline)] bg-[var(--material-thick)] px-2 py-1.5 text-[11px] text-[color:var(--text-main)] outline-none focus:border-accent"
-                                >
-                                  {piperModels.filter((m) => m.installed).map((m) => (
-                                    <option key={m.id} value={m.id}>{m.label}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            )}
-
-                            <div>
-                              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Free voice catalog</div>
-                              <div className="space-y-0.5">
-                                {piperModels.map((model) => (
-                                  <div key={model.id} className="flex items-center justify-between rounded-lg px-2 py-1 text-[10px]">
-                                    <span className="text-[color:var(--text-main)]">{model.label}</span>
-                                    {model.installed ? (
-                                      <span className="font-semibold text-emerald-600 dark:text-emerald-400">Installed</span>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={() => downloadPiperModel(model.id)}
-                                        disabled={downloadingPiperModelId !== null}
-                                        className="rounded-md bg-black/5 px-2 py-0.5 font-medium text-[color:var(--text-main)] transition hover:bg-accent hover:text-white disabled:opacity-40 dark:bg-[var(--material-thin)] dark:hover:bg-accent dark:hover:text-white"
-                                      >
-                                        {downloadingPiperModelId === model.id ? 'Downloading...' : `${model.sizeMb}MB`}
-                                      </button>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-
-                            <label className="block text-[10px] text-[color:var(--text-muted)]">
-                              Speed {voiceRate.toFixed(2)}
-                              <input type="range" min="0.8" max="1.5" step="0.05" value={voiceRate} onChange={(e) => setVoiceRate(Number(e.target.value))} className="mt-1 w-full" />
-                            </label>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-              <div className="flex flex-wrap justify-end gap-1.5">
-                {deepThinkingEnabled && (
-                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
-                    Deep Thinking
-                  </span>
-                )}
-                {guidedLearningEnabled && (
-                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
-                    Guided
-                  </span>
-                )}
-                {trainingMode === 'fine-tuning' && (
-                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
-                    Quick Learning
-                  </span>
-                )}
-                {trainingMode === 'full-training' && (
-                  <span className="rounded-full border border-amber-300/60 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-400/40 dark:bg-amber-900/30 dark:text-amber-200">
-                    Deep Training
-                  </span>
-                )}
-                {canvasEnabled && (
-                  <span className="rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)]">
-                    Canvas
-                  </span>
-                )}
-                {remoteConnected && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300/50 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-900/20 dark:text-emerald-300">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                     {remoteTarget}
-                  </span>
+                  </button>
                 )}
                 {workspacePins.length > 0 && (
                   <button
@@ -8098,12 +8109,6 @@ export default function ChatApp() {
                     <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
                     {workspacePins.length} workspace file{workspacePins.length === 1 ? '' : 's'}
                   </button>
-                )}
-                {selectedMcpServer && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/60 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-700 dark:border-cyan-400/40 dark:bg-cyan-900/20 dark:text-cyan-300">
-                    <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
-                    MCP {selectedMcpServer.id}
-                  </span>
                 )}
               </div>
                 <span
@@ -8125,18 +8130,13 @@ export default function ChatApp() {
                 onChange={handleAttachFiles}
               />
               <textarea
+                ref={composerInputRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onFocus={() => {
                   setIsModelMenuOpen(false);
-                  setIsTrainingMenuOpen(false);
-                  setIsToolsMenuOpen(false);
-                  setIsControlPanelOpen(false);
-                  setIsMcpPanelOpen(false);
                   setOpenHardwarePopover(null);
-                  setIsEngineMenuOpen(false);
                   setIsContextPanelOpen(false);
-                  setIsVoiceMenuOpen(false);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
@@ -8209,30 +8209,6 @@ export default function ChatApp() {
               </div>
             </div>
           </footer>
-
-          {(showScrollDown || !autoScrollEnabled) && (
-            <div className="pointer-events-none absolute bottom-28 left-0 right-0 z-20 flex justify-center">
-              <button
-                type="button"
-                onClick={() => {
-                  const el = messagesScrollRef.current;
-                  if (!el) return;
-                  autoScrollRef.current = true;
-                  setAutoScrollEnabled(true);
-                  setShowScrollDown(false);
-                  isProgrammaticScrollRef.current = true;
-                  lastScrollTopRef.current = el.scrollHeight; // set baseline to destination now
-                  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-                  setTimeout(() => { isProgrammaticScrollRef.current = false; }, 600);
-                }}
-                className="pointer-events-auto inline-flex h-8 items-center gap-1.5 rounded-full border border-accent/30 bg-accentSoft px-3 text-[11px] font-semibold text-ink shadow-[0_4px_16px_-4px_rgba(15,23,42,0.18)] backdrop-blur-sm transition hover:bg-accent/20 dark:border-accent/30 dark:bg-accent/15 dark:text-accent dark:hover:bg-accent/25"
-                title="Jump to latest messages"
-                aria-label="Scroll to bottom"
-              >
-                {isStreaming && !autoScrollEnabled ? <span className="inline-flex items-center gap-1">New messages <ArrowDownIcon size={12} /></span> : <ArrowDownIcon size={14} />}
-              </button>
-            </div>
-          )}
         </section>
       </div>
       <footer className="pointer-events-none absolute bottom-1 left-0 right-0 text-center text-xs tracking-wide text-[color:var(--text-main)]/90">
@@ -8257,7 +8233,7 @@ export default function ChatApp() {
       />
       <VoiceChat
         open={voiceChatOpen}
-        onClose={() => appStore.closeVoiceChat()}
+        onClose={closeVoiceChat}
         phase={voicePhase}
         interimText={voiceInterim}
         replyText={voiceReply}
@@ -8266,6 +8242,17 @@ export default function ChatApp() {
         onOrbTap={onVoiceOrbTap}
         srSupported={voiceLoopSupported}
         note={voiceNote}
+      >
+        {/* A spoken request in Ask first can wait on the user; the card above the composer is behind this panel. */}
+        {voiceChatOpen ? approvalCard : null}
+      </VoiceChat>
+      {/* Portaled to body, so the Dock and the shortcut can open it on either tab. */}
+      <SettingsSheet
+        open={settingsOpen}
+        section={settingsSection}
+        onSection={(id) => appStore.openSettings(id)}
+        onClose={() => appStore.closeSettings()}
+        sections={settingsSections}
       />
     </main>
   );
