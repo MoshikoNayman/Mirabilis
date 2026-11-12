@@ -142,7 +142,9 @@ test('headDigest gives up at its timeout', async () => {
   const result = await headDigest('qwen3:8b', {
     timeoutMs: 50,
     fetchImpl: (_url, init) => new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      // AbortSignal.timeout does not hold the event loop open; this timer does.
+      const hold = setTimeout(() => {}, 5000);
+      init?.signal?.addEventListener('abort', () => { clearTimeout(hold); reject(init.signal?.reason); });
     })
   });
   assert.equal(result.status, 'unknown');

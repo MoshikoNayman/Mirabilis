@@ -277,7 +277,10 @@ test('every fetch is bounded: a page past 4 MB is refused, a silent host times o
   const silent = createOllamaLibrary({
     fetchImpl: (_url, init) => new Promise((_resolve, reject) => {
       seen = init;
-      init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      // AbortSignal.timeout does not hold the event loop open; without this the
+      // runner can drain the loop and cancel the test before the abort fires.
+      const hold = setTimeout(() => {}, 5000);
+      init?.signal?.addEventListener('abort', () => { clearTimeout(hold); reject(init.signal?.reason); });
     })
   });
   const started = Date.now();
