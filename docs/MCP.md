@@ -40,6 +40,21 @@ token and a config snippet to copy.
 Requests without it get `401`. The backend also binds to loopback and rejects
 foreign `Host` headers by default.
 
+### On and off
+
+The switch on "Use Mirabilis from other apps" turns the server off; it is on by
+default. While it is off, `POST /mcp` answers `503` with
+`Mirabilis MCP server is off`, before the token is checked, and the startup
+log adds `(off)` to the endpoint line. The setting is saved in
+`<data-dir>/mcp-endpoint.json` (see [CONFIGURATION.md](CONFIGURATION.md)).
+
+| Route | Does |
+|---|---|
+| `GET /api/mcp-endpoint` | `{ enabled, path: "/mcp", tools }`, with the tool names above. |
+| `PUT /api/mcp-endpoint` | `{ enabled: true \| false }`; answers like GET, `400` for any other body. |
+
+Both need the session token.
+
 ### VS Code
 
 `.vscode/mcp.json`:
@@ -73,20 +88,38 @@ their tools. Manage them in Settings, Connectors.
 
 - Catalog: ready-made servers. Filesystem, Memory, Sequential Thinking and
   Everything (a reference server for testing) run with `npx`; Git, Fetch and
-  Time with `uvx` (install uv first); Junos with `python3` (clone
-  https://github.com/Juniper/junos-mcp-server and `pip install -r
-  requirements.txt` first). The catalog says which launchers are installed.
-- Local command: any stdio server, as a command, arguments, `KEY=value`
+  Time with `uvx` (install uv first); Junos with Python (below). The catalog
+  says which launchers are installed.
+- Custom, Command: any stdio server, as a command, arguments, `KEY=value`
   environment lines and a working folder. `~` means your home folder.
-- Remote URL: a streamable HTTP server, with an optional bearer token.
+- Custom, URL: a streamable HTTP server you run yourself, here or on another
+  machine, with an optional bearer token.
 
-Enabled connectors start when the backend starts, in the background. A local
-connector is a child process: Mirabilis widens its `PATH` with the Homebrew and
-user tool folders (an app started from the Dock gets a minimal one), passes a
-short list of environment variables plus the connector's own, restarts it at
-most 3 times in 5 minutes after a crash, and stops its whole process group on
-disable, remove or shutdown. The last 300 lines of its output are under View
-logs.
+In the list a command shows as `Local`, a URL on this computer (`127.0.0.1`,
+`localhost` or `::1`) as `Local URL`, and any other URL as `Remote`.
+
+Local connectors are child processes of Mirabilis, so a local server needs no
+script or port of its own. Enabled ones start when the backend starts, in the
+background, and stop with it. Mirabilis widens a connector's `PATH` with the
+Homebrew and user tool folders (an app started from the Dock gets a minimal
+one), passes a short list of environment variables plus the connector's own,
+restarts it at most 3 times in 5 minutes after a crash, and stops its whole
+process group on disable, remove or shutdown. The last 300 lines of its output
+are under View logs.
+
+### Junos
+
+The Junos entry needs only the folder of a
+[junos-mcp-server](https://github.com/Juniper/junos-mcp-server) checkout
+(clone it and `pip install -r requirements.txt` first). Mirabilis runs
+`jmcp.py -f <devices file> -t stdio` in that folder with the folder's own
+`.venv/bin/python` (`.venv\Scripts\python.exe` on Windows) when it has one,
+else `python3` from `PATH` (`python` on Windows). The devices file defaults to
+`devices.json` in the folder, and a relative one is looked up there too. When
+`~/junos-mcp-server/jmcp.py` exists the catalog fills in that folder, and its
+venv counts as Python being installed, so a fresh install, the desktop app
+included, adds it in one step. Adding fails, and saves nothing, when the
+folder, `jmcp.py` or the devices file is missing.
 
 ### Tool permissions
 
@@ -124,8 +157,8 @@ All routes need the session token:
 | Route | Does |
 |---|---|
 | `GET /api/connectors` | List connectors with status and tools. Secret values are never returned, only their names. |
-| `GET /api/connectors/catalog` | The catalog, with `available` per entry. |
-| `POST /api/connectors` | Add `{ presetId, fields }` or a custom connector. |
+| `GET /api/connectors/catalog` | The catalog, with `available` per entry and a field's `default` when this machine has it. |
+| `POST /api/connectors` | Add `{ presetId, fields }` (`preset` works too) or a custom connector. |
 | `PATCH /api/connectors/:id` | Rename, enable, change the command or URL, or set `tools: { name: "allow" \| "ask" \| "off" }`. |
 | `DELETE /api/connectors/:id` | Remove and stop it. |
 | `POST /api/connectors/:id/restart` | Restart it. |

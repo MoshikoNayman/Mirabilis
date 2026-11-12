@@ -81,7 +81,8 @@ for (const rel of constTargets) {
 const readmePath = join(ROOT, 'README.md');
 try {
   const readme = readFileSync(readmePath, 'utf8');
-  const next = readme.replace(/^\*\*Version:\*\* .*$/m, `**Version:** ${marketing}  `);
+  // The line reads "Version 26.3R1-S1. Author: ...".
+  const next = readme.replace(/^Version \S+?\.(?= )/m, `Version ${marketing}.`);
   if (next !== readme) {
     drift = true;
     if (!check) {

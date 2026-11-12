@@ -23,7 +23,7 @@ Backend defaults come from `backend/src/config.js` and the modules named below.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MIRABILIS_DATA_DIR` | `../mirabilis-data` beside the repo | Chats, IntelLedger, config vault, Access settings, connectors, agent run logs, MCP token. |
+| `MIRABILIS_DATA_DIR` | `../mirabilis-data` beside the repo | Chats, IntelLedger, config vault, Access settings, connectors, agent run logs, MCP token and MCP server switch. |
 | `DATA_DIR` | (unset) | Older alias. `MIRABILIS_DATA_DIR` wins. The desktop app sets it to its per-app data folder. |
 
 ## Providers
@@ -179,7 +179,34 @@ file that cannot be read is moved aside and the `.bak` used. Each entry:
 
 `env` and `headers` hold secrets such as tokens; the API returns their names,
 never their values. The Memory preset keeps its data in
-`connector-memory.jsonl`. See [MCP.md](MCP.md).
+`connector-memory.jsonl`. A local (`stdio`) entry is a child process of the
+backend: enabled ones start with it and stop with it. A command, argument or
+working folder typed with `~` is saved that way and expanded when the program
+starts. A Junos entry looks like this, with `cwd` set to the server folder:
+
+```json
+{
+  "name": "Junos", "transport": "stdio",
+  "command": "~/junos-mcp-server/.venv/bin/python",
+  "args": ["~/junos-mcp-server/jmcp.py", "-f", "~/junos-mcp-server/devices.json", "-t", "stdio"],
+  "cwd": "~/junos-mcp-server", "preset": "junos"
+}
+```
+
+See [MCP.md](MCP.md).
+
+### mcp-endpoint.json
+
+Whether Mirabilis's own MCP server (`POST /mcp`) is on, set with the switch in
+Settings, Connectors (or with `PUT /api/mcp-endpoint`):
+
+```json
+{ "enabled": false, "updatedAt": "2026-11-11T12:00:00.000Z" }
+```
+
+Only `"enabled": false` turns it off; a missing or unreadable file means on.
+While it is off, `/mcp` answers `503`. The file is written `0600`, through a
+temp file and a rename.
 
 ## Image generation
 
@@ -242,7 +269,7 @@ backend.
 
 Data files are written `0600` and the data directory `0700`: chats, IntelLedger,
 config vault index, homelab roster, personal memory, provider keys, Access
-settings, connectors and agent run logs. Startup tightens existing files that are looser and logs how many it
+settings, the MCP server switch, connectors and agent run logs. Startup tightens existing files that are looser and logs how many it
 changed. This is a file mode, not encryption; use whole-disk encryption
 (FileVault, BitLocker, LUKS) for offline protection.
 

@@ -62,6 +62,8 @@ import { createAgentRouter } from './agent/routes.js';
 import { createAccessStore } from './accessSettings.js';
 import { createAccessRouter } from './routes/access.js';
 import { createConnectorsRouter } from './routes/connectors.js';
+import { createMcpEndpointStore } from './mcpEndpoint.js';
+import { createMcpEndpointRouter, makeMcpEndpointGate } from './routes/mcpEndpoint.js';
 import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
 import { shouldSuppressReminder, buildReminderWebhookHeaders } from './intelLedgerReminderUtils.js';
 import { expandHome } from './paths.js';
@@ -3229,7 +3231,14 @@ app.delete('/api/provider-keys/:provider', makePrivilegedGuard(mcpToken, 'provid
   res.json(await providerKeys.remove(req.params.provider));
 });
 
-app.post('/mcp', makeMcpAuthGuard(mcpToken), mcpServerHandler);
+// Settings can turn the server off; /mcp then answers 503, ahead of the token check.
+const mcpEndpoint = createMcpEndpointStore(dataDir);
+await mcpEndpoint.load();
+app.use('/api/mcp-endpoint', createMcpEndpointRouter({
+  store: mcpEndpoint,
+  guard: makePrivilegedGuard(mcpToken, 'MCP server')
+}));
+app.post('/mcp', makeMcpEndpointGate(mcpEndpoint), makeMcpAuthGuard(mcpToken), mcpServerHandler);
 
 app.use((err, _req, res, next) => {
   if (err instanceof EgressBlockedError && !res.headersSent) {
@@ -3881,7 +3890,7 @@ if (INTELLEDGER_REMINDER_WORKER_ENABLED) {
 
 const server = app.listen(config.port, config.bindHost, () => {
   console.log(`Backend listening on http://${config.bindHost}:${config.port} (host=${config.bindHost})`);
-  console.log(`MCP server endpoint: http://${config.bindHost}:${config.port}/mcp`);
+  console.log(`MCP server endpoint: http://${config.bindHost}:${config.port}/mcp${mcpEndpoint.isEnabled() ? '' : ' (off)'}`);
   // Log only a fingerprint and the path: the desktop app writes stdout to a
   // world-readable backend.log.
   console.log(`MCP token (for external MCP clients): ${String(mcpToken).slice(0, 4)}... [read the full token from ${config.mcpTokenPath}]`);

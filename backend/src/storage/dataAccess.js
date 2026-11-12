@@ -18,6 +18,7 @@ const OTHER_FILES = [
   'access.json',
   'connectors.json',
   'go-dark.json',
+  'mcp-endpoint.json',
   'mcp-token'
 ];
 

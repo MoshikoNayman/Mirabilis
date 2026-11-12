@@ -1137,12 +1137,12 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
     },
 
     catalog() {
-      return buildCatalog({ pathValue: augmentPath(pathOf(env), { home, platform }), platform });
+      return buildCatalog({ pathValue: augmentPath(pathOf(env), { home, platform }), platform, home });
     },
 
     /**
-     * Add a connector from the catalog ({presetId, fields}) or a custom one. It is
-     * saved even when it fails to start; the summary says why.
+     * Add a connector from the catalog ({presetId, fields}, or {preset, fields}) or a
+     * custom one. It is saved even when it fails to start; the summary says why.
      * @param {any} input
      */
     async create(input = {}) {
@@ -1151,12 +1151,13 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw badRequest('Send the connector as a JSON object.');
       if (records.length >= MAX_CONNECTORS) throw badRequest(`You can add up to ${MAX_CONNECTORS} connectors.`);
       let draft;
-      if (input.presetId != null && input.presetId !== '') {
-        const preset = findPreset(String(input.presetId));
-        if (!preset) throw badRequest(`Unknown catalog entry: ${String(input.presetId).slice(0, 60)}`);
+      const presetId = [input.presetId, input.preset].find((v) => v != null && v !== '');
+      if (presetId !== undefined) {
+        const preset = findPreset(String(presetId));
+        if (!preset) throw badRequest(`Unknown catalog entry: ${String(presetId).slice(0, 60)}`);
         let built;
         try {
-          built = connectorFromPreset(preset, input.fields, { dataDir, home });
+          built = connectorFromPreset(preset, input.fields, { dataDir, home, platform });
         } catch (err) {
           throw badRequest(String(err?.message || err));
         }

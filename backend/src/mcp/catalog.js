@@ -18,6 +18,20 @@ import { expandTilde, findExecutable } from './stdioClient.js';
  */
 
 /**
+ * @typedef {object} Machine
+ * @property {string} home
+ * @property {string} platform
+ */
+
+/**
+ * @typedef {object} PresetCommand
+ * @property {string} command
+ * @property {string[]} args
+ * @property {Record<string, string>} env
+ * @property {string} cwd
+ */
+
+/**
  * @typedef {object} Preset
  * @property {string} id
  * @property {string} name
@@ -27,15 +41,17 @@ import { expandTilde, findExecutable } from './stdioClient.js';
  * @property {string} command
  * @property {string[]} args  {key} placeholders; a whole-argument {key} of kind paths becomes one argument per path
  * @property {Record<string, string>} [env]  may use {dataDir}
- * @property {string} [cwdFrom]  run in the folder of this path field
  * @property {PresetField[]} fields
  * @property {'npx'|'uvx'|'python3'} requires
  * @property {boolean} network
  * @property {string} docsUrl
  * @property {string} note
+ * @property {(machine: Machine & {has: (bin: string) => boolean}) => {available: boolean, defaults: Record<string, string>, command?: string}} [detect]  for the catalog: launcher, field values and shown command found on this machine
+ * @property {(fields: Record<string, unknown>, ctx: Machine & {dataDir: string}) => PresetCommand} [build]  for presets that need logic; replaces the placeholder fill
  */
 
 const SERVERS = 'https://github.com/modelcontextprotocol/servers/tree/main/src';
+const JUNOS_FOLDER = '~/junos-mcp-server';
 
 /** @type {Preset[]} */
 export const PRESETS = [
@@ -135,16 +151,17 @@ export const PRESETS = [
     category: 'Network',
     transport: 'stdio',
     command: 'python3',
-    args: ['{script}', '-f', '{devices}', '-t', 'stdio'],
-    cwdFrom: 'script',
+    args: ['{folder}/jmcp.py', '-f', '{devices}', '-t', 'stdio'],
     fields: [
-      { key: 'script', label: 'Server script', kind: 'path', placeholder: '~/junos-mcp-server/jmcp.py', required: true, expect: 'file' },
-      { key: 'devices', label: 'Devices file', kind: 'path', placeholder: '~/junos-mcp-server/devices.json', required: true, expect: 'file' }
+      { key: 'folder', label: 'Server folder', kind: 'path', placeholder: JUNOS_FOLDER, required: true },
+      { key: 'devices', label: 'Devices file', kind: 'path', placeholder: `${JUNOS_FOLDER}/devices.json`, required: false }
     ],
     requires: 'python3',
     network: true,
     docsUrl: 'https://github.com/Juniper/junos-mcp-server',
-    note: 'Clone the repo, then pip install -r requirements.txt'
+    note: 'Clone the repo, then pip install -r requirements.txt',
+    detect: detectJunos,
+    build: buildJunos
   },
   {
     id: 'everything',
@@ -174,10 +191,11 @@ function installHint(requires, platform) {
 }
 
 /**
- * The catalog as the app shows it, with `available` checked against this PATH.
- * @param {{pathValue: string, platform?: string}} opts
+ * The catalog as the app shows it, with `available` checked against this PATH and
+ * a field's `default` when this machine already has the value.
+ * @param {{pathValue: string, platform?: string, home?: string}} opts
  */
-export function buildCatalog({ pathValue, platform = process.platform }) {
+export function buildCatalog({ pathValue, platform = process.platform, home = os.homedir() }) {
   /** @type {Map<string, boolean>} */
   const found = new Map();
   /** @param {string} bin */
@@ -186,16 +204,20 @@ export function buildCatalog({ pathValue, platform = process.platform }) {
     return found.get(bin) === true;
   };
   return PRESETS.map((preset) => {
-    const available = has(preset.requires);
+    const detected = preset.detect ? preset.detect({ home, platform, has }) : null;
+    const available = detected ? detected.available : has(preset.requires);
+    const defaults = detected ? detected.defaults : {};
     return {
       id: preset.id,
       name: preset.name,
       description: preset.description,
       category: preset.category,
       transport: preset.transport,
-      command: preset.command,
+      command: detected?.command || preset.command,
       args: [...preset.args],
-      fields: preset.fields.map(({ key, label, kind, placeholder, required }) => ({ key, label, kind, placeholder, required })),
+      fields: preset.fields.map(({ key, label, kind, placeholder, required }) => ({
+        key, label, kind, placeholder, required, ...(defaults[key] ? { default: defaults[key] } : {})
+      })),
       requires: preset.requires,
       available,
       network: preset.network,
@@ -226,6 +248,12 @@ function readField(value, kind) {
   return kind === 'paths' ? list : list.slice(0, 1);
 }
 
+/** A typed path made absolute, ~ expanded. @param {string} value @param {string} home */
+const fullPath = (value, home) => path.resolve(home, expandTilde(value, home));
+
+/** A typed path in stored form: ~ kept, anything else absolute. @param {string} value @param {string} home */
+const storedPath = (value, home) => (value.startsWith('~') ? value : fullPath(value, home));
+
 /**
  * Check a path field and return it in stored form: ~ kept, anything else absolute.
  * @param {string} value
@@ -233,7 +261,7 @@ function readField(value, kind) {
  * @param {string} home
  */
 function checkPath(value, field, home) {
-  const full = path.resolve(home, expandTilde(value, home));
+  const full = fullPath(value, home);
   let info;
   try {
     info = statSync(full);
@@ -253,13 +281,19 @@ function checkPath(value, field, home) {
 }
 
 /**
- * Fill a preset's placeholders from the person's fields. Throws plain-worded errors.
+ * Fill a preset's placeholders from the person's fields, or run its build hook.
+ * Throws plain-worded errors.
  * @param {Preset} preset
  * @param {unknown} fields
- * @param {{dataDir: string, home?: string}} ctx
+ * @param {{dataDir: string, home?: string, platform?: string}} ctx
  */
-export function connectorFromPreset(preset, fields, { dataDir, home = os.homedir() }) {
+export function connectorFromPreset(preset, fields, { dataDir, home = os.homedir(), platform = process.platform }) {
   const input = /** @type {Record<string, unknown>} */ (fields && typeof fields === 'object' ? fields : {});
+  const transport = /** @type {'stdio'} */ ('stdio');
+  if (preset.build) {
+    const { command, args, env, cwd } = preset.build(input, { dataDir, home, platform });
+    return { name: preset.name, transport, command, args, env, cwd, preset: preset.id };
+  }
   /** @type {Record<string, string[]>} */
   const values = { dataDir: [dataDir] };
   for (const field of preset.fields) {
@@ -282,14 +316,93 @@ export function connectorFromPreset(preset, fields, { dataDir, home = os.homedir
   for (const [key, value] of Object.entries(preset.env || {})) {
     env[key] = value.replace(/\{(\w+)\}/g, (_m, name) => (values[name] || [''])[0]);
   }
-  const anchor = preset.cwdFrom ? values[preset.cwdFrom]?.[0] : '';
   return {
     name: preset.name,
-    transport: /** @type {'stdio'} */ ('stdio'),
+    transport,
     command: preset.command,
     args,
     env,
-    cwd: anchor ? path.dirname(anchor) : '',
+    cwd: '',
     preset: preset.id
+  };
+}
+
+/* Junos: jmcp.py from Juniper's junos-mcp-server, run from its own folder. */
+
+/** @param {string} p */
+function isFile(p) {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** @param {string} p */
+function isDir(p) {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** The interpreter `python -m venv .venv` makes, relative to the folder. @param {string} platform */
+function venvPython(platform) {
+  return platform === 'win32' ? path.join('.venv', 'Scripts', 'python.exe') : path.join('.venv', 'bin', 'python');
+}
+
+/** What runs jmcp.py when its folder has no venv. @param {string} platform */
+function systemPython(platform) {
+  return platform === 'win32' ? 'python' : 'python3';
+}
+
+/**
+ * ~/junos-mcp-server is the default when jmcp.py is there, and its venv counts as
+ * the launcher, so Python on PATH is not needed. The shown command then matches
+ * what buildJunos will run.
+ * @param {Machine & {has: (bin: string) => boolean}} machine
+ * @returns {{available: boolean, defaults: Record<string, string>, command?: string}}
+ */
+function detectJunos({ home, platform, has }) {
+  const folder = fullPath(JUNOS_FOLDER, home);
+  const found = isFile(path.join(folder, 'jmcp.py'));
+  const venv = found && isFile(path.join(folder, venvPython(platform)));
+  /** @type {Record<string, string>} */
+  const defaults = {};
+  if (found) defaults.folder = JUNOS_FOLDER;
+  if (found && isFile(path.join(folder, 'devices.json'))) defaults.devices = `${JUNOS_FOLDER}/devices.json`;
+  return {
+    available: has(systemPython(platform)) || venv,
+    defaults,
+    ...(venv ? { command: path.join('{folder}', venvPython(platform)) } : {})
+  };
+}
+
+/**
+ * jmcp.py over stdio with the folder's venv python when it has one, else Python
+ * from PATH. The devices file defaults to devices.json in the folder.
+ * @param {Record<string, unknown>} fields
+ * @param {Machine} machine
+ * @returns {PresetCommand}
+ */
+function buildJunos(fields, { home, platform }) {
+  const typed = readField(fields.folder, 'path')[0];
+  if (!typed) throw new Error('Server folder is required.');
+  const folder = storedPath(typed, home);
+  if (!isDir(fullPath(folder, home))) throw new Error(`Server folder not found: ${typed}`);
+  const script = path.join(folder, 'jmcp.py');
+  if (!isFile(fullPath(script, home))) throw new Error(`jmcp.py not found in ${typed}`);
+  const typedDevices = readField(fields.devices, 'path')[0];
+  // A relative devices file is in the server folder, where jmcp.py looks for it.
+  let devices = path.join(folder, 'devices.json');
+  if (typedDevices) devices = typedDevices.startsWith('~') ? typedDevices : path.resolve(fullPath(folder, home), typedDevices);
+  if (!isFile(fullPath(devices, home))) throw new Error(`Devices file not found: ${typedDevices || devices}`);
+  const venv = path.join(folder, venvPython(platform));
+  return {
+    command: isFile(fullPath(venv, home)) ? venv : systemPython(platform),
+    args: [script, '-f', devices, '-t', 'stdio'],
+    env: {},
+    cwd: folder
   };
 }

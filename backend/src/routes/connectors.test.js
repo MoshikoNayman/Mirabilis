@@ -183,6 +183,38 @@ test('bad input gets a 400 with a plain error', async () => {
   assert.deepEqual((await call('GET')).body, { connectors: [] });
 });
 
+test('Junos from a folder: plain 400s until it has jmcp.py and devices.json, then a local connector', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-junos-route-'));
+  try {
+    const nowhere = path.join(dir, 'nope');
+    const add = (fields, extra = {}) => call('POST', '', { preset: 'junos', fields, ...extra });
+    for (const [fields, message] of [
+      [{}, 'Server folder is required.'],
+      [{ folder: nowhere }, `Server folder not found: ${nowhere}`],
+      [{ folder: dir }, `jmcp.py not found in ${dir}`]
+    ]) {
+      const res = await add(fields);
+      assert.equal(res.status, 400, JSON.stringify(fields));
+      assert.equal(res.body.error, message);
+    }
+    await fs.writeFile(path.join(dir, 'jmcp.py'), '');
+    const noDevices = await add({ folder: dir, devices: 'lab.json' });
+    assert.equal(noDevices.status, 400);
+    assert.equal(noDevices.body.error, 'Devices file not found: lab.json');
+    assert.deepEqual((await call('GET')).body, { connectors: [] }, 'nothing saved on a 400');
+
+    await fs.writeFile(path.join(dir, 'devices.json'), '{}');
+    const res = await add({ folder: dir }, { enabled: false });
+    assert.equal(res.status, 201);
+    const c = res.body.connector;
+    assert.deepEqual([c.name, c.transport, c.preset, c.cwd], ['Junos', 'stdio', 'junos', dir]);
+    assert.deepEqual(c.args, [path.join(dir, 'jmcp.py'), '-f', path.join(dir, 'devices.json'), '-t', 'stdio']);
+    assert.equal((await call('DELETE', `/${c.id}`)).status, 200);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('a connector that fails to start is still saved and reported', async () => {
   const res = await call('POST', '', { name: 'Broken', command: process.execPath, args: [FAKE], env: { FAKE_MCP_MODE: 'fail' } });
   assert.equal(res.status, 201);

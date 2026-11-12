@@ -13,9 +13,10 @@ import { describeApiError, fetchAccess } from '../../lib/access';
 import {
   listConnectors, getCatalog, createConnector, updateConnector, removeConnector,
   restartConnector, connectorLogs, callConnectorTool, connectorStatus, connectorSubtitle,
-  commandLine, monogram, buildCustomConnector, presetFieldValues, presetFieldsError,
-  presetCommandPreview, groupPresets, requirementInfo, isLocalUrl, mirabilisMcpUrl,
-  maskToken, clientSnippet, MCP_CLIENTS
+  connectorKind, commandLine, monogram, buildCustomConnector, presetFieldValues,
+  presetInitialValues, presetFieldsError, presetCommandPreview, groupPresets, requirementInfo,
+  isLocalUrl, mirabilisMcpUrl, maskToken, clientSnippet, MCP_CLIENTS, fetchMcpEndpoint,
+  saveMcpEndpoint
 } from '../../lib/connectors';
 import { getSessionToken } from '../../lib/sessionToken';
 import { SettingsGroup, SettingsList, SettingsRow, SettingsNotice } from './SettingsSheet';
@@ -191,7 +192,7 @@ function ConnectorRow({ connector, busy, onOpen, onToggle }) {
         <div id={`${uid}-sub`} className={`mt-0.5 flex min-w-0 items-center gap-1.5 ${muted2xs}`}>
           {/* Narrow rows have no room for the pill, so the status leads the subtitle. The pill stays the described text. */}
           <span aria-hidden="true" className="shrink-0 font-medium text-[color:var(--text-main)] min-[480px]:hidden">{status.label}</span>
-          <span className="min-w-0 truncate">{sub.kind}</span>
+          <span className="min-w-0 truncate min-[480px]:shrink-0">{sub.kind}</span>
           <span className="hidden min-w-0 truncate font-mono min-[480px]:inline" title={sub.detail}>{sub.detail}</span>
         </div>
       </div>
@@ -411,7 +412,10 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
   const logRef = useRef(null);
   const confirmRef = useRef(null);
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
 
   const state = c.enabled ? c.status.state : 'off';
   const isHttp = c.transport === 'http';
@@ -460,14 +464,22 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
             <h4 className="truncate text-[length:var(--text-md)] font-semibold text-[color:var(--text-main)]">{c.name}</h4>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               <StatusPill connector={c} />
-              <Badge>{isHttp ? 'Remote URL' : 'Local command'}</Badge>
+              <Badge>{connectorKind(c)}</Badge>
             </div>
           </div>
           <div className="flex items-center gap-2 pt-1">
+            {/* A local connector that is on starts whenever Mirabilis does. */}
+            {isHttp ? null : (
+              <label id={`${uid}-start`} htmlFor={`${uid}-switch`} className={`cursor-pointer whitespace-nowrap ${mutedXs}`}>
+                Start with Mirabilis
+              </label>
+            )}
             <Switch
+              id={`${uid}-switch`}
               checked={c.enabled}
               onChange={(on) => onToggle(c, on)}
-              label={`Enable ${c.name}`}
+              label={isHttp ? `Enable ${c.name}` : undefined}
+              aria-labelledby={isHttp ? undefined : `${uid}-start`}
               aria-disabled={busy ? true : undefined}
             />
           </div>
@@ -655,11 +667,29 @@ function PresetField({ id, field, value, onChange, disabled }) {
 
 function PresetRow({ preset, added, expanded, onExpand, onCollapse, onCreate }) {
   const uid = useId();
-  const [values, setValues] = useState({});
+  const [values, setValues] = useState(() => presetInitialValues(preset));
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
+  const rowRef = useRef(null);
+  const wasExpanded = useRef(expanded);
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+
+  // Set up and Cancel disappear when pressed, so focus moves to the first field,
+  // or back to Set up unless another row's form took it.
+  useEffect(() => {
+    if (wasExpanded.current === expanded) return;
+    wasExpanded.current = expanded;
+    const row = rowRef.current;
+    if (!row) return;
+    const active = document.activeElement;
+    if (expanded) row.querySelector('input, textarea')?.focus();
+    else if (!active || active === document.body || row.contains(active)) row.querySelector('[data-preset-action]')?.focus();
+  }, [expanded]);
+
   const needsForm = preset.fields.length > 0;
   const need = requirementInfo(preset.requires);
   const actionText = creating ? 'Adding...' : needsForm ? 'Set up' : added ? 'Add another' : 'Add';
@@ -680,7 +710,7 @@ function PresetRow({ preset, added, expanded, onExpand, onCollapse, onCreate }) 
   }
 
   return (
-    <div className="px-4 py-3">
+    <div ref={rowRef} className="px-4 py-3">
       <div className="flex items-start gap-3">
         <Avatar name={preset.name} />
         <div className="min-w-0 flex-1">
@@ -730,6 +760,7 @@ function PresetRow({ preset, added, expanded, onExpand, onCollapse, onCreate }) 
             onClick={needsForm ? onExpand : add}
             aria-disabled={creating || undefined}
             aria-label={`${actionText} ${preset.name}`}
+            data-preset-action=""
           >
             {creating ? <Spinner size={12} /> : null}
             {actionText}
@@ -836,7 +867,10 @@ function CustomForm({ goDark, onCreate }) {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
   const isHttp = form.transport === 'http';
   const id = (k) => `${uid}-${k}`;
 
@@ -869,7 +903,7 @@ function CustomForm({ goDark, onCreate }) {
           size="sm"
           value={form.transport}
           onChange={(v) => set('transport', v)}
-          options={[{ value: 'stdio', label: 'Local command' }, { value: 'http', label: 'Remote URL' }]}
+          options={[{ value: 'stdio', label: 'Command' }, { value: 'http', label: 'URL' }]}
         />
       </div>
 
@@ -1022,6 +1056,10 @@ function UseFromOtherApps() {
   const [tokenState, setTokenState] = useState('loading');
   const [reveal, setReveal] = useState(false);
   const [client, setClient] = useState(MCP_CLIENTS[0].id);
+  // known stays false on a backend without the switch: no switch, server on.
+  const [server, setServer] = useState({ known: false, enabled: true });
+  const [saving, setSaving] = useState(false);
+  const mounted = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -1033,6 +1071,31 @@ function UseFromOtherApps() {
     return () => { alive = false; };
   }, []);
 
+  useEffect(() => {
+    mounted.current = true;
+    fetchMcpEndpoint()
+      .then((e) => { if (mounted.current) setServer({ known: true, enabled: e.enabled }); })
+      .catch(() => { /* older backend: no switch, server stays on */ });
+    return () => { mounted.current = false; };
+  }, []);
+
+  // Flips at once and flips back if the save fails, like the connector switches.
+  async function toggleServer(on) {
+    if (saving) return;
+    setSaving(true);
+    setServer({ known: true, enabled: on });
+    try {
+      const next = await saveMcpEndpoint({ enabled: on });
+      if (mounted.current) setServer({ known: true, enabled: next.enabled });
+    } catch (err) {
+      if (!mounted.current) return;
+      setServer({ known: true, enabled: !on });
+      appStore.toast(`Could not turn MCP server ${on ? 'on' : 'off'}. ${describeApiError(err, 'MCP server')}`, { kind: 'error' });
+    } finally {
+      if (mounted.current) setSaving(false);
+    }
+  }
+
   const url = mirabilisMcpUrl();
   const shownToken = token ? (reveal ? token : maskToken(token)) : '<token>';
   const hint = (MCP_CLIENTS.find((c) => c.id === client) || MCP_CLIENTS[0]).hint;
@@ -1041,42 +1104,59 @@ function UseFromOtherApps() {
     : token ? shownToken : 'Not available. Start the backend, then reopen Settings.';
 
   return (
-    <SettingsGroup title="Use Mirabilis from other apps">
-      <SettingsList>
-        <SettingsRow
-          label="Endpoint"
-          detail={<code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{url}</code>}
-        >
-          <CopyButton text={url} label="Copy endpoint" />
-        </SettingsRow>
-        <SettingsRow
-          label="Token"
-          detail={<code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{tokenText}</code>}
-        >
-          <Button size="sm" variant="ghost" onClick={() => setReveal((v) => !v)} disabled={!token}>
-            {reveal ? 'Hide' : 'Show'}
-          </Button>
-          <CopyButton text={token} label="Copy token" />
-        </SettingsRow>
-      </SettingsList>
-      <p className={`mt-2 flex items-start gap-1.5 leading-snug ${muted2xs}`}>
-        <ShieldIcon size={12} className="mt-px shrink-0" />
-        Keep this token private.
-      </p>
-
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-        <SegmentedControl
-          size="sm"
-          value={client}
-          onChange={setClient}
-          options={MCP_CLIENTS.map((c) => ({ value: c.id, label: c.label }))}
+    <SettingsGroup
+      title="Use Mirabilis from other apps"
+      action={server.known ? (
+        <Switch
+          checked={server.enabled}
+          onChange={toggleServer}
+          label="Mirabilis MCP server"
+          aria-disabled={saving || undefined}
         />
-        <CopyButton text={clientSnippet(client, url, token || '<token>')} label="Copy setup" />
-      </div>
-      <pre tabIndex={0} className={`${monoBlockClass} mt-2 whitespace-pre-wrap break-words`} style={monoBg} aria-label="Setup snippet">
-        {clientSnippet(client, url, shownToken)}
-      </pre>
-      <p className={`mt-1 ${muted2xs}`}>{hint}</p>
+      ) : null}
+    >
+      {/* Only the content below hides; the switch keeps focus. */}
+      {server.enabled ? (
+        <>
+          <SettingsList>
+            <SettingsRow
+              label="Endpoint"
+              detail={<code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{url}</code>}
+            >
+              <CopyButton text={url} label="Copy endpoint" />
+            </SettingsRow>
+            <SettingsRow
+              label="Token"
+              detail={<code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{tokenText}</code>}
+            >
+              <Button size="sm" variant="ghost" onClick={() => setReveal((v) => !v)} disabled={!token}>
+                {reveal ? 'Hide' : 'Show'}
+              </Button>
+              <CopyButton text={token} label="Copy token" />
+            </SettingsRow>
+          </SettingsList>
+          <p className={`mt-2 flex items-start gap-1.5 leading-snug ${muted2xs}`}>
+            <ShieldIcon size={12} className="mt-px shrink-0" />
+            Keep this token private.
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+            <SegmentedControl
+              size="sm"
+              value={client}
+              onChange={setClient}
+              options={MCP_CLIENTS.map((c) => ({ value: c.id, label: c.label }))}
+            />
+            <CopyButton text={clientSnippet(client, url, token || '<token>')} label="Copy setup" />
+          </div>
+          <pre tabIndex={0} className={`${monoBlockClass} mt-2 whitespace-pre-wrap break-words`} style={monoBg} aria-label="Setup snippet">
+            {clientSnippet(client, url, shownToken)}
+          </pre>
+          <p className={`mt-1 ${muted2xs}`}>{hint}</p>
+        </>
+      ) : (
+        <p className={mutedXs}>Off</p>
+      )}
     </SettingsGroup>
   );
 }

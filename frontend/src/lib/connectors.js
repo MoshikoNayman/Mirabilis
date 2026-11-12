@@ -1,6 +1,7 @@
 // @ts-check
-// Client for /api/connectors (MCP servers Mirabilis uses as a client) plus the
-// formatting rules the Connectors pane needs, kept here so they are testable.
+// Client for /api/connectors (MCP servers Mirabilis uses as a client) and
+// /api/mcp-endpoint (its own MCP server switch), plus the formatting rules the
+// Connectors pane needs, kept here so they are testable.
 
 import { API_BASE, apiFetch } from './api.js';
 
@@ -54,6 +55,7 @@ const SLOW_MS = 45000;
  * @property {'path'|'paths'|'text'} kind
  * @property {string} placeholder
  * @property {boolean} required
+ * @property {string} default      found on this machine by the backend, '' when not
  */
 
 /**
@@ -147,7 +149,8 @@ function normalizeField(raw) {
     label: str(f.label) || str(f.key),
     kind: f.kind === 'paths' || f.kind === 'path' ? f.kind : 'text',
     placeholder: str(f.placeholder),
-    required: f.required === true
+    required: f.required === true,
+    default: str(f.default)
   };
 }
 
@@ -279,18 +282,34 @@ export function commandLine(command, args = []) {
   return [command, ...args.map(quoteArg)].filter(Boolean).join(' ');
 }
 
+const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '::1', '[::1]'];
+
+/**
+ * Kind label: Local is a command Mirabilis starts, Local URL a server on this
+ * computer, Remote any other URL.
+ * @param {{ transport?: string, url?: string }} c
+ * @returns {'Local'|'Local URL'|'Remote'}
+ */
+export function connectorKind(c) {
+  if (c?.transport !== 'http') return 'Local';
+  let host = '';
+  try { host = new URL(String(c.url || '')).hostname.toLowerCase(); } catch { /* not a URL */ }
+  return LOOPBACK_HOSTS.includes(host) ? 'Local URL' : 'Remote';
+}
+
 /**
  * Row subtitle: what kind of connector and where it runs.
  * @param {Connector} c
  * @returns {{ kind: string, detail: string }}
  */
 export function connectorSubtitle(c) {
+  const kind = connectorKind(c);
   if (c.transport === 'http') {
     let host = c.url;
     try { host = new URL(c.url).host || c.url; } catch { /* keep the raw text */ }
-    return { kind: 'Remote URL', detail: host };
+    return { kind, detail: host };
   }
-  return { kind: 'Local command', detail: commandLine(c.command, c.args) };
+  return { kind, detail: commandLine(c.command, c.args) };
 }
 
 /**
@@ -409,6 +428,20 @@ export function presetFieldValues(preset, values) {
 }
 
 /**
+ * Starting form values: whatever the backend found on this machine.
+ * @param {Preset} preset
+ * @returns {Record<string, string>}
+ */
+export function presetInitialValues(preset) {
+  /** @type {Record<string, string>} */
+  const values = {};
+  for (const f of preset.fields) {
+    if (f.default) values[f.key] = f.default;
+  }
+  return values;
+}
+
+/**
  * First missing required field as a sentence, or ''.
  * @param {Preset} preset
  * @param {Record<string, string>} values
@@ -426,6 +459,14 @@ export function presetFieldsError(preset, values) {
  */
 export function presetCommandPreview(preset, values) {
   const filled = presetFieldValues(preset, values);
+  /** @param {string} text */
+  const fill = (text) => text.replace(/\{(\w+)\}/g, (m, key) => {
+    const v = filled[key];
+    if (Array.isArray(v)) return v.join(' ');
+    if (v) return v;
+    const field = preset.fields.find((f) => f.key === key);
+    return `<${field ? field.label.toLowerCase() : key}>`;
+  });
   /** @type {string[]} */
   const args = [];
   for (const arg of preset.args) {
@@ -435,15 +476,10 @@ export function presetCommandPreview(preset, values) {
       args.push(...val);
       continue;
     }
-    args.push(arg.replace(/\{(\w+)\}/g, (m, key) => {
-      const v = filled[key];
-      if (Array.isArray(v)) return v.join(' ');
-      if (v) return v;
-      const field = preset.fields.find((f) => f.key === key);
-      return `<${field ? field.label.toLowerCase() : key}>`;
-    }));
+    args.push(fill(arg));
   }
-  return commandLine(preset.command, args);
+  // The command can use placeholders too, e.g. a server folder's venv python.
+  return commandLine(fill(preset.command), args);
 }
 
 /**
@@ -502,6 +538,44 @@ export function isLocalUrl(url) {
   const a = Number(v4[1]);
   const b = Number(v4[2]);
   return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+}
+
+/**
+ * @typedef {object} McpEndpoint
+ * @property {boolean} enabled  whether POST /mcp answers
+ * @property {string} path
+ * @property {string[]} tools   names of the tools it offers
+ */
+
+/**
+ * Only an explicit false is off, as in the backend.
+ * @param {any} raw
+ * @returns {McpEndpoint}
+ */
+export function normalizeMcpEndpoint(raw) {
+  const p = raw && typeof raw === 'object' ? raw : {};
+  return {
+    enabled: p.enabled !== false,
+    path: str(p.path) || '/mcp',
+    tools: Array.isArray(p.tools) ? p.tools.filter((t) => typeof t === 'string' && t !== '') : []
+  };
+}
+
+/**
+ * Mirabilis's own MCP server switch. Rejects on a backend without the route.
+ * @param {{ signal?: AbortSignal }} [opts]
+ * @returns {Promise<McpEndpoint>}
+ */
+export async function fetchMcpEndpoint(opts = {}) {
+  return normalizeMcpEndpoint(await apiFetch('/api/mcp-endpoint', { signal: opts.signal }));
+}
+
+/**
+ * @param {{ enabled: boolean }} patch
+ * @returns {Promise<McpEndpoint>} what the backend saved
+ */
+export async function saveMcpEndpoint(patch) {
+  return normalizeMcpEndpoint(await apiFetch('/api/mcp-endpoint', { method: 'PUT', body: { enabled: patch.enabled } }));
 }
 
 /**

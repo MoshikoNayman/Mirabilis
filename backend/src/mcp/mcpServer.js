@@ -131,6 +131,9 @@ const TOOLS = [
   }
 ];
 
+// Names only, for the on/off switch in Settings.
+export const MCP_TOOL_NAMES = Object.freeze(TOOLS.map((t) => t.name));
+
 function jsonRpcResponse(id, result) {
   return { jsonrpc: '2.0', id, result };
 }

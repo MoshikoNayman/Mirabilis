@@ -513,12 +513,17 @@ test('catalog presets fill their fields and check folders, repositories and file
 
   const script = path.join(dir, 'jmcp.py');
   const devices = path.join(dir, 'devices.json');
+  await assert.rejects(manager.create({ presetId: 'junos', fields: { folder: dir } }), /jmcp\.py not found in/);
   await fs.writeFile(script, '');
+  await assert.rejects(manager.create({ presetId: 'junos', fields: { folder: script } }), /Server folder not found/);
+  await assert.rejects(manager.create({ presetId: 'junos', fields: { folder: dir } }), /Devices file not found/);
   await fs.writeFile(devices, '{}');
-  await assert.rejects(manager.create({ presetId: 'junos', fields: { script: dir, devices } }), /Not a file/);
-  const junos = await manager.create({ presetId: 'junos', fields: { script, devices }, enabled: false });
-  assert.deepEqual([junos.command, ...junos.args], ['python3', script, '-f', devices, '-t', 'stdio']);
-  assert.equal(junos.cwd, dir, 'runs from the repository folder');
+  // preset is accepted as well as presetId.
+  const junos = await manager.create({ preset: 'junos', fields: { folder: dir }, enabled: false });
+  const python = process.platform === 'win32' ? 'python' : 'python3';
+  assert.deepEqual([junos.command, ...junos.args], [python, script, '-f', devices, '-t', 'stdio']);
+  assert.equal(junos.cwd, dir, 'runs from the server folder');
+  assert.equal(junos.preset, 'junos');
 
   const memory = await manager.create({ presetId: 'memory', enabled: false });
   assert.deepEqual(memory.envKeys, ['MEMORY_FILE_PATH']);
@@ -529,7 +534,8 @@ test('catalog presets fill their fields and check folders, repositories and file
 test('catalog: availability follows the launchers on PATH', { skip: process.platform === 'win32' }, async () => {
   const bin = await tempDir('mirabilis-bin-');
   await fs.writeFile(path.join(bin, 'npx'), '#!/bin/sh\n', { mode: 0o755 });
-  const presets = buildCatalog({ pathValue: bin, platform: 'darwin' });
+  // An empty home, so a Junos server in the real one cannot make it available.
+  const presets = buildCatalog({ pathValue: bin, platform: 'darwin', home: await tempDir('mirabilis-home-') });
   assert.deepEqual(presets.map((p) => p.id), ['filesystem', 'memory', 'sequential-thinking', 'git', 'fetch', 'time', 'junos', 'everything']);
   for (const p of presets) {
     assert.equal(p.available, p.requires === 'npx', p.id);
@@ -544,7 +550,7 @@ test('catalog: availability follows the launchers on PATH', { skip: process.plat
   assert.match(byId.fetch.installHint, /brew install uv/);
   assert.equal(byId.junos.category, 'Network');
   assert.equal(byId.junos.docsUrl, 'https://github.com/Juniper/junos-mcp-server');
-  assert.deepEqual(byId.junos.args, ['{script}', '-f', '{devices}', '-t', 'stdio']);
+  assert.deepEqual(byId.junos.args, ['{folder}/jmcp.py', '-f', '{devices}', '-t', 'stdio']);
   assert.equal(byId.everything.category, 'Developer');
   assert.equal(byId.everything.note, '');
 
@@ -552,6 +558,46 @@ test('catalog: availability follows the launchers on PATH', { skip: process.plat
   const fromManager = manager.catalog();
   assert.equal(fromManager.length, 8);
   assert.ok(fromManager.filter((p) => p.requires === 'npx').every((p) => p.available), 'npx found on the given PATH');
+});
+
+test('Junos from its folder: the venv python runs it, and it starts and stops with the manager', { skip: process.platform === 'win32' }, async () => {
+  const dir = await tempDir('mirabilis-junos-');
+  await fs.writeFile(path.join(dir, 'jmcp.py'), '');
+  await fs.writeFile(path.join(dir, 'devices.json'), '{}');
+  await fs.mkdir(path.join(dir, '.venv', 'bin'), { recursive: true });
+  // Stands in for the venv python: runs the fake server, whatever it is given.
+  await fs.writeFile(path.join(dir, '.venv', 'bin', 'python'), `#!/bin/sh\nexec "${process.execPath}" "${FAKE}"\n`, { mode: 0o755 });
+  const dataDir = await tempDir();
+  const first = createConnectorManager({ dataDir });
+  managers.push(first);
+  await first.init();
+  const c = await first.create({ preset: 'junos', fields: { folder: dir } });
+  assert.equal(c.status.state, 'ready', c.status.error);
+  assert.equal(c.command, path.join(dir, '.venv', 'bin', 'python'));
+  assert.deepEqual(c.args, [path.join(dir, 'jmcp.py'), '-f', path.join(dir, 'devices.json'), '-t', 'stdio']);
+  assert.equal(c.cwd, dir);
+  assert.equal(c.tools.length, 2);
+  const pid = c.status.pid;
+  await first.shutdown();
+  assert.ok(gone(pid), 'it stops with the backend');
+
+  const { manager } = await newManager({ dataDir });
+  assert.ok(await waitFor(() => manager.get(c.id)?.status.state === 'ready'), 'it starts with the backend');
+});
+
+test('a Junos connector saved before the folder field still runs as saved', async () => {
+  const dataDir = await tempDir();
+  const dir = await tempDir('mirabilis-old-junos-');
+  // The old preset stored the script and devices paths and ran from the script's folder.
+  const old = {
+    id: 'old-junos', name: 'Junos', transport: 'stdio', command: process.execPath,
+    args: [FAKE, '-f', path.join(dir, 'devices.json'), '-t', 'stdio'], cwd: dir, enabled: true, preset: 'junos', tools: {}
+  };
+  await fs.writeFile(path.join(dataDir, 'connectors.json'), JSON.stringify({ version: 1, connectors: [old] }));
+  const { manager } = await newManager({ dataDir });
+  assert.ok(await waitFor(() => manager.get('old-junos')?.status.state === 'ready'), manager.get('old-junos')?.status.error || '');
+  const c = manager.get('old-junos');
+  assert.deepEqual([c.command, c.args, c.cwd, c.preset], [old.command, old.args, old.cwd, 'junos']);
 });
 
 test('slug and toolKey make safe, bounded agent tool names', () => {
