@@ -3,6 +3,8 @@
 
 const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'http://127.0.0.1:8000/v1';
 
+const LIST_TIMEOUT_MS = 8000;
+
 export async function listOpenAICompatibleModels(input) {
   const base = typeof input === 'string'
     ? (input || OPENAI_BASE_URL)
@@ -10,7 +12,8 @@ export async function listOpenAICompatibleModels(input) {
   const apiKey = typeof input === 'object' && input !== null ? input.apiKey : '';
   try {
     const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined;
-    const res = await fetch(`${base}/models`, { headers });
+    // A stalled host must not hang the model picker.
+    const res = await fetch(`${base}/models`, { headers, signal: AbortSignal.timeout(LIST_TIMEOUT_MS) });
     if (!res.ok) return [];
     const data = await res.json();
     return (data.data || []).map(m => ({
@@ -38,6 +41,9 @@ const OPENAI_PARAM_SPEC = {
   n_predict: { min: -1, max: 131072, int: true } // llama.cpp alias for max tokens
 };
 
+// OpenAI, Groq and vLLM read this for reasoning models; "none" switches it off.
+const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+
 export function sanitizeOpenAIParams(raw) {
   if (!raw || typeof raw !== 'object') return {};
   const out = {};
@@ -56,13 +62,43 @@ export function sanitizeOpenAIParams(raw) {
   if (Array.isArray(raw.tools) && raw.tools.length) out.tools = raw.tools;
   if (raw.tool_choice != null) out.tool_choice = raw.tool_choice;
   if (raw.grammar && typeof raw.grammar === 'string') out.grammar = raw.grammar; // llama.cpp GBNF
+  if (REASONING_EFFORTS.has(raw.reasoning_effort)) out.reasoning_effort = raw.reasoning_effort;
   return out;
 }
 
-export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messages, signal, onToken, temperature, maxTokens, params, providerLabel = 'OpenAI-compatible' }) {
+// Reasoning tokens count toward max_completion_tokens, so a cap sized for the
+// answer could be spent before any text appears. The cap gets room for the effort
+// on top; billing follows the tokens actually used.
+const REASONING_HEADROOM = { none: 0, minimal: 1024, low: 4096, medium: 16384, high: 32768, xhigh: 65536 };
+
+/**
+ * OpenAI's own API runs GPT-5 and later and the o-series as reasoning models:
+ * they take max_completion_tokens, and reject temperature and top_p unless
+ * reasoning_effort is "none". Groq, Cerebras, OpenRouter and local servers
+ * keep max_tokens and sampling.
+ * @param {{ provider?: string, baseUrl?: string, model?: string }} args
+ * @returns {boolean}
+ */
+export function isOpenAIReasoningRequest({ provider, baseUrl, model }) {
+  let host = '';
+  try { host = new URL(String(baseUrl || '')).hostname.toLowerCase(); } catch { /* not a URL */ }
+  if (provider !== 'openai' && host !== 'api.openai.com') return false;
+  // Fine-tunes keep the base id after "ft:".
+  const m = /^(?:ft:)?(?:gpt-(\d+)|o\d)/i.exec(String(model || '').trim());
+  if (!m) return false;
+  return m[1] === undefined || Number(m[1]) >= 5;
+}
+
+export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messages, signal, onToken, temperature, maxTokens, params, provider = '', providerLabel = 'OpenAI-compatible' }) {
   const base = baseUrl || OPENAI_BASE_URL;
   const headers = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+  const extra = sanitizeOpenAIParams(params);
+  const reasoning = isOpenAIReasoningRequest({ provider, baseUrl: base, model });
+  // Sampling is only accepted there with reasoning switched off.
+  const sampling = !reasoning || extra.reasoning_effort === 'none';
+  if (!sampling) delete extra.top_p;
 
   const payload = {
     model,
@@ -78,9 +114,13 @@ export async function streamOpenAICompatibleChat({ baseUrl, apiKey, model, messa
       }
       : { role: m.role, content: m.content })),
     stream: true,
-    ...(temperature != null ? { temperature } : {}),
-    ...(maxTokens != null ? { max_tokens: maxTokens } : {}),
-    ...sanitizeOpenAIParams(params),
+    ...(temperature != null && sampling ? { temperature } : {}),
+    ...(maxTokens != null
+      ? (reasoning
+        ? { max_completion_tokens: maxTokens + (REASONING_HEADROOM[extra.reasoning_effort] ?? REASONING_HEADROOM.medium) }
+        : { max_tokens: maxTokens })
+      : {}),
+    ...extra,
   };
 
   try {

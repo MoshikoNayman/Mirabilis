@@ -4,8 +4,8 @@
 
 import { createElement, isValidElement, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IconButton, CloseIcon } from '../ui/primitives';
-import { useAppStore } from '../../store/useAppStore';
+import { Button, IconButton, CheckIcon, CloseIcon, CopyIcon } from '../ui/primitives';
+import { appStore, useAppStore } from '../../store/useAppStore';
 import { APP_VERSION } from '../../constants/app';
 
 function cx(...parts) {
@@ -95,6 +95,60 @@ const NOTICE_TONES = {
   warn: 'border border-amber-400/40 bg-amber-500/10 text-amber-800 dark:text-amber-200',
   danger: 'border border-rose-400/40 bg-rose-500/10 text-rose-700 dark:text-rose-200'
 };
+
+// The Clipboard API can be refused (desktop shell permissions); a hidden
+// textarea copy still works there.
+async function copyText(text) {
+  const active = typeof document !== 'undefined' ? document.activeElement : null;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* fall through */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  } finally {
+    if (active && typeof active.focus === 'function' && active !== document.activeElement) active.focus();
+  }
+}
+
+/** Copy control for a command or value shown in a pane; reads Copied for a moment. */
+export function SettingsCopyButton({ text, label = 'Copy', disabled }) {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef(null);
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  async function onCopy() {
+    if (!text) return;
+    if (await copyText(text)) {
+      setCopied(true);
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => setCopied(false), 1600);
+    } else {
+      appStore.toast('Could not copy. Copy it manually.', { kind: 'error' });
+    }
+  }
+
+  return (
+    <Button size="sm" variant="ghost" onClick={onCopy} disabled={disabled || !text} aria-label={copied ? 'Copied' : label}>
+      {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
+      {copied ? 'Copied' : 'Copy'}
+    </Button>
+  );
+}
 
 /** Inline message inside a pane: info, warn or danger. */
 export function SettingsNotice({ tone = 'info', icon, action, children, className }) {

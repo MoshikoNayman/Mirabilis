@@ -193,7 +193,7 @@ async function snapshotBeforeWrite(journalDir, resolvedPath) {
 
 async function callMirabilisChat({ prompt, provider, model, systemPrompt }, config, streamWithProvider, getEffectiveModel, listModels) {
   const resolvedProvider = provider || config.aiProvider || 'ollama';
-  const resolvedModel = model || await getEffectiveModel(config, resolvedProvider);
+  const resolvedModel = model || await getEffectiveModel({ provider: resolvedProvider, config });
 
   const messages = [];
   if (systemPrompt) {

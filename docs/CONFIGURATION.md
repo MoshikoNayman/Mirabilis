@@ -23,7 +23,7 @@ Backend defaults come from `backend/src/config.js` and the modules named below.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MIRABILIS_DATA_DIR` | `../mirabilis-data` beside the repo | Chats, IntelLedger, config vault, Access settings, connectors, agent run logs, MCP token and MCP server switch. |
+| `MIRABILIS_DATA_DIR` | `../mirabilis-data` beside the repo | Chats, IntelLedger, config vault, Access settings, connectors, agent run logs, MCP token, MCP server switch and model caches. |
 | `DATA_DIR` | (unset) | Older alias. `MIRABILIS_DATA_DIR` wins. The desktop app sets it to its per-app data folder. |
 
 ## Providers
@@ -33,7 +33,7 @@ Backend defaults come from `backend/src/config.js` and the modules named below.
 | `AI_PROVIDER` | `ollama` | Provider used when a request does not name one. |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama endpoint. |
 | `OLLAMA_MODEL` | `llama3` | Fallback model when none is selected and none can be listed. |
-| `OLLAMA_MODELS` | `~/.ollama/models` | Ollama's model directory, read to locate GGUF blobs for llama.cpp. |
+| `OLLAMA_MODELS` | `~/.ollama/models` | Ollama's model directory, read to locate GGUF blobs for llama.cpp and for the free disk space in Settings, Models. |
 | `OPENAI_BASE_URL` | `http://127.0.0.1:8000/v1` | OpenAI-compatible endpoint. Defaults to a local server. |
 | `OPENAI_API_KEY` | (empty) | Fallback key for OpenAI and OpenAI-compatible providers when none is set in the UI. Also used for OpenAI transcription. |
 | `OPENAI_MODEL` | `model.gguf` | Model for the OpenAI-compatible provider. |
@@ -41,6 +41,36 @@ Backend defaults come from `backend/src/config.js` and the modules named below.
 | `KOBOLD_MODEL` | `koboldcpp` | Label for the loaded KoboldCpp model. |
 | `MIRABILIS_CATALOG_URL` | `backend/models.json` on the repo's main branch | Remote suggested-model catalog, fetched at most hourly. |
 | `MIRABILIS_USER_CATALOG` | `~/.mirabilis/models.json` | Your own catalog additions; wins over bundled and remote. |
+
+## Models
+
+Settings, Models manages Ollama models: Installed (size, loaded, update status,
+delete, free disk, the Ollama version) and Discover (a search of the Ollama
+library with an install button and progress). The routes are under
+`/api/models` (`backend/src/routes/models.js`). Installing, canceling and
+deleting need the session token; reading does not.
+
+| Request | Host | Cached |
+|---|---|---|
+| Library search and a model's tags | `ollama.com` | 1 hour, in `ollama-library-cache.json` |
+| Update check, one HEAD per installed model for its manifest digest | `registry.ollama.ai`, `ollama.com` | 6 hours, in `model-updates.json` |
+| Latest Ollama release | `api.github.com` | 12 hours, in `model-updates.json` |
+
+- An update check downloads nothing. A result is dropped when the model's local
+  digest changes, so an updated model is checked again;
+  `GET /api/models/updates?refresh=1` checks now. MCQ models are built here and
+  are never checked.
+- When ollama.com cannot be reached or read, the last copy is served marked
+  `stale`. With nothing cached the route answers `502`.
+- Go Dark makes no request: search and tags return nothing, update checks
+  return the cache, an install is refused with `403`, and a download in
+  progress stops. The daemon does the download, so this is checked in the route
+  and the install job, not by the egress guard.
+- Install jobs live in memory. Progress is overall across layers, with speed
+  and time left. Cancel keeps the partial download, so the next install resumes.
+  Updating a model is an install of the same name; Ollama fetches only the
+  changed layers.
+- Both files are written `0600`, through a temp file and a rename.
 
 ## Launcher (`run.js`)
 
@@ -285,7 +315,7 @@ backend.
 
 Data files are written `0600` and the data directory `0700`: chats, IntelLedger,
 config vault index, homelab roster, personal memory, provider keys, Access
-settings, the MCP server switch, connectors and agent run logs. Startup tightens existing files that are looser and logs how many it
+settings, the MCP server switch, connectors, model caches and agent run logs. Startup tightens existing files that are looser and logs how many it
 changed. This is a file mode, not encryption; use whole-disk encryption
 (FileVault, BitLocker, LUKS) for offline protection.
 

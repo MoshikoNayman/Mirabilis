@@ -3,6 +3,7 @@
 // Streams underneath so the abort signal reaches the engine and stopping a run stops the model.
 
 import { describeEngineError } from '../engineErrors.js';
+import { isClaude5OrLater, withoutTrailingAssistant } from '../providers/anthropic.js';
 
 /**
  * @param {object} deps
@@ -13,6 +14,9 @@ import { describeEngineError } from '../engineErrors.js';
  * @returns {(req: {messages: Array<{role:string,content:string}>, maxTokens?: number, purpose: string, timeoutMs?: number}) => Promise<{text:string, tokens:number}>}
  */
 export function createModelAdapter({ streamWithProvider, config, request, signal }) {
+  // Claude 5 and later reject sampling parameters and an assistant prefill.
+  const fixedSampling = request.provider === 'claude' && isClaude5OrLater(request.model);
+
   return async function callModel({ messages, maxTokens, purpose, timeoutMs }) {
     let text = '';
     let reportedTokens = 0;
@@ -30,7 +34,7 @@ export function createModelAdapter({ streamWithProvider, config, request, signal
       await streamWithProvider({
       provider: request.provider,
       model: request.model,
-      messages,
+      messages: fixedSampling ? withoutTrailingAssistant(messages) : messages,
       config,
       signal: callSignal,
       onToken: (token) => { text += token; },
@@ -41,7 +45,7 @@ export function createModelAdapter({ streamWithProvider, config, request, signal
       overrideBaseUrl: request.baseUrl || undefined,
       overrideApiKey: request.apiKey || undefined,
       // Low temperature and token cap keep each step a short decision.
-      temperature: purpose === 'validate' ? 0 : (request.temperature ?? 0.2),
+      temperature: fixedSampling ? undefined : (purpose === 'validate' ? 0 : (request.temperature ?? 0.2)),
       maxTokens: maxTokens ?? 1_500,
       ollamaOptions: request.ollamaOptions,
         keepAlive: request.keepAlive ?? '30m'

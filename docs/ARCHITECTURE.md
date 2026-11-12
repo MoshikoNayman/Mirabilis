@@ -48,6 +48,9 @@ Backend (`backend/src`, Node ESM):
 - `backend/src/mcp/`: `mcpServer.js` (Mirabilis as a server), the connector client, and
   `machineServer.js` with `machineTools.js` (the built-in This computer server).
 - `backend/src/storage/`: JSON stores. `backend/src/routes/`: routers mounted by `server.js`.
+- `backend/src/routes/models.js`: Settings, Models. `backend/src/ollamaLibrary.js` parses ollama.com
+  search and tags, `backend/src/modelUpdates.js` compares installed digests with the registry's, and
+  `backend/src/modelInstallJobs.js` runs installs as jobs. Go Dark refuses an install and stops a running one.
 - Features beside chat: `backend/src/recall.js` (search past chats with local embeddings),
   `backend/src/configVault.js` (cited answers over a folder of config files), IntelLedger
   (`backend/src/routes/intelLedger.js`, `backend/src/storage/intelLedger.js`), Homelab Roster
@@ -201,6 +204,7 @@ sets it to Electron's user data folder (on macOS `~/Library/Application Support/
 | `go-dark.json` | Go Dark on or off. |
 | `provider-keys.json` | Cloud provider API keys. |
 | `mcp-token` | The local session and MCP token. |
+| `ollama-library-cache.json`, `model-updates.json` | Model search cache, update checks, latest Ollama release. |
 | `personal-memory.json` | Personal memory items. |
 | `intelledger.json`, `config-vault.json`, `homelab-hosts.json` | Feature stores. |
 | `agent-runs/` | Run logs (`<runId>.jsonl`), `runs.json`, and pre-write copies. |

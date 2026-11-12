@@ -12,7 +12,7 @@ import { FlowerMark } from './ui/StatusOrb';
 import {
   Badge, Button, SegmentedControl, Spinner, Switch,
   IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon, CheckIcon,
-  GearIcon, ShieldIcon, PlugIcon, MicIcon, TerminalIcon, FlaskIcon, AlertIcon
+  GearIcon, ShieldIcon, PlugIcon, MicIcon, TerminalIcon, FlaskIcon, AlertIcon, CubeIcon, ChevronRightIcon
 } from './ui/primitives';
 import TabSwitch from './shell/TabSwitch';
 import CommitmentRadar from './shell/CommitmentRadar';
@@ -22,6 +22,7 @@ import ApprovalCard from './shell/ApprovalCard';
 import SettingsSheet, { SettingsGroup, SettingsList, SettingsRow, SettingsNotice } from './settings/SettingsSheet';
 import AccessPane from './settings/AccessPane';
 import ConnectorsPane from './settings/ConnectorsPane';
+import ModelsPane from './settings/ModelsPane';
 import { playSend, playReceive, playError } from '../lib/sounds';
 import { postJSON } from '../lib/api';
 import { getSessionToken } from '../lib/sessionToken';
@@ -36,6 +37,10 @@ import { ACCESS_LEVELS, ACCESS_TONE_COLOR, accessMeta, lowerAccess, fetchAccess,
 import { hasUsableKey, providerNeedsKey, missingKeyMessage } from '../lib/providerKeys';
 import { needsServerModelSwitch } from '../lib/providerCapabilities';
 import { EFFORT_LABELS } from '../lib/effort';
+import {
+  pickAutoModel, pickUncensoredModel, modelFit, fitDetail, itemSize, FIT_LABELS, rowIdForName, isInstalledName,
+  startInstallJob, followInstallJob, cancelInstallJob, listInstallJobs, deleteInstalledModel
+} from '../lib/models';
 import { appStore, useAppStore } from '../store/useAppStore';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:4000';
@@ -233,97 +238,118 @@ const PROVIDER_OPTIONS = [
 const STREAM_FIRST_TOKEN_BUDGET_MS = 900000; // 15 min before the first token
 const STREAM_STALL_TIMEOUT_MS = 60000;       // 60s gap between tokens = dead
 
-const UNCENSORED_MODEL_PRIORITY = [
-  'qwen3.5-uncensored',
-  'deepseek-r1-abliterated',
-  'dolphin3',
-  'dolphin-mixtral:8x7b',
-  'dolphin-mixtral',
-  'llama4.1:surge',
-  'llama4.1'
-];
-
-function normalizeModelId(modelId) {
-  return String(modelId || '').split(':')[0].trim().toLowerCase();
-}
-
-function isUncensoredModelRecord(item) {
-  const haystack = `${item?.id || ''} ${item?.label || ''} ${item?.group || ''}`.toLowerCase();
-  return (
-    String(item?.group || '').toLowerCase() === 'uncensored' ||
-    /uncensored|dolphin|abliterated|surge/.test(haystack)
-  );
-}
-
-// Models with a guaranteed 128K+ context, preferred for large conversations.
-// phi4 (16K) and mistral/mixtral (32K) stay out.
-const LARGE_CONTEXT_PRIORITY = [
-  'qwen2.5', 'llama3.1', 'gemma3', 'qwen3', 'deepseek-r1', 'gemma4:e2b', 'gemma4:e4b',
-  'gemma3:12b', 'gemma3:27b', 'gemma4:26b', 'gemma4:31b', 'llama3.3', 'llama3'
-];
-
-// Priority list for Auto mode when context is small - prefer faster/lighter local models first.
-const AUTO_MODEL_PRIORITY = [
-  'qwen2.5', 'llama3.1', 'gemma3', 'mistral', 'phi4', 'qwen3',
-  'deepseek-r1', 'gemma4:e2b', 'gemma4:e4b', 'gemma3:12b', 'gemma3:27b',
-  'gemma4:26b', 'gemma4:31b', 'mistral-large', 'llama3.3', 'llama3'
-];
-
+// Per-1M-token list prices for the budget bar, from each provider's pricing page
+// (2026-11-11). The longest matching prefix wins; default covers the rest.
 const COST_RATES_PER_1M = {
   openai: {
-    default: { in: 0.15, out: 0.60 },
-    'gpt-4o': { in: 5.0, out: 15.0 },
-    'gpt-4.1': { in: 5.0, out: 15.0 },
+    default: { in: 0.10, out: 0.50 },
+    'gpt-6-luna': { in: 0.10, out: 0.50 },
+    'gpt-6-sol': { in: 2.00, out: 10.00 },
+    'gpt-6-astra': { in: 10.00, out: 50.00 },
+    'gpt-6.1-sol': { in: 2.00, out: 10.00 },
+    'gpt-6.1-terra': { in: 1.00, out: 5.00 },
+    'gpt-5.6-luna': { in: 0.20, out: 1.20 },
+    'gpt-5.6-terra': { in: 2.00, out: 12.00 },
+    'gpt-5.6-sol': { in: 4.40, out: 22.00 },
+    'gpt-5.5': { in: 5.00, out: 30.00 },
+    'gpt-5.4': { in: 2.50, out: 15.00 },
+    'gpt-5.4-mini': { in: 0.75, out: 4.50 },
+    'gpt-5.4-nano': { in: 0.20, out: 1.25 },
+    // Shut down January 14, 2027.
+    'gpt-4.1': { in: 2.00, out: 8.00 },
+    'gpt-4o': { in: 2.50, out: 10.00 },
     'gpt-4o-mini': { in: 0.15, out: 0.60 }
   },
   grok: {
-    default: { in: 0.50, out: 1.50 },
-    'grok-3': { in: 5.0, out: 15.0 },
-    'grok-3-mini': { in: 0.50, out: 1.50 }
+    default: { in: 1.25, out: 2.50 },
+    'grok-4.3': { in: 1.25, out: 2.50 },
+    'grok-4.20': { in: 1.25, out: 2.50 },
+    'grok-4.5': { in: 2.00, out: 6.00 },
+    'grok-4.6': { in: 2.00, out: 6.00 },
+    'grok-4.7': { in: 2.00, out: 6.00 },
+    'grok-build': { in: 1.00, out: 2.00 }
   },
   groq: {
-    default: { in: 0.05, out: 0.08 },
-    'llama-3.1-8b': { in: 0.05, out: 0.08 },
-    'llama-3.3-70b': { in: 0.59, out: 0.79 }
+    default: { in: 0.075, out: 0.30 },
+    'openai/gpt-oss-20b': { in: 0.075, out: 0.30 },
+    'openai/gpt-oss-120b': { in: 0.15, out: 0.60 },
+    'qwen/qwen3.8-27b': { in: 0.80, out: 4.00 }
   },
   openrouter: {
+    // Ids ending in :free cost nothing; see resolveRateCard.
     default: { in: 0.50, out: 1.50 },
-    'openai/gpt-4o-mini': { in: 0.15, out: 0.60 },
-    'anthropic/claude-3.5-sonnet': { in: 3.00, out: 15.00 }
+    'openrouter/free': { in: 0, out: 0 },
+    'openai/gpt-6-luna': { in: 0.10, out: 0.50 },
+    'openai/gpt-6.1-terra': { in: 1.00, out: 5.00 },
+    'openai/gpt-oss-120b': { in: 0.15, out: 0.60 },
+    'anthropic/claude-haiku-5.5': { in: 0.10, out: 0.50 },
+    'anthropic/claude-sonnet-5': { in: 2.00, out: 10.00 },
+    'anthropic/claude-opus-5.5': { in: 4.00, out: 20.00 },
+    'google/gemini-3.5-flash-lite': { in: 0.30, out: 2.50 },
+    'x-ai/grok-4.3': { in: 1.25, out: 2.50 }
   },
   gpuaas: {
     default: { in: 0.60, out: 1.80 }
   },
   gemini: {
-    default: { in: 0.10, out: 0.40 },
-    'gemini-2.5-pro': { in: 3.50, out: 10.50 },
-    'gemini-2.5-flash': { in: 0.10, out: 0.40 }
+    default: { in: 0.30, out: 2.50 },
+    'gemini-3.5-flash-lite': { in: 0.30, out: 2.50 },
+    'gemini-3.6-flash': { in: 1.50, out: 7.50 },
+    // Introductory price through the end of 2026.
+    'gemini-3.8-flash': { in: 0.75, out: 3.75 },
+    // List price after the introductory period ends November 30, 2026.
+    'gemini-4-argon': { in: 4.00, out: 20.00 },
+    'gemini-4-carbon': { in: 4.00, out: 20.00 }
   },
   claude: {
-    default: { in: 3.00, out: 15.00 },
-    'claude-3-5-haiku': { in: 0.80, out: 4.00 },
-    'claude-3-5-sonnet': { in: 3.00, out: 15.00 },
-    'claude-sonnet': { in: 3.00, out: 15.00 },
-    'claude-opus': { in: 15.00, out: 75.00 }
+    default: { in: 0.10, out: 0.50 },
+    'claude-haiku-5-5': { in: 0.10, out: 0.50 },
+    'claude-haiku-4-5': { in: 1.00, out: 5.00 },
+    'claude-sonnet-5': { in: 2.00, out: 10.00 },
+    'claude-sonnet-4': { in: 3.00, out: 15.00 },
+    'claude-opus-5-5': { in: 4.00, out: 20.00 },
+    'claude-opus-5': { in: 5.00, out: 25.00 },
+    'claude-opus-4': { in: 5.00, out: 25.00 },
+    'claude-fable-5-2': { in: 8.00, out: 40.00 },
+    'claude-fable-5': { in: 10.00, out: 50.00 },
+    'claude-mythos-5-2': { in: 8.00, out: 40.00 },
+    'claude-mythos-5': { in: 10.00, out: 50.00 }
   },
   cerebras: {
-    // Free tier is 0; these approximate the paid overage rates so the budget bar
-    // is meaningful past the free allowance.
-    default: { in: 0.60, out: 0.80 },
-    'llama-3.3-70b': { in: 0.60, out: 0.80 }
+    // Free tier is 0; these are the paid rates so the budget bar is meaningful
+    // past the free allowance.
+    default: { in: 0.35, out: 0.75 },
+    'gpt-oss-120b': { in: 0.35, out: 0.75 },
+    'qwen-3.8-27b': { in: 0.99, out: 1.49 }
   }
 };
 
+// The longest matching prefix wins, so gpt-4o-mini is not priced as gpt-4o.
 function resolveRateCard(providerId, modelId) {
   const providerRates = COST_RATES_PER_1M[providerId];
   if (!providerRates) return null;
   const key = String(modelId || '').toLowerCase();
-  for (const [prefix, rate] of Object.entries(providerRates)) {
-    if (prefix === 'default') continue;
-    if (key.startsWith(prefix)) return rate;
+  if (providerId === 'openrouter' && key.endsWith(':free')) return { in: 0, out: 0 };
+  let best = '';
+  for (const prefix of Object.keys(providerRates)) {
+    if (prefix !== 'default' && prefix.length > best.length && key.startsWith(prefix)) best = prefix;
   }
-  return providerRates.default;
+  return best ? providerRates[best] : providerRates.default;
 }
+
+// Auto on a cloud provider: the first model it lists. With no list, '' lets the
+// backend send providerDefaults from backend/models.json.
+function cloudAutoModel(list) {
+  return (list || []).find((item) => item?.available !== false)?.id || '';
+}
+
+// Install and delete failures as the sentence a row shows, never raw JSON.
+function modelErrorText(err, fallback) {
+  const text = plainError(describeApiError(err, 'Models'), fallback);
+  return /fetch failed|ECONNREFUSED/i.test(text) ? 'Ollama is not running. Start it, then retry.' : text;
+}
+
+const GO_DARK_INSTALL = 'Blocked by Go Dark. Turn it off to install.';
 
 function normalizeGeminiBaseUrl(baseUrl) {
   const raw = String(baseUrl || '').trim().replace(/\/$/, '');
@@ -332,41 +358,6 @@ function normalizeGeminiBaseUrl(baseUrl) {
     return `${raw}/openai`;
   }
   return raw;
-}
-
-// Threshold above which we switch to context-first routing (in tokens ~= 6K chars).
-const LARGE_CONTEXT_THRESHOLD = 6000;
-
-function pickBestAutoModel(modelsList = [], contextTokens = 0) {
-  const installed = (modelsList || []).filter(
-    (item) => item?.available !== false && item?.group !== 'Uncensored'
-  );
-  const priority = contextTokens > LARGE_CONTEXT_THRESHOLD ? LARGE_CONTEXT_PRIORITY : AUTO_MODEL_PRIORITY;
-  for (const preferred of priority) {
-    const match = installed.find(
-      (item) => item?.id === preferred || item?.ollamaId === preferred
-    );
-    if (match) return match;
-  }
-  return installed[0] || null;
-}
-
-function pickMostUncensoredModel(modelsList = []) {
-  const installed = (modelsList || []).filter((item) => item?.available !== false);
-  if (installed.length === 0) {
-    return null;
-  }
-
-  for (const preferred of UNCENSORED_MODEL_PRIORITY) {
-    const preferredNorm = normalizeModelId(preferred);
-    const match = installed.find((item) =>
-      normalizeModelId(item?.id) === preferredNorm ||
-      normalizeModelId(item?.ollamaId) === preferredNorm
-    );
-    if (match) return match;
-  }
-
-  return installed.find((item) => isUncensoredModelRecord(item)) || null;
 }
 
 function isImageRequest(text) {
@@ -534,25 +525,16 @@ function formatTokenCount(value) {
   return `${amount.toLocaleString()} tok`;
 }
 
-// Rough pre-pull fit: weight size vs device memory, with headroom for KV cache
-// and the OS. Returns {tier,label,title}, or null without the numbers.
-function computeModelFit(item, ramGb) {
-  if (!Number.isFinite(ramGb) || ramGb <= 0) return null;
-  let weightsGb = null;
-  if (Number.isFinite(item?.sizeBytes) && item.sizeBytes > 0) {
-    weightsGb = item.sizeBytes / 1e9;
-  } else if (typeof item?.size === 'string') {
-    const m = item.size.match(/([\d.]+)\s*(GB|MB)/i);
-    if (m) weightsGb = /mb/i.test(m[2]) ? parseFloat(m[1]) / 1024 : parseFloat(m[1]);
-  }
-  if (!Number.isFinite(weightsGb) || weightsGb <= 0) return null;
-  // Runtime footprint runs above raw weights (KV cache, activations, overhead).
-  const required = weightsGb * 1.2;
-  const title = `${weightsGb.toFixed(1)} GB weights, ${ramGb} GB memory`;
-  if (required <= ramGb * 0.6) return { tier: 'fits', label: 'Fits', title };
-  if (required <= ramGb * 0.82) return { tier: 'tight', label: 'Tight', title };
-  return { tier: 'swap', label: 'Will swap', title };
-}
+// Picker fit chip colors; lib/models.js modelFit decides the fit, as in Settings > Models.
+const FIT_CHIP_TONE = {
+  fits: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300',
+  tight: 'bg-amber-500/15 text-amber-600 dark:text-amber-300',
+  swap: 'bg-rose-500/15 text-rose-600 dark:text-rose-300'
+};
+
+// Install progress is polled at this rate; a lost backend gets this many tries.
+const JOB_POLL_MS = 1000;
+const JOB_POLL_RETRIES = 5;
 
 function formatFileSize(bytes) {
   const size = Number(bytes || 0);
@@ -1716,8 +1698,13 @@ export default function ChatApp() {
   });
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
   const [models, setModels] = useState([]);
+  // Ollama's catalog and installed rows for Settings > Models, whatever provider chats use.
+  const [ollamaModels, setOllamaModels] = useState([]);
+  const ollamaModelsRef = useRef([]);
   // Total device memory (GB) for the pre-pull model-fit pill. Fetched once.
   const [deviceRamGb, setDeviceRamGb] = useState(null);
+  // Apple silicon runs Ollama's MLX builds; Settings > Models marks them.
+  const [appleSilicon, setAppleSilicon] = useState(false);
   const [provider, setProvider] = useState(() => {
     if (typeof window !== 'undefined') return safeStorageGet('mirabilis-provider', 'ollama');
     return 'ollama';
@@ -1953,32 +1940,18 @@ export default function ChatApp() {
   const [configVaultFolder, setConfigVaultFolder] = useState(() => (typeof window !== 'undefined' ? safeStorageGet('mirabilis-config-vault-folder', '') || '' : ''));
   const [configVaultBusy, setConfigVaultBusy] = useState(false);
   const [configVaultMsg, setConfigVaultMsg] = useState('');
-  // modelId -> { pct: number|null, status: string, ctrl: AbortController } while pulling
+  // Row id (lib/models.js rowIdForName) -> the running install or update:
+  // { name, jobId, status, pct, completedBytes, totalBytes, bytesPerSec, etaSec }.
+  // The picker and Settings > Models both read it.
   const [pullingModels, setPullingModels] = useState({});
-  // Free-text "pull any Ollama model" field in the model menu.
-  const [customModelInput, setCustomModelInput] = useState('');
-  const [customModelLookup, setCustomModelLookup] = useState(null);
-
-  // Debounced registry lookup so a typo and the size show before Pull, not mid-download.
-  useEffect(() => {
-    const name = customModelInput.trim();
-    if (!name) { setCustomModelLookup(null); return; }
-    let cancelled = false;
-    setCustomModelLookup({ status: 'checking' });
-    const timer = setTimeout(async () => {
-      try {
-        const params = new URLSearchParams({ id: name });
-        if (appStore.getGoDark()) params.set('localOnly', '1');
-        const result = await api(`/api/models/registry-lookup?${params.toString()}`);
-        if (!cancelled) setCustomModelLookup(result);
-      } catch {
-        if (!cancelled) setCustomModelLookup({ status: 'unknown' });
-      }
-    }, 400);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [customModelInput]);
-  // modelId -> true while a delete request is in-flight
-  const [deletingModels, setDeletingModels] = useState({});
+  // Row id -> { name, error } for the last failed install, until it is retried.
+  const [installErrors, setInstallErrors] = useState({});
+  // Row id -> { ctrl, jobId, update } of the poll loop watching that job.
+  const jobWatchersRef = useRef(new Map());
+  // Bumped when the installed set changes, so Settings > Models reloads.
+  const [modelsRevision, setModelsRevision] = useState(0);
+  // Settings > Models view; kept here because the pane remounts per section.
+  const [modelsView, setModelsView] = useState('installed');
   const [isTeachPanelOpen, setIsTeachPanelOpen] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
@@ -2081,6 +2054,12 @@ export default function ChatApp() {
   );
 
   const selectedModelRecord = useMemo(() => models.find((item) => item.id === model) || null, [model, models]);
+  // What the picker's Auto row names: the catalog pick for Ollama, the send-time pick elsewhere.
+  const autoModelRecord = useMemo(() => {
+    if (provider === 'ollama') return pickAutoModel(models);
+    const id = cloudAutoModel(models);
+    return models.find((item) => item.id === id) || null;
+  }, [provider, models]);
   const shouldShowModelChip = useMemo(
     () => provider === 'ollama' || provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm' || provider === 'koboldcpp' || provider === 'llamacpp' || models.length > 0,
     [provider, models.length]
@@ -3951,7 +3930,7 @@ export default function ChatApp() {
         body: JSON.stringify({ uncensoredMode: next })
       });
       if (next && provider === 'ollama') {
-        const best = pickMostUncensoredModel(models);
+        const best = pickUncensoredModel(models);
         if (best?.id && best.id !== model) {
           setModel(best.id);
           setStatusText(`Uncensored on: ${best.label || best.id}`);
@@ -4285,7 +4264,29 @@ export default function ChatApp() {
     }
   }
 
+  function setOllamaList(list) {
+    ollamaModelsRef.current = list;
+    setOllamaModels(list);
+  }
+
+  // Memory and platform for fit chips and MLX builds; tried again until the backend answers.
+  const specsLoadedRef = useRef(false);
+  async function loadDeviceSpecs() {
+    if (specsLoadedRef.current) return;
+    specsLoadedRef.current = true;
+    try {
+      const specs = await api('/api/system/specs');
+      const ram = Number(specs?.ramGb);
+      if (Number.isFinite(ram) && ram > 0) setDeviceRamGb(ram);
+      setAppleSilicon(specs?.platform === 'darwin' && specs?.arch === 'arm64');
+    } catch {
+      specsLoadedRef.current = false; // fit chips just won't show yet
+    }
+  }
+
+  // Lists the chat provider's models; for Ollama the same list feeds Settings > Models.
   async function refreshModels() {
+    const forProvider = provider;
     try {
       const query = new URLSearchParams({ provider: String(provider || '').trim() });
       let keyHeader;
@@ -4299,16 +4300,9 @@ export default function ChatApp() {
         if ((provider === 'openai' || provider === 'grok' || provider === 'groq' || provider === 'openrouter' || provider === 'gemini' || provider === 'cerebras' || provider === 'claude' || provider === 'gpuaas' || provider === 'openai-compatible' || provider === 'vllm') && apiKey) keyHeader = { 'x-provider-key': apiKey };
       }
       const payload = await api(`/api/models?${query.toString()}`, keyHeader ? { headers: keyHeader } : undefined);
-      const available = payload.models || [];
+      const available = Array.isArray(payload?.models) ? payload.models : [];
       setModels(available);
-      // Fetch total device RAM once, to size the model-fit pill against it.
-      if (deviceRamGb === null) {
-        try {
-          const specs = await api('/api/system/specs');
-          const ram = Number(specs?.ramGb);
-          if (Number.isFinite(ram) && ram > 0) setDeviceRamGb(ram);
-        } catch { /* fit pill just won't show */ }
-      }
+      if (forProvider === 'ollama') setOllamaList(available);
       // 'auto' resolves at send time; fall back only if the chosen model is gone.
       setModel((currentModel) => {
         if (currentModel === 'auto') return 'auto';
@@ -4316,9 +4310,32 @@ export default function ChatApp() {
         if (stillInstalled) return currentModel;
         return 'auto';
       });
+      return available;
     } catch {
       setModels([]);
+      return [];
+    } finally {
+      loadDeviceSpecs();
     }
+  }
+
+  // The Ollama list for Settings > Models while chats use another provider.
+  async function refreshOllamaModels() {
+    if (provider === 'ollama') return refreshModels();
+    try {
+      const payload = await api('/api/models?provider=ollama');
+      const list = Array.isArray(payload?.models) ? payload.models : [];
+      setOllamaList(list);
+      return list;
+    } catch {
+      return ollamaModelsRef.current;
+    }
+  }
+
+  // An install, update or delete finished: the picker, Auto and Settings > Models catch up.
+  function modelsChanged() {
+    refreshOllamaModels();
+    setModelsRevision((n) => n + 1);
   }
 
   async function refreshVaultStatus() {
@@ -4377,9 +4394,9 @@ export default function ChatApp() {
 
   async function resolveProviderForSend() {
     if (provider === 'ollama') {
-      const forcedUncensored = uncensoredMode ? pickMostUncensoredModel(models) : null;
+      const forcedUncensored = uncensoredMode ? pickUncensoredModel(models) : null;
       const contextTokens = contextUsage?.totalTokens || 0;
-      const resolvedAuto = model === 'auto' ? (pickBestAutoModel(models, contextTokens)?.id || '') : model;
+      const resolvedAuto = model === 'auto' ? (pickAutoModel(models, contextTokens)?.id || '') : model;
       const effectiveModel = forcedUncensored?.id || resolvedAuto;
       if (uncensoredMode && forcedUncensored?.id && model !== forcedUncensored.id) {
         setModel(forcedUncensored.id);
@@ -4387,10 +4404,7 @@ export default function ChatApp() {
       return { provider: 'ollama', model: effectiveModel, providerBaseUrl: undefined, providerApiKey: undefined };
     }
 
-    const firstAvailableModel = (models || []).find((item) => item?.available !== false)?.id || '';
-    const effectiveNonOllamaModel = model === 'auto'
-      ? (firstAvailableModel || (provider === 'openai' ? 'gpt-4o-mini' : provider === 'grok' ? 'grok-3-mini' : provider === 'groq' ? 'llama-3.3-70b-versatile' : provider === 'openrouter' ? 'meta-llama/llama-3.3-70b-instruct:free' : provider === 'gemini' ? 'gemini-2.5-flash' : provider === 'cerebras' ? 'llama-3.3-70b' : provider === 'claude' ? 'claude-3-5-sonnet-latest' : provider === 'gpuaas' ? 'model.gguf' : ''))
-      : model;
+    const effectiveNonOllamaModel = model === 'auto' ? cloudAutoModel(models) : model;
 
     await ensureProviderKey();
     const configuredApiKey = String(providerConfigs[provider]?.apiKey || '').trim();
@@ -4437,119 +4451,132 @@ export default function ChatApp() {
     }
   }
 
-  function cancelInstall(modelId) {
+  // Fresh each render, for poll loops that outlive the render that started them.
+  const modelsChangedRef = useRef(null);
+  modelsChangedRef.current = modelsChanged;
+
+  function dropPulling(rowId) {
     setPullingModels((prev) => {
-      if (prev[modelId]?.ctrl) prev[modelId].ctrl.abort();
-      const jobId = prev[modelId]?.jobId;
-      if (jobId) {
-        api(`/api/models/install-jobs/${encodeURIComponent(jobId)}/cancel`, {
-          method: 'POST'
-        }).catch(() => {});
-      }
-      const n = { ...prev };
-      delete n[modelId];
-      return n;
+      if (!(rowId in prev)) return prev;
+      const next = { ...prev };
+      delete next[rowId];
+      return next;
     });
-    setStatusText(`Model install cancelled: ${modelId}`);
   }
 
-  async function deleteModel(ollamaId, modelId) {
-    if (provider !== 'ollama') return;
-    setDeletingModels((prev) => ({ ...prev, [modelId]: true }));
-    try {
-      await api(`/api/models/${encodeURIComponent(ollamaId || modelId)}`, { method: 'DELETE' });
-      setStatusText(`Removed: ${modelId}`);
-      await refreshModels();
-      // if the deleted model was selected, clear the selection
-      setModel((prev) => (prev === modelId ? '' : prev));
-    } catch (err) {
-      setStatusText(`Remove failed: ${err.message}`);
-    } finally {
-      setDeletingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });
+  function dismissInstallError(rowId) {
+    setInstallErrors((prev) => {
+      if (!(rowId in prev)) return prev;
+      const next = { ...prev };
+      delete next[rowId];
+      return next;
+    });
+  }
+
+  // The job ended on the backend; a cancel from here never reaches this.
+  function finishJob(rowId, watcher, name, status, error) {
+    if (jobWatchersRef.current.get(rowId) === watcher) jobWatchersRef.current.delete(rowId);
+    dropPulling(rowId);
+    const update = watcher?.update === true;
+    if (status === 'completed') {
+      setStatusText(`Model ${update ? 'updated' : 'installed'}: ${name}`);
+      appStore.toast(`${update ? 'Updated' : 'Installed'} ${name}`, { kind: 'success' });
+      modelsChangedRef.current?.();
+    } else if (status === 'canceled') {
+      setStatusText(`Model ${update ? 'update' : 'install'} cancelled: ${name}`);
+    } else {
+      const sentence = plainError(error, `${update ? 'Update' : 'Install'} failed. Try again.`);
+      setInstallErrors((prev) => ({ ...prev, [rowId]: { name, error: sentence } }));
+      setStatusText(`Model ${update ? 'update' : 'install'} failed: ${sentence}`);
+      appStore.toast(`Could not ${update ? 'update' : 'install'} ${name}`, { kind: 'error' });
     }
   }
 
-  function installModel(ollamaId, modelId) {
-    if (provider !== 'ollama') {
-      setStatusText('Model install needs Ollama');
+  // One poll loop per row, shared by the picker and Settings > Models. The job
+  // runs on the backend, so closing either view does not stop it.
+  async function watchJob(firstJob, rowId, name, watcher) {
+    const live = () => jobWatchersRef.current.get(rowId) === watcher;
+    const end = await followInstallJob(firstJob, {
+      signal: watcher.ctrl.signal,
+      intervalMs: JOB_POLL_MS,
+      retries: JOB_POLL_RETRIES,
+      describe: (err) => modelErrorText(err, ''),
+      onProgress: (job) => setPullingModels((prev) => (!live() ? prev : {
+        ...prev,
+        [rowId]: {
+          name,
+          jobId: job.id,
+          status: job.status,
+          pct: job.pct,
+          completedBytes: job.completedBytes,
+          totalBytes: job.totalBytes,
+          bytesPerSec: job.bytesPerSec,
+          etaSec: job.etaSec
+        }
+      }))
+    });
+    if (end.status !== 'aborted' && live()) finishJob(rowId, watcher, name, end.status, end.error);
+  }
+
+  // Installs or updates one Ollama model, from the picker or Settings > Models,
+  // whatever provider chats use. Updating is a new pull of the same name.
+  async function installModel(name, rowId = rowIdForName(name, ollamaModelsRef.current)) {
+    const pull = String(name || '').trim();
+    if (!pull || !rowId || jobWatchersRef.current.has(rowId)) return;
+    if (appStore.getGoDark()) {
+      setStatusText(GO_DARK_INSTALL);
       return;
     }
-    if (pullingModels[modelId]) return; // already pulling
-    const ctrl = new AbortController();
-    setPullingModels((prev) => ({ ...prev, [modelId]: { pct: null, status: 'Queued...', ctrl, jobId: null } }));
-    (async () => {
-      try {
-        const started = await api('/api/models/install-jobs', {
-          method: 'POST',
-          body: JSON.stringify({ modelId: ollamaId })
-        });
+    const watcher = { ctrl: new AbortController(), jobId: null, update: isInstalledName(pull, ollamaModelsRef.current) };
+    jobWatchersRef.current.set(rowId, watcher);
+    dismissInstallError(rowId);
+    setPullingModels((prev) => ({
+      ...prev,
+      [rowId]: { name: pull, jobId: null, status: 'queued', pct: null, completedBytes: null, totalBytes: null, bytesPerSec: null, etaSec: null }
+    }));
+    let job;
+    try {
+      job = await startInstallJob(pull);
+      if (!job.id) throw new Error('Install did not start. Try again.');
+    } catch (err) {
+      if (jobWatchersRef.current.get(rowId) === watcher) finishJob(rowId, watcher, pull, 'failed', modelErrorText(err, ''));
+      return;
+    }
+    // Canceled while the request was in flight: the job exists now, so stop it too.
+    if (watcher.ctrl.signal.aborted) {
+      cancelInstallJob(job.id).catch(() => {});
+      return;
+    }
+    watcher.jobId = job.id;
+    watchJob(job, rowId, pull, watcher);
+  }
 
-        const jobId = started?.job?.id;
-        if (!jobId) {
-          throw new Error('Install job was not created');
-        }
+  function cancelInstall(rowId) {
+    const watcher = jobWatchersRef.current.get(rowId);
+    jobWatchersRef.current.delete(rowId);
+    watcher?.ctrl.abort();
+    if (watcher?.jobId) cancelInstallJob(watcher.jobId).catch(() => {});
+    dropPulling(rowId);
+    setStatusText(`Model ${watcher?.update ? 'update' : 'install'} cancelled: ${pullingModels[rowId]?.name || rowId}`);
+  }
 
-        setPullingModels((prev) => {
-          if (!prev[modelId]) return prev;
-          return {
-            ...prev,
-            [modelId]: {
-              ...prev[modelId],
-              jobId,
-              status: started?.job?.message || 'Starting...',
-              pct: started?.job?.pct ?? null
-            }
-          };
-        });
+  // Settings > Models confirms first. Resolves to '' or the sentence the row shows.
+  async function deleteOllamaModel(name) {
+    try {
+      await deleteInstalledModel(name);
+    } catch (err) {
+      return modelErrorText(err, 'Delete failed. Try again.');
+    }
+    setStatusText(`Removed: ${name}`);
+    appStore.toast(`Deleted ${name}`, { kind: 'success' });
+    modelsChanged();
+    return '';
+  }
 
-        while (true) {
-          if (ctrl.signal.aborted) {
-            throw new DOMException('Aborted', 'AbortError');
-          }
-
-          const polled = await api(`/api/models/install-jobs/${encodeURIComponent(jobId)}`);
-          const job = polled?.job;
-          if (!job) {
-            throw new Error('Install job not found');
-          }
-
-          setPullingModels((prev) => {
-            if (!prev[modelId]) return prev;
-            return {
-              ...prev,
-              [modelId]: {
-                ...prev[modelId],
-                pct: job.pct ?? null,
-                status: job.message || job.status || '',
-                jobId
-              }
-            };
-          });
-
-          if (job.done) {
-            setPullingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });
-
-            if (job.status === 'completed') {
-              await refreshModels();
-              setStatusText(`Model installed: ${modelId}`);
-            } else if (job.status === 'canceled') {
-              setStatusText(`Model install cancelled: ${modelId}`);
-            } else {
-              setStatusText(`Model install failed: ${job.error || job.message || 'unknown error'}`);
-            }
-            return;
-          }
-
-          await new Promise((resolve) => setTimeout(resolve, 700));
-        }
-      } catch (error) {
-        setPullingModels((prev) => { const n = { ...prev }; delete n[modelId]; return n; });
-        const msg = error?.name === 'AbortError'
-          ? `Model install cancelled: ${modelId}`
-          : `Model install failed: ${error?.message || 'unknown error'}`;
-        setStatusText(msg);
-      }
-    })();
+  function openModelManager() {
+    setIsModelMenuOpen(false);
+    setModelsView('discover');
+    appStore.openSettings('models');
   }
 
     function closeAllDropdowns() {
@@ -4735,6 +4762,32 @@ export default function ChatApp() {
     refreshModels();
   }, [provider]);
 
+  // Install jobs run on the backend and outlive a reload; their progress is
+  // picked back up here, on the rows that started them.
+  useEffect(() => {
+    let alive = true;
+    const watchers = jobWatchersRef.current;
+    (async () => {
+      const running = (await listInstallJobs().catch(() => [])).filter((job) => !job.done);
+      if (!alive || running.length === 0) return;
+      const rows = await refreshOllamaModels();
+      if (!alive) return;
+      for (const job of running) {
+        const rowId = rowIdForName(job.modelId, rows);
+        if (!rowId || watchers.has(rowId)) continue;
+        const watcher = { ctrl: new AbortController(), jobId: job.id, update: isInstalledName(job.modelId, rows) };
+        watchers.set(rowId, watcher);
+        watchJob(job, rowId, job.modelId, watcher);
+      }
+    })();
+    return () => {
+      alive = false;
+      for (const watcher of watchers.values()) watcher.ctrl.abort();
+      watchers.clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // The Aurora shell owns Cmd+K and drives chat actions through these events.
   // Do not bind Cmd+K here or it fires twice.
   useEffect(() => {
@@ -4788,7 +4841,11 @@ export default function ChatApp() {
     } else if (settingsSection === 'chat-tools') {
       checkImageService();
       refreshVaultStatus();
+    } else if (settingsSection === 'models') {
+      // Models pulled from the command line show up as installed.
+      refreshOllamaModels();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsOpen, settingsSection]);
 
   // Cmd+, (Ctrl+, elsewhere) opens Settings from either tab.
@@ -4891,7 +4948,8 @@ export default function ChatApp() {
       return { enabled: false, estUsd: 0, pct: 0, budgetUsd: remoteBudgetUsd, rate: null };
     }
 
-    const rate = resolveRateCard(remoteProvider, model);
+    // Auto is priced as the model it sends to.
+    const rate = resolveRateCard(remoteProvider, model === 'auto' ? cloudAutoModel(models) : model);
     if (!rate) {
       return { enabled: false, estUsd: 0, pct: 0, budgetUsd: remoteBudgetUsd, rate: null };
     }
@@ -4902,7 +4960,7 @@ export default function ChatApp() {
     const budget = Number(remoteBudgetUsd || 0);
     const pct = budget > 0 ? Math.min(100, Math.round((estUsd / budget) * 100)) : 0;
     return { enabled: true, estUsd, pct, budgetUsd: budget, rate };
-  }, [provider, model, chatTokenSummary.input, chatTokenSummary.output, remoteBudgetUsd]);
+  }, [provider, model, models, chatTokenSummary.input, chatTokenSummary.output, remoteBudgetUsd]);
 
   async function handleImageGeneration(content) {
     setInput('');
@@ -5357,7 +5415,7 @@ export default function ChatApp() {
 
     try {
       // Uncensored runs on the model the chat path would force.
-      const forced = uncensoredMode && provider === 'ollama' ? pickMostUncensoredModel(models) : null;
+      const forced = uncensoredMode && provider === 'ollama' ? pickUncensoredModel(models) : null;
 
       // Create the chat up front so the backend can write the result into it. It
       // carries the same modes as a chat-path chat, or reloading it would reset them.
@@ -6140,6 +6198,29 @@ export default function ChatApp() {
       label: 'Connectors',
       icon: PlugIcon,
       render: () => <ConnectorsPane />
+    },
+    {
+      id: 'models',
+      label: 'Models',
+      icon: CubeIcon,
+      render: () => (
+        <ModelsPane
+          view={modelsView}
+          onViewChange={setModelsView}
+          catalog={ollamaModels}
+          ramGb={deviceRamGb}
+          appleSilicon={appleSilicon}
+          jobs={pullingModels}
+          installErrors={installErrors}
+          revision={modelsRevision}
+          goDark={goDarkOn}
+          onInstall={(name) => installModel(name)}
+          onCancel={cancelInstall}
+          onDelete={deleteOllamaModel}
+          onDismissError={dismissInstallError}
+          onRefresh={refreshOllamaModels}
+        />
+      )
     },
     {
       id: 'chat-tools',
@@ -7299,7 +7380,7 @@ export default function ChatApp() {
                               <span className="truncate font-semibold">Auto</span>
                             </span>
                             <span className="ml-2 shrink-0 text-[10px] text-[color:var(--text-muted)]">
-                              {pickBestAutoModel(models) ? `uses ${pickBestAutoModel(models).label}` : 'none installed'}
+                              {autoModelRecord ? `uses ${autoModelRecord.label || autoModelRecord.id}` : 'none installed'}
                             </span>
                           </button>
                         </div>
@@ -7311,10 +7392,8 @@ export default function ChatApp() {
                               .filter((item) => (item.group || 'Models') === group)
                               .map((item) => {
                                 const pulling = pullingModels[item.id];
-                                const isDeleting = deletingModels[item.id];
                                 const isSelected = item.id === model;
                                 const isInstalled = item.available !== false;
-                                const canDelete = isInstalled && provider === 'ollama' && !pulling && !isDeleting;
                                 return (
                                 <div key={item.id} className="group/row relative flex items-center">
                                 <button
@@ -7394,6 +7473,7 @@ export default function ChatApp() {
                                       <span
                                         role="button"
                                         tabIndex={0}
+                                        aria-label="Cancel install"
                                         onClick={(e) => { e.stopPropagation(); cancelInstall(item.id); }}
                                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); cancelInstall(item.id); } }}
                                         className="ml-0.5 cursor-pointer rounded px-1 text-[10px] text-red-400 hover:text-red-600"
@@ -7403,16 +7483,12 @@ export default function ChatApp() {
                                   ) : (
                                     <span className="ml-2 flex shrink-0 items-center gap-1.5 text-[10px] text-[color:var(--text-muted)]">
                                       {provider === 'ollama' ? (() => {
-                                        const fit = computeModelFit(item, deviceRamGb);
+                                        const size = itemSize(item);
+                                        const fit = modelFit(size, deviceRamGb);
                                         if (!fit) return null;
-                                        const tone = fit.tier === 'fits'
-                                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300'
-                                          : fit.tier === 'tight'
-                                            ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300'
-                                            : 'bg-rose-500/15 text-rose-600 dark:text-rose-300';
                                         return (
-                                          <span title={fit.title} className={`inline-flex items-center rounded-[var(--r-pill)] px-1.5 py-[1px] font-semibold ${tone}`}>
-                                            {fit.label}
+                                          <span title={fitDetail(size, deviceRamGb)} className={`inline-flex items-center rounded-[var(--r-pill)] px-1.5 py-[1px] font-semibold ${FIT_CHIP_TONE[fit]}`}>
+                                            {FIT_LABELS[fit]}
                                           </span>
                                         );
                                       })() : null}
@@ -7426,17 +7502,6 @@ export default function ChatApp() {
                                     </span>
                                   )}
                                 </button>
-                                {canDelete && (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); deleteModel(item.ollamaId || item.id, item.id); }}
-                                    className="ml-0.5 shrink-0 rounded p-1 text-[10px] text-slate-300 opacity-0 transition hover:text-red-500 group-hover/row:opacity-100 dark:text-[color:var(--text-main)] dark:hover:text-red-400"
-                                    title={`Remove ${item.label}`}
-                                  ><CloseIcon size={11} /></button>
-                                )}
-                                {isDeleting && (
-                                  <span className="ml-1 shrink-0 animate-pulse text-[10px] text-red-400">...</span>
-                                )}
                                 </div>
                                 );
                               })}
@@ -7476,73 +7541,20 @@ export default function ChatApp() {
                         })()
                       )}
 
-                    {/* Pull any Ollama model by name via installModel(). */}
+                    {/* Installing, updating and deleting live in Settings > Models. */}
                     {provider === 'ollama' && (
-                      <div className="mt-1 border-t border-black/10 px-2 py-2">
-                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Add a model</div>
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="text"
-                            value={customModelInput}
-                            onChange={(e) => setCustomModelInput(e.target.value)}
-                            onKeyDown={(e) => {
-                              e.stopPropagation();
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                const name = customModelInput.trim();
-                                if (name) { installModel(name, name); setCustomModelInput(''); }
-                              }
-                            }}
-                            placeholder="qwen2.5:7b"
-                            aria-label="Model name"
-                            className="au-focus min-w-0 flex-1 rounded-[var(--r-md)] border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-1.5 text-[11px] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const name = customModelInput.trim();
-                              if (name) { installModel(name, name); setCustomModelInput(''); }
-                            }}
-                            disabled={
-                              !customModelInput.trim()
-                              || !!pullingModels[customModelInput.trim()]
-                              // Block only on a definite "no such model", not an unreachable registry.
-                              || customModelLookup?.status === 'missing'
-                              || customModelLookup?.status === 'invalid'
-                            }
-                            className="shrink-0 rounded-[var(--r-md)] px-2.5 py-1.5 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:opacity-40"
-                            style={{ background: 'var(--accent)' }}
-                          >
-                            Pull
-                          </button>
-                        </div>
-                        {customModelInput.trim() && customModelLookup && (
-                          <div className="mt-1 text-[10px] text-[color:var(--text-muted)]">
-                            {customModelLookup.status === 'checking' && 'Checking...'}
-                            {customModelLookup.status === 'found' && (
-                              <span className="text-emerald-600 dark:text-emerald-400">
-                                Found{customModelLookup.size ? `, ${customModelLookup.size}` : ''}
-                              </span>
-                            )}
-                            {customModelLookup.status === 'missing' && (
-                              <span className="text-rose-500">Not found</span>
-                            )}
-                            {customModelLookup.status === 'invalid' && (
-                              <span className="text-rose-500">Invalid name</span>
-                            )}
-                            {customModelLookup.status === 'unknown' && (
-                              <span>Could not check</span>
-                            )}
-                          </div>
-                        )}
-                        <a
-                          href="https://ollama.com/library"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-1.5 inline-block text-[10px] text-[color:var(--text-muted)] underline decoration-[var(--hairline)] underline-offset-2 hover:text-accent"
+                      <div className="mt-1 border-t border-black/10 pt-1">
+                        <button
+                          type="button"
+                          onClick={openModelManager}
+                          className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs font-medium text-[color:var(--text-main)] transition hover:bg-black/5 dark:hover:bg-[var(--material-thin)]"
                         >
-                          Ollama library
-                        </a>
+                          <span className="flex items-center gap-1.5">
+                            <CubeIcon size={12} />
+                            Manage models
+                          </span>
+                          <ChevronRightIcon size={12} className="text-[color:var(--text-muted)]" />
+                        </button>
                       </div>
                     )}
 

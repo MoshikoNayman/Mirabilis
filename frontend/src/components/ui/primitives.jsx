@@ -334,6 +334,10 @@ export function PlusIcon(props) {
 export function ExternalIcon(props) {
   return <Svg {...props}><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" /></Svg>;
 }
+// Isometric cube for models.
+export function CubeIcon(props) {
+  return <Svg {...props}><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" /><path d="M4 7.5 12 12l8-4.5M12 12v9" /></Svg>;
+}
 
 /* SegmentedControl */
 export function SegmentedControl({ value, onChange, options, size = 'md' }) {

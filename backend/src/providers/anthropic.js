@@ -14,8 +14,10 @@ export async function listAnthropicModels({ baseUrl, apiKey }) {
   if (!apiKey) return [];
   const base = String(baseUrl || ANTHROPIC_BASE_URL).replace(/\/$/, '');
   try {
+    // A stalled host must not hang the model picker.
     const res = await fetch(`${base}/v1/models`, {
-      headers: buildAnthropicHeaders(apiKey)
+      headers: buildAnthropicHeaders(apiKey),
+      signal: AbortSignal.timeout(8000)
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -28,6 +30,31 @@ export async function listAnthropicModels({ baseUrl, apiKey }) {
     console.error('Failed to list Anthropic models:', error.message);
     return [];
   }
+}
+
+/**
+ * Claude 5 and later answer 400 to temperature, top_p or top_k and to a
+ * trailing assistant prefill. Matched on the major version (claude-haiku-5-5,
+ * claude-opus-6; not claude-sonnet-4-5 or claude-3-5-sonnet), so later models
+ * need no change.
+ * @param {string} [model]
+ * @returns {boolean}
+ */
+export function isClaude5OrLater(model) {
+  const m = /claude-(?:[a-z]+-)?(\d{1,2})(?!\d)/i.exec(String(model || ''));
+  return Boolean(m) && Number(m?.[1]) >= 5;
+}
+
+/**
+ * The turns without any trailing assistant prefill.
+ * @template {{ role: string }} T
+ * @param {T[]} turns
+ * @returns {T[]}
+ */
+export function withoutTrailingAssistant(turns) {
+  let end = turns.length;
+  while (end > 0 && turns[end - 1].role === 'assistant') end -= 1;
+  return end === turns.length ? turns : turns.slice(0, end);
 }
 
 export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, signal, onToken, onStats, temperature, maxTokens, providerLabel = 'Claude' }) {
@@ -57,12 +84,13 @@ export async function streamAnthropicChat({ baseUrl, apiKey, model, messages, si
   // Anthropic requires a leading user turn; the history window can start on an assistant turn.
   while (conversation.length && conversation[0].role !== 'user') conversation.shift();
 
+  const fixedSampling = isClaude5OrLater(model);
   // Anthropic only accepts temperature in [0, 1]; the UI slider goes to 2.
-  const clampedTemp = temperature != null ? Math.min(1, Math.max(0, temperature)) : null;
+  const clampedTemp = temperature != null && !fixedSampling ? Math.min(1, Math.max(0, temperature)) : null;
 
   const payload = {
     model,
-    messages: conversation,
+    messages: fixedSampling ? withoutTrailingAssistant(conversation) : conversation,
     // Required by Anthropic. High default to match the uncapped providers.
     max_tokens: maxTokens != null ? maxTokens : 8192,
     // Streaming keeps the UI live and time-to-first-token accurate.

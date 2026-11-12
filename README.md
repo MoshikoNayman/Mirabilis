@@ -83,14 +83,22 @@ endpoint panel.
 Base URLs, key formats, the model catalog and the MCQ models are in
 [docs/PROVIDERS.md](docs/PROVIDERS.md).
 
+### Models
+
+Settings, Models lists the installed Ollama models with size, update status and
+free disk space, and searches the Ollama library to install any other model,
+with progress and cancel. Update checks compare digests and download nothing.
+The suggested picks live in `backend/models.json`, which the app re-reads from
+this repository, so new picks arrive without an app update.
+
 ### Uncensored models
 
 An Uncensored toggle in the composer is off by default. Turning it on for a chat
 switches to an installed uncensored local model, if there is one, and puts a
 directive at the top of the system prompt that drops the app's content
-restrictions. The model list has an Uncensored group (Dolphin variants, Wizard
-Vicuna Uncensored, Llama 2 Uncensored) and MCQ-Raw-8B, which has no safety
-filters. These run locally on hardware you control.
+restrictions. The model list has an Uncensored group, set in
+`backend/models.json`, and MCQ-Raw-8B, which has no safety filters. These run
+locally on hardware you control.
 
 ## Go Dark
 

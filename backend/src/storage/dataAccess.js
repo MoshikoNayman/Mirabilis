@@ -19,7 +19,9 @@ const OTHER_FILES = [
   'connectors.json',
   'go-dark.json',
   'mcp-endpoint.json',
-  'mcp-token'
+  'mcp-token',
+  'ollama-library-cache.json',
+  'model-updates.json'
 ];
 
 /** A uid we can name is more useful than a number. */

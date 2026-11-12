@@ -28,16 +28,16 @@ MIRABILIS_THREADS=8 node run.js openai-compatible
 
 ## Remote and cloud
 
-| Provider | Base URL | Free tier | Key format |
-|---|---|---|---|
-| OpenAI | `https://api.openai.com/v1` | No | `sk-...` |
-| Claude (Anthropic) | `https://api.anthropic.com` | No | `sk-ant-...` |
-| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | Yes | `AIza...` |
-| Grok (xAI) | `https://api.x.ai/v1` | No | `xai-...` |
-| Groq | `https://api.groq.com/openai/v1` | Yes | `gsk_...` |
-| OpenRouter | `https://openrouter.ai/api/v1` | Yes | `sk-or-...` |
-| Cerebras | `https://api.cerebras.ai/v1` | Yes | `csk-...` |
-| GPUaaS Endpoint | your URL | Varies | provider specific |
+| Provider | Base URL | Free tier | Key format | Fallback model |
+|---|---|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | No | `sk-...` | `gpt-6-luna` |
+| Claude (Anthropic) | `https://api.anthropic.com` | No | `sk-ant-...` | `claude-haiku-5-5` |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | Yes | `AIza...` | `gemini-3.5-flash-lite` |
+| Grok (xAI) | `https://api.x.ai/v1` | No | `xai-...` | `grok-4.3` |
+| Groq | `https://api.groq.com/openai/v1` | Yes | `gsk_...` | `openai/gpt-oss-20b` |
+| OpenRouter | `https://openrouter.ai/api/v1` | Yes | `sk-or-...` | `openrouter/free` |
+| Cerebras | `https://api.cerebras.ai/v1` | Yes | `csk-...` | `gpt-oss-120b` |
+| GPUaaS Endpoint | your URL | Varies | provider specific | none |
 
 GPUaaS Endpoint is for any OpenAI-compatible GPU host: Together AI, Fireworks,
 RunPod, a vLLM gateway. Claude uses a native Anthropic adapter; the rest use the
@@ -46,6 +46,17 @@ OpenAI-compatible transport.
 Cloud model lists come live from each provider. When a listing fails (no key,
 offline, provider down) the fallback model from `providerDefaults` in
 `backend/models.json` is used.
+
+Request parameters follow the model family:
+
+- Claude 5 and later (`claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5`,
+  `claude-fable-5-2`) answer 400 to `temperature`, `top_p`, `top_k` and an
+  assistant prefill, so none are sent. The rule reads the major version, so a
+  Claude 6 needs no change. Older Claude models keep them.
+- OpenAI's GPT-5, GPT-6 and o-series models get `max_completion_tokens` instead
+  of `max_tokens`, and `temperature` and `top_p` only with `reasoning_effort`
+  `"none"`. This applies on `api.openai.com` only; Groq, Cerebras, OpenRouter
+  and local servers keep `max_tokens` and sampling.
 
 If a remote provider is unreachable the app shows the error. It does not switch
 to Ollama on its own.
@@ -65,21 +76,48 @@ off-device, and an unknown provider counts as off-device.
 
 With Ollama, the `auto` model picks an installed model for the kind of request
 (coding, reasoning, general, experimental) within the machine's memory limit.
-Context size, `low_vram` and thread counts are tuned to the device.
+Lanes follow the catalog groups, in catalog order:
+
+| Lane | Takes |
+|---|---|
+| coding | Coding |
+| reasoning | Reasoning, then any model with the thinking capability |
+| general | Small & Fast, then Powerful |
+| experimental | Uncensored, then models flagged `"uncensored": true` |
+
+Another tag of a catalog model, such as `qwen3.8:27b-mlx`, takes that row's
+group and flags. A model the catalog does not know goes by its name: `code`,
+`reason` or `think` pick a lane, and `uncensored`, `abliterated`, `heretic` or
+`dolphin` mark it uncensored. Embedding models are never picked, and other
+lanes skip uncensored models while anything else is installed. Context size,
+`low_vram` and thread counts are tuned to the device.
 
 The Inference Cockpit under the model menu sets temperature, top-p, top-k, repeat
 penalty, context window, GPU layers and a fixed seed for local Ollama models.
 
 ## Model catalog
 
-The suggested-model list is merged from three `models.json` files, later wins:
+The suggested-model list comes from three `models.json` files:
 
 1. `backend/models.json`, bundled
 2. the copy on the repository's main branch, fetched at most hourly
-   (`MIRABILIS_CATALOG_URL`)
-3. `~/.mirabilis/models.json`, your own additions (`MIRABILIS_USER_CATALOG`)
+   (`MIRABILIS_CATALOG_URL`). When its `updated` date is the same as the
+   bundle's or later, it replaces the bundled list, so a pick removed on main
+   leaves every install without a release. An older copy is ignored, so a newer
+   app keeps its own list.
+3. `~/.mirabilis/models.json`, your own additions; they add and override by id
+   (`MIRABILIS_USER_CATALOG`)
 
 Go Dark blocks the remote fetch; the bundled list covers offline use.
+`scripts/validate-model-catalog.mjs` runs on every push of the file and checks
+the date, a minimum size and the groups Auto and the router read.
+
+The catalog drives the picker groups, Auto, the router lanes and the uncensored
+pick, so updating the file changes them with no app release. A row counts as
+installed only when its exact tag is; a bare id means `:latest`. Every other
+installed tag, such as `qwen3.8:27b-mlx`, is listed under Installed locally.
+Rows marked `"local": true` are built on this machine and skipped by
+`scripts/check-model-catalog.mjs`.
 
 ## MCQ models
 
@@ -89,8 +127,8 @@ Mirabilis-specific Modelfiles in `training/mcq/`.
 | Model | Base | Size | Context | Use |
 |---|---|---|---|---|
 | MCQ-Raw-8B | `dolphin3` (Llama 3.1) | 4.9 GB | 8192 | Fast, fully unrestricted, no safety filters |
-| MCQ-Pro-12B | `gemma3:12b` | 8.1 GB | 32768 | Everyday model |
-| MCQ-Ultra-31B | `gemma4:31b` | ~20 GB | 65536 | Highest quality; needs about 20 GB RAM/VRAM |
+| MCQ-Pro-12B | `gemma3:12b` | 8.2 GB | 32768 | Everyday model |
+| MCQ-Ultra-31B | `gemma4:31b` | 19-20 GB | 65536 | Highest quality; needs about 20 GB RAM/VRAM |
 
 Install from the Ollama model menu (the backend builds `mcq-*` from the local
 Modelfiles and pulls the base if missing) or from a shell:
@@ -107,8 +145,8 @@ and an install can be cancelled.
 
 The Uncensored toggle in the composer is off by default and is stored per chat.
 When on, the chat switches to an installed uncensored local model if one exists
-(the Uncensored group: Dolphin 3.0, Dolphin Llama 3, Dolphin Mistral, Dolphin
-Mixtral, Wizard Vicuna Uncensored, Llama 2 Uncensored; or MCQ-Raw-8B), and a
-directive at the top of the system prompt removes the app's content
+(the first installed model of the catalog's Uncensored group, else MCQ-Raw-8B
+or another model flagged uncensored),
+and a directive at the top of the system prompt removes the app's content
 restrictions. OpenClaw goes further: uncensored, no personal memory and no app
 system prompt.

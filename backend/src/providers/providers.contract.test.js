@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 
 import { streamOllamaChat, getFittedOptions, clearFittedOptions } from './ollama.js';
-import { streamOpenAICompatibleChat } from './openaiCompatible.js';
-import { streamAnthropicChat } from './anthropic.js';
+import { streamOpenAICompatibleChat, isOpenAIReasoningRequest } from './openaiCompatible.js';
+import { streamAnthropicChat, isClaude5OrLater } from './anthropic.js';
 
 /** One-off upstream on 127.0.0.1:0. Returns { baseUrl, close }. */
 async function upstream(handler) {
@@ -202,6 +202,87 @@ test('openai-compatible: ignores [DONE] and non-data lines without erroring', as
     });
     assert.equal(tokens.join(''), 'ok');
   } finally { await up.close(); }
+});
+
+/** Send one chat through the OpenAI-compatible adapter and return the request body. */
+async function captureOpenAI(args) {
+  let body = null;
+  const up = await upstream((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      body = JSON.parse(raw || '{}');
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(sse({ choices: [{ delta: { content: 'ok' } }] }));
+      res.end('data: [DONE]\n\n');
+    });
+  });
+  try {
+    await streamOpenAICompatibleChat({
+      baseUrl: `${up.baseUrl}/v1`, apiKey: 'k', messages: [{ role: 'user', content: 'hi' }], onToken: () => {}, ...args
+    });
+    return body;
+  } finally { await up.close(); }
+}
+
+test('openai: reasoning models get max_completion_tokens and no temperature or top_p', async () => {
+  // OpenAI rejects sampling on GPT-5 and later unless reasoning is off.
+  for (const model of ['gpt-6-luna', 'gpt-5.1', 'o3-mini', 'o4-mini', 'ft:gpt-5-mini:acme::x1']) {
+    const body = await captureOpenAI({
+      provider: 'openai', model, temperature: 0.7, maxTokens: 500, params: { top_p: 0.9, seed: 7 }
+    });
+    // The answer's 500 plus room for medium effort, so reasoning cannot eat the whole cap.
+    assert.equal(body.max_completion_tokens, 500 + 16384, `${model} should cap max_completion_tokens`);
+    assert.equal('max_tokens' in body, false, `${model} must not send max_tokens`);
+    assert.equal('temperature' in body, false, `${model} must not send temperature`);
+    assert.equal('top_p' in body, false, `${model} must not send top_p`);
+    assert.equal(body.seed, 7, 'other parameters still pass');
+  }
+});
+
+test('openai: the reasoning cap grows with the effort asked for', async () => {
+  const body = await captureOpenAI({ provider: 'openai', model: 'gpt-6-luna', maxTokens: 1500, params: { reasoning_effort: 'low' } });
+  assert.equal(body.max_completion_tokens, 1500 + 4096);
+  assert.equal(body.reasoning_effort, 'low');
+});
+
+test('openai: reasoning_effort none keeps temperature and top_p', async () => {
+  const body = await captureOpenAI({
+    provider: 'openai', model: 'gpt-6-luna', temperature: 0.4, maxTokens: 300,
+    params: { top_p: 0.8, reasoning_effort: 'none' }
+  });
+  assert.equal(body.temperature, 0.4);
+  assert.equal(body.top_p, 0.8);
+  assert.equal(body.reasoning_effort, 'none');
+  assert.equal(body.max_completion_tokens, 300, 'reasoning off needs no extra room');
+  assert.equal('max_tokens' in body, false);
+});
+
+test('openai-compatible: older OpenAI models and other servers keep max_tokens and sampling', async () => {
+  for (const args of [
+    { provider: 'openai', model: 'gpt-4o-mini' },
+    { provider: 'groq', model: 'openai/gpt-oss-20b' },
+    { provider: 'cerebras', model: 'gpt-oss-120b' },
+    { provider: 'openrouter', model: 'openai/gpt-5' },
+    // A local server named gpt-5 is still a local server.
+    { provider: 'openai-compatible', model: 'gpt-5' },
+    { model: 'o3' }
+  ]) {
+    const body = await captureOpenAI({ ...args, temperature: 0.6, maxTokens: 200, params: { top_p: 0.9 } });
+    const what = `${args.provider || 'no provider'} ${args.model}`;
+    assert.equal(body.max_tokens, 200, `${what} should send max_tokens`);
+    assert.equal('max_completion_tokens' in body, false, `${what} must not send max_completion_tokens`);
+    assert.equal(body.temperature, 0.6, `${what} should keep temperature`);
+    assert.equal(body.top_p, 0.9, `${what} should keep top_p`);
+  }
+});
+
+test('openai: the api.openai.com host marks a reasoning request whatever the provider', () => {
+  assert.equal(isOpenAIReasoningRequest({ provider: 'openai-compatible', baseUrl: 'https://api.openai.com/v1', model: 'gpt-6-luna' }), true);
+  assert.equal(isOpenAIReasoningRequest({ provider: 'openai-compatible', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4.1' }), false);
+  assert.equal(isOpenAIReasoningRequest({ provider: 'openai-compatible', baseUrl: 'https://api.openai.com.evil.test/v1', model: 'gpt-6-luna' }), false);
+  assert.equal(isOpenAIReasoningRequest({ provider: 'openai', baseUrl: '', model: 'gpt-image-1' }), false);
+  assert.equal(isOpenAIReasoningRequest({ provider: 'openai', baseUrl: '', model: 'gpt-oss-20b' }), false);
 });
 
 test('openai-compatible: an aborted stream resolves quietly rather than throwing', async () => {
@@ -424,8 +505,8 @@ test('anthropic: THROWS on a mid-stream error event', async () => {
   } finally { await up.close(); }
 });
 
-test('anthropic: clamps temperature into the accepted range', async () => {
-  // The UI slider goes to 2; Anthropic rejects anything above 1.
+/** Send one chat through the Anthropic adapter and return the request body. */
+async function captureAnthropic(args) {
   let body = null;
   const up = await upstream((req, res) => {
     let raw = '';
@@ -438,11 +519,59 @@ test('anthropic: clamps temperature into the accepted range', async () => {
   });
   try {
     await streamAnthropicChat({
-      baseUrl: up.baseUrl, apiKey: 'k', model: 'claude-x',
-      messages: [{ role: 'user', content: 'hi' }], temperature: 1.9, onToken: () => {}
+      baseUrl: up.baseUrl, apiKey: 'k', messages: [{ role: 'user', content: 'hi' }], onToken: () => {}, ...args
     });
-    assert.equal(body.temperature, 1, 'temperature must be clamped to 1');
+    return body;
   } finally { await up.close(); }
+}
+
+test('anthropic: clamps temperature into the accepted range before Claude 5', async () => {
+  // The UI slider goes to 2; Anthropic rejects anything above 1.
+  for (const model of ['claude-sonnet-4-5', 'claude-3-5-sonnet-latest', 'claude-x']) {
+    const body = await captureAnthropic({ model, temperature: 1.9 });
+    assert.equal(body.temperature, 1, `${model}: temperature must be clamped to 1`);
+  }
+});
+
+test('anthropic: Claude 5 and later get no temperature and no assistant prefill', async () => {
+  // Both answer 400 on these models, which broke every agent run on them.
+  for (const model of ['claude-haiku-5-5', 'claude-sonnet-5', 'claude-opus-5-5-20261007', 'claude-fable-5-2', 'claude-opus-6']) {
+    const body = await captureAnthropic({
+      model,
+      temperature: 0.7,
+      messages: [
+        { role: 'user', content: 'question' },
+        { role: 'assistant', content: 'Sure, ' }
+      ]
+    });
+    for (const key of ['temperature', 'top_p', 'top_k']) {
+      assert.equal(key in body, false, `${model} must not send ${key}`);
+    }
+    assert.equal(body.messages.at(-1).role, 'user', `${model} must not end on an assistant prefill`);
+    assert.equal(body.messages.length, 1);
+  }
+});
+
+test('anthropic: older Claude keeps temperature and the assistant prefill', async () => {
+  const body = await captureAnthropic({
+    model: 'claude-sonnet-4-5',
+    temperature: 0.3,
+    messages: [
+      { role: 'user', content: 'question' },
+      { role: 'assistant', content: 'Sure, ' }
+    ]
+  });
+  assert.equal(body.temperature, 0.3);
+  assert.equal(body.messages.at(-1).role, 'assistant');
+});
+
+test('anthropic: the Claude 5 rule follows the major version, not a list', () => {
+  for (const id of ['claude-haiku-5-5', 'claude-sonnet-5', 'claude-fable-5-2', 'claude-opus-7-1', 'anthropic.claude-sonnet-5-5-v1:0']) {
+    assert.equal(isClaude5OrLater(id), true, id);
+  }
+  for (const id of ['claude-sonnet-4-5-20250929', 'claude-opus-4-1', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229', 'claude-2.1', 'claude-instant-1.2', 'claude-x', '']) {
+    assert.equal(isClaude5OrLater(id), false, id || '(empty)');
+  }
 });
 
 test('anthropic: drops leading non-user turns so the conversation starts correctly', async () => {

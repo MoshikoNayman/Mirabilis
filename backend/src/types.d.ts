@@ -98,9 +98,21 @@ export interface ModelListItem {
 export interface AvailableModel {
   id?: string;
   name?: string;
-  sizeBytes?: number;
+  sizeBytes?: number | null;
   paramSize?: string | null;
-  quant?: string;
+  quant?: string | null;
+  /** Catalog group such as "Coding"; looked up in the catalog when absent. */
+  group?: string;
+  /** From Ollama /api/show, e.g. ["completion", "tools", "thinking"]. */
+  capabilities?: string[];
+  uncensored?: boolean;
+}
+
+/** A catalog row as the router reads it: group, flag and order. */
+export interface RouteCatalogRow {
+  id: string;
+  ollamaId?: string;
+  group?: string;
   uncensored?: boolean;
 }
 
@@ -110,6 +122,8 @@ export interface RouteArgs {
   availableModels?: AvailableModel[];
   ramGb?: number;
   uncensored?: boolean;
+  /** Defaults to the merged models.json catalog. */
+  catalog?: RouteCatalogRow[];
 }
 
 export interface RouteResult {

@@ -2,11 +2,11 @@
 import { readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { streamOllamaChat, listOllamaModels } from './providers/ollama.js';
+import { streamOllamaChat, listOllamaModels, getOllamaModelInfo } from './providers/ollama.js';
 import { streamOpenAICompatibleChat, listOpenAICompatibleModels } from './providers/openaiCompatible.js';
 import { listAnthropicModels, streamAnthropicChat } from './providers/anthropic.js';
 import { assertSafeProviderUrl } from './security.js';
-import { getModels as getCatalogModels, refreshCatalog, getProviderDefault } from './modelCatalog.js';
+import { getModels as getCatalogModels, refreshCatalog, getProviderDefault, ollamaTag, catalogRowFor, UNCENSORED_NAME_RE } from './modelCatalog.js';
 
 // The suggested-model catalog is backend/models.json, loaded by modelCatalog.js.
 // getModels() is synchronous; a background refresh lands on the next call.
@@ -14,6 +14,43 @@ import { getModels as getCatalogModels, refreshCatalog, getProviderDefault } fro
 // Built per call so callers see the refreshed catalog.
 export function curatedOllamaIds() {
   return new Set(getCatalogModels().map((m) => m.ollamaId || m.id));
+}
+
+/** Comparison key: the daemon matches names case-insensitively. */
+function tagKey(name) {
+  return ollamaTag(name).toLowerCase();
+}
+
+/** The model name without its tag. */
+function baseOf(name) {
+  const key = tagKey(name);
+  return key.slice(0, key.lastIndexOf(':'));
+}
+
+/**
+ * The installed tag a requested Ollama model runs as: a catalog row's own tag,
+ * then the exact tag, then another tag of the same model, then the first one
+ * installed.
+ * @param {string[]} installed names from /api/tags
+ * @param {string} [requested]
+ * @param {Array<{id: string, ollamaId?: string}>} [catalog]
+ * @returns {string}
+ */
+export function resolveOllamaModel(installed, requested, catalog = getCatalogModels()) {
+  const want = String(requested || '').trim();
+  if (installed.length === 0) return want;
+  const byKey = new Map(installed.map((name) => [tagKey(name), name]));
+  // The picker sends the row id; dolphin-mixtral means its 8x7b tag, not :latest.
+  const row = want ? catalog.find((m) => m.id === want) : undefined;
+  const ofRow = row?.ollamaId ? byKey.get(tagKey(row.ollamaId)) : undefined;
+  if (ofRow) return ofRow;
+  if (want) {
+    const exact = byKey.get(tagKey(want));
+    if (exact) return exact;
+    const sibling = installed.find((name) => baseOf(name) === baseOf(want));
+    if (sibling) return sibling;
+  }
+  return installed[0];
 }
 
 function normalizeModelId(modelId) {
@@ -207,7 +244,7 @@ export async function getEffectiveModel({ provider, model, config }) {
   if (provider === 'claude') {
     const preferred = model && model !== 'auto' ? model : config.openAIModel;
     if (preferred && preferred !== 'auto') return preferred;
-    return getProviderDefault('claude') || 'claude-sonnet-5';
+    return getProviderDefault('claude');
   }
   if (provider === 'koboldcpp') {
     const preferred = model && model !== 'auto' ? model : (config.koboldModel || config.openAIModel);
@@ -227,15 +264,8 @@ export async function getEffectiveModel({ provider, model, config }) {
     const res = await fetch(`${config.ollamaBaseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
     if (res.ok) {
       const body = await res.json();
-      const installed = (body.models || []).map(m => m.name);
-      if (installed.length > 0) {
-        const match = installed.find(n =>
-          n === preferred ||
-          n.split(':')[0] === preferred ||
-          n.split(':')[0] === (preferred || '').split(':')[0]
-        );
-        return match || installed[0];
-      }
+      const installed = (body.models || []).map(m => m?.name).filter((n) => typeof n === 'string' && n);
+      if (installed.length > 0) return resolveOllamaModel(installed, preferred);
     }
   } catch {
     // Unreachable: return preferred and let the stream report the error.
@@ -359,88 +389,100 @@ export async function listModels(config, provider = config.aiProvider, options =
     return [];
   }
 
+  // options.catalog is a test seam; normally the merged models.json.
+  /** @type {import('./modelCatalog.js').CatalogModel[]} */
+  const catalog = Array.isArray(options?.catalog) ? options.catalog : getCatalogModels();
   const discoveredModels = await listOllamaModels(config.ollamaBaseUrl);
-  const selectedOllamaModel = await getEffectiveModel({ provider: 'ollama', config });
-  const discoveredSet = new Set(discoveredModels.map((m) => m.name));
-  const discoveredBaseSet = new Set(discoveredModels.map((m) => normalizeModelId(m.name)));
-  // Two param maps: exact full name (e.g. 'gemma3:latest') and base name (e.g. 'gemma3')
-  const paramSizeExact = {};
-  const paramSizeBase = {};
-  // Parallel maps of on-disk size (bytes) and quant level, so the UI can show a
-  // pre-pull Fits/Tight/Will-swap pill against available memory.
-  const sizeBytesExact = {};
-  const sizeBytesBase = {};
-  const quantExact = {};
-  const quantBase = {};
-  for (const m of discoveredModels) {
-    paramSizeExact[m.name] = m.paramSize;
-    sizeBytesExact[m.name] = m.sizeBytes;
-    quantExact[m.name] = m.quant;
-    const base = normalizeModelId(m.name);
-    if (!paramSizeBase[base]) paramSizeBase[base] = m.paramSize;
-    if (!sizeBytesBase[base]) sizeBytesBase[base] = m.sizeBytes;
-    if (!quantBase[base]) quantBase[base] = m.quant;
-  }
-  const curatedBaseSet = new Set(
-    getCatalogModels().flatMap((m) => [
-      normalizeModelId(m.id),
-      normalizeModelId(m.ollamaId || m.id)
-    ])
-  );
-  const curated = getCatalogModels().map((model) => {
-    const pullId = model.ollamaId || model.id;
-    // A specific tag must be installed exactly; a shared base name is not enough.
-    const hasSpecificTag = pullId.includes(':') && !pullId.endsWith(':latest');
-    let isAvailable;
-    let paramSize;
-    if (hasSpecificTag) {
-      isAvailable = discoveredSet.has(pullId) || discoveredSet.has(model.id);
-      paramSize = paramSizeExact[pullId] || paramSizeExact[model.id] || null;
-    } else {
-      isAvailable =
-        discoveredSet.has(model.id) ||
-        discoveredSet.has(pullId) ||
-        discoveredBaseSet.has(normalizeModelId(model.id)) ||
-        discoveredBaseSet.has(normalizeModelId(pullId));
-      paramSize =
-        paramSizeExact[model.id] ||
-        paramSizeExact[pullId] ||
-        paramSizeBase[normalizeModelId(model.id)] ||
-        paramSizeBase[normalizeModelId(pullId)] ||
-        null;
+  const selectedOllamaModel = resolveOllamaModel(discoveredModels.map((m) => m.name), config.ollamaModel, catalog);
+  const installedByTag = new Map(discoveredModels.map((m) => [tagKey(m.name), m]));
+  const facts = await describeInstalled(config.ollamaBaseUrl, discoveredModels);
+
+  // A row is installed only when its own tag is (a bare id is id:latest), so
+  // qwen3.8:27b-mlx or qwen3.8:latest never mark the qwen3.8:27b row.
+  const claimed = new Set();
+  const curated = catalog.map((model) => {
+    const key = tagKey(model.ollamaId || model.id);
+    const installed = installedByTag.get(key);
+    if (!installed) {
+      return { ...model, available: false, selected: false, paramSize: null, sizeBytes: null, quant: null };
     }
-    const sizeBytes = hasSpecificTag
-      ? (sizeBytesExact[pullId] ?? sizeBytesExact[model.id] ?? null)
-      : (sizeBytesExact[model.id] ?? sizeBytesExact[pullId]
-          ?? sizeBytesBase[normalizeModelId(model.id)] ?? sizeBytesBase[normalizeModelId(pullId)] ?? null);
-    const quant = hasSpecificTag
-      ? (quantExact[pullId] || quantExact[model.id] || null)
-      : (quantExact[model.id] || quantExact[pullId]
-          || quantBase[normalizeModelId(model.id)] || quantBase[normalizeModelId(pullId)] || null);
+    claimed.add(key);
     return {
       ...model,
-      available: isAvailable,
-      selected: normalizeModelId(model.id) === normalizeModelId(selectedOllamaModel),
-      paramSize,
-      sizeBytes,
-      quant
+      available: true,
+      selected: installed.name === selectedOllamaModel,
+      ...installedFields(installed, facts)
     };
   });
 
+  // Every other installed tag is listed under its own name, even when a
+  // catalog row shares its base name. Another tag of an uncensored row, or a
+  // name that says so, is flagged, so Auto leaves it alone.
   const extraModels = discoveredModels
-    .filter(({ name }) => !curatedBaseSet.has(normalizeModelId(name)))
-    .map(({ name, paramSize, sizeBytes, quant }) => ({
-      id: name,
-      label: name,
-      group: 'Installed locally',
-      available: true,
-      selected: name === selectedOllamaModel,
-      paramSize: paramSize || null,
-      sizeBytes: sizeBytes ?? null,
-      quant: quant || null
-    }));
+    .filter((m) => !claimed.has(tagKey(m.name)))
+    .map((m) => {
+      const sibling = catalogRowFor(m.name, catalog)?.row;
+      const uncensored = sibling?.uncensored === true || sibling?.group === 'Uncensored' || UNCENSORED_NAME_RE.test(m.name);
+      return {
+        id: m.name,
+        label: m.name,
+        group: 'Installed locally',
+        available: true,
+        selected: m.name === selectedOllamaModel,
+        ...(uncensored ? { uncensored: true } : {}),
+        ...installedFields(m, facts)
+      };
+    });
 
   return [...curated, ...extraModels];
+}
+
+// /api/show per installed model: a few at a time inside a total budget, so a
+// long list or a slow daemon cannot stall the picker. Successes are cached.
+const SHOW_CONCURRENCY = 4;
+const SHOW_BUDGET_MS = 4000;
+
+/**
+ * Capabilities and context window for each installed model. A failed or
+ * skipped show leaves capabilities [] and contextWindow null.
+ * @param {string} baseUrl
+ * @param {Array<{name: string, digest?: string | null}>} installed
+ * @returns {Promise<Map<string, {capabilities: string[], contextWindow: number | null}>>}
+ */
+async function describeInstalled(baseUrl, installed) {
+  /** @type {Map<string, {capabilities: string[], contextWindow: number | null}>} */
+  const facts = new Map();
+  const deadline = Date.now() + SHOW_BUDGET_MS;
+  let next = 0;
+  async function worker() {
+    while (next < installed.length && Date.now() < deadline) {
+      const m = installed[next];
+      next += 1;
+      const info = await getOllamaModelInfo(baseUrl, m.name, { digest: m.digest }).catch(() => null);
+      facts.set(m.name, {
+        capabilities: Array.isArray(info?.capabilities) ? info.capabilities : [],
+        contextWindow: info?.contextWindow ?? null
+      });
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(SHOW_CONCURRENCY, installed.length) }, worker));
+  return facts;
+}
+
+/** Fields only an installed model has; the update checks and Settings read them. */
+function installedFields(m, facts) {
+  const info = facts.get(m.name);
+  return {
+    paramSize: m.paramSize || null,
+    sizeBytes: m.sizeBytes ?? null,
+    quant: m.quant || null,
+    digest: m.digest || null,
+    modifiedAt: m.modifiedAt || null,
+    family: m.family || null,
+    format: m.format || null,
+    capabilities: info?.capabilities || [],
+    contextWindow: info?.contextWindow ?? null
+  };
 }
 
 export async function streamWithProvider({ provider, model, messages, config, signal, onToken, onStats, onNotice, overrideBaseUrl, overrideApiKey, temperature, maxTokens, ollamaOptions, openaiParams, keepAlive }) {
@@ -480,6 +522,7 @@ export async function streamWithProvider({ provider, model, messages, config, si
       temperature,
       maxTokens,
       params: openaiParams,
+      provider,
       providerLabel: provider === 'openai'
         ? 'OpenAI'
         : provider === 'grok'

@@ -44,7 +44,7 @@ import { createRecall } from './recall.js';
 import { createConfigVault } from './configVault.js';
 import { makeHostGuard, makeMcpAuthGuard, makePrivilegedGuard, isLoopbackRequest, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
 import { classifyProviderScope } from './providerScope.js';
-import { refreshCatalog } from './modelCatalog.js';
+import { refreshCatalog, ollamaTag } from './modelCatalog.js';
 import { lookupModel } from './ollamaRegistry.js';
 import { describeEngineError } from './engineErrors.js';
 import { createProviderKeyStore } from './providerKeys.js';
@@ -62,6 +62,7 @@ import { createAgentRouter } from './agent/routes.js';
 import { createAccessStore } from './accessSettings.js';
 import { createAccessRouter } from './routes/access.js';
 import { createConnectorsRouter } from './routes/connectors.js';
+import { createModelsRouter } from './routes/models.js';
 import { createMcpEndpointStore } from './mcpEndpoint.js';
 import { createMcpEndpointRouter, makeMcpEndpointGate } from './routes/mcpEndpoint.js';
 import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
@@ -267,44 +268,31 @@ async function generateChatTitle({ content, provider, model, config: cfg, ollama
     .trim() || null;
 }
 
-function normalizeModelId(modelId) {
-  return String(modelId || '').split(':')[0].trim().toLowerCase();
-}
-
-function isUncensoredModelRecord(item) {
-  const haystack = `${item?.id || ''} ${item?.label || ''} ${item?.group || ''}`.toLowerCase();
-  return (
-    String(item?.group || '').toLowerCase() === 'uncensored' ||
-    item?.uncensored === true ||
-    /uncensored|dolphin|abliterated|surge|mcq-raw/.test(haystack)
-  );
-}
-
+// The catalog's Uncensored group in models.json order, then any model listModels
+// flags uncensored (MCQ-Raw, another tag of an uncensored row, an abliterated build).
 async function pickMostUncensoredOllamaModel(cfg) {
-  const priority = [
-    'qwen3.5-uncensored',
-    'deepseek-r1-abliterated',
-    'dolphin3',
-    'dolphin-mixtral:8x7b',
-    'dolphin-mixtral',
-    'llama4.1:surge',
-    'llama4.1'
-  ];
-
   const models = await listModels(cfg, 'ollama');
-  const installed = (models || []).filter((item) => item?.available !== false);
-  if (installed.length === 0) return null;
+  const installed = (models || []).filter((item) => item?.available === true);
+  const pick = installed.find((item) => item.group === 'Uncensored')
+    || installed.find((item) => item.uncensored === true);
+  if (!pick) return null;
+  // A row is installed only under its own tag, so this is the tag that runs.
+  return ollamaTag(pick.ollamaId || pick.id);
+}
 
-  for (const preferred of priority) {
-    const preferredNorm = normalizeModelId(preferred);
-    const match = installed.find((item) =>
-      normalizeModelId(item?.id) === preferredNorm ||
-      normalizeModelId(item?.ollamaId) === preferredNorm
-    );
-    if (match?.id) return match.id;
-  }
-
-  return installed.find((item) => isUncensoredModelRecord(item))?.id || null;
+// Installed Ollama models as the router reads them. The router takes groups
+// and flags from the catalog, and /api/show capabilities let reasoning use
+// any model that can think.
+async function routeCandidates(cfg) {
+  const listed = await listModels(cfg, 'ollama').catch(() => []);
+  return listed
+    .filter((item) => item?.available === true)
+    .map((item) => ({
+      id: item.ollamaId || item.id,
+      sizeBytes: item.sizeBytes,
+      capabilities: item.capabilities,
+      uncensored: item.uncensored === true
+    }));
 }
 
 // Write one SSE frame. Returns false once the socket is gone, so a streaming
@@ -1081,11 +1069,8 @@ app.post('/api/runtimes/llamacpp/stop', async (_req, res) => {
 app.post('/api/route', async (req, res) => {
   try {
     const { prompt, lane, uncensored } = req.body || {};
-    const [models, specs] = await Promise.all([
-      listOllamaModels(config.ollamaBaseUrl).catch(() => []),
-      Promise.resolve({ ramGb: Number((os.totalmem() / 1024 ** 3).toFixed(1)) })
-    ]);
-    const decision = routeModel({ prompt, lane, uncensored, availableModels: models, ramGb: specs.ramGb });
+    const ramGb = Number((os.totalmem() / 1024 ** 3).toFixed(1));
+    const decision = routeModel({ prompt, lane, uncensored, availableModels: await routeCandidates(config), ramGb });
     res.json({ ok: true, ...decision });
   } catch (error) {
     res.status(500).json({ ok: false, error: `Route failed: ${error.message}` });
@@ -1428,328 +1413,17 @@ app.post('/api/providers/switch-model', async (req, res) => {
   });
 });
 
-// Model pull (install from Ollama registry)
-
-// Ollama model IDs are alphanumeric plus hyphens, dots and colons; validate before forwarding.
-const SAFE_MODEL_RE = /^[a-z0-9][a-z0-9._:/-]{0,99}$/i;
-const MCQ_MODEL_SPECS = {
-  'mcq-pro-12b': { base: 'gemma3:12b', modelfile: 'Modelfile.mcq-pro-12b' },
-  'mcq-ultra-31b': { base: 'gemma4:31b', modelfile: 'Modelfile.mcq-ultra-31b' },
-  'mcq-raw-8b': { base: 'dolphin3:latest', modelfile: 'Modelfile.mcq-raw-8b' }
-};
-const modelInstallJobs = new Map(); // jobId -> job
-
-function cloneJob(job) {
-  return {
-    id: job.id,
-    modelId: job.modelId,
-    status: job.status,
-    pct: job.pct,
-    message: job.message,
-    error: job.error,
-    done: job.done,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt
-  };
-}
-
-function updateJob(job, patch) {
-  Object.assign(job, patch, { updatedAt: nowIso() });
-}
-
-function pruneModelInstallJobs(maxAgeMs = 6 * 60 * 60 * 1000) {
-  const now = Date.now();
-  for (const [id, job] of modelInstallJobs.entries()) {
-    const updatedAt = Date.parse(job.updatedAt || 0);
-    if (job.done && Number.isFinite(updatedAt) && (now - updatedAt) > maxAgeMs) {
-      modelInstallJobs.delete(id);
-    }
-  }
-}
-
-function streamOllamaPullToSSE(upstream, send, statusPrefix = '') {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const reader = upstream.body.getReader();
-      const decoder = new TextDecoder('utf8');
-      let buf = '';
-      let sawSuccess = false;
-      let lastErrorMessage = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop() || '';
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const payload = JSON.parse(trimmed);
-            if (payload.error) {
-              lastErrorMessage = String(payload.error);
-              send('error', { message: lastErrorMessage });
-              return resolve({ ok: false, error: lastErrorMessage });
-            }
-            const pct = payload.total
-              ? Math.round((payload.completed / payload.total) * 100)
-              : null;
-            const status = payload.status || '';
-            send('progress', { status: `${statusPrefix}${status}`.trim(), pct });
-            if (status === 'success') {
-              sawSuccess = true;
-              return resolve({ ok: true });
-            }
-          } catch {
-            // Skip malformed chunks.
-          }
-        }
-      }
-
-      if (buf.trim()) {
-        try {
-          const payload = JSON.parse(buf.trim());
-          if (payload.error) lastErrorMessage = String(payload.error);
-          if (payload.status === 'success') sawSuccess = true;
-        } catch {
-          // ignore trailing non-json fragment
-        }
-      }
-
-      if (sawSuccess) return resolve({ ok: true });
-      return resolve({ ok: false, error: lastErrorMessage || 'Pull did not complete successfully' });
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-function runProcess(command, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, {
-      cwd: options.cwd,
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    if (typeof options.onSpawn === 'function') {
-      options.onSpawn(proc);
-    }
-    let stdout = '';
-    let stderr = '';
-    let abortHandler = null;
-
-    if (options.signal) {
-      if (options.signal.aborted) {
-        try { proc.kill('SIGTERM'); } catch { /* ignore */ }
-      }
-      abortHandler = () => {
-        try { proc.kill('SIGTERM'); } catch { /* ignore */ }
-      };
-      options.signal.addEventListener('abort', abortHandler, { once: true });
-    }
-
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
-    proc.on('error', reject);
-    proc.on('close', (code) => {
-      if (options.signal && abortHandler) {
-        options.signal.removeEventListener('abort', abortHandler);
-      }
-      resolve({ code: Number(code || 0), stdout, stderr });
-    });
-  });
-}
-
-async function streamOllamaPullToJob(upstream, job, statusPrefix = '') {
-  const reader = upstream.body.getReader();
-  const decoder = new TextDecoder('utf8');
-  let buf = '';
-  let sawSuccess = false;
-  let lastErrorMessage = '';
-
-  while (true) {
-    if (job.abortController.signal.aborted) {
-      throw new Error('canceled');
-    }
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const lines = buf.split('\n');
-    buf = lines.pop() || '';
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const payload = JSON.parse(trimmed);
-        if (payload.error) {
-          lastErrorMessage = String(payload.error);
-          throw new Error(lastErrorMessage);
-        }
-        const pct = payload.total
-          ? Math.round((payload.completed / payload.total) * 100)
-          : null;
-        const status = payload.status || '';
-        updateJob(job, { message: `${statusPrefix}${status}`.trim(), pct });
-        if (status === 'success') {
-          sawSuccess = true;
-          return;
-        }
-      } catch (error) {
-        if (error instanceof SyntaxError) {
-          // Skip malformed chunks from upstream.
-          continue;
-        }
-        throw error;
-      }
-    }
-  }
-
-  if (!sawSuccess) {
-    throw new Error(lastErrorMessage || 'Pull did not complete successfully');
-  }
-}
-
-async function runInstallJob(job) {
-  const ollamaBase = config.ollamaBaseUrl || 'http://127.0.0.1:11434';
-  const modelId = String(job.modelId).trim().toLowerCase();
-  const isMcqModel = Object.prototype.hasOwnProperty.call(MCQ_MODEL_SPECS, modelId);
-
-  updateJob(job, { status: 'running', message: `Preparing ${modelId}`, pct: null, error: null });
-
-  try {
-    if (isMcqModel) {
-      const { base, modelfile } = MCQ_MODEL_SPECS[modelId];
-      const modelfilePath = join(MIRABILIS_ROOT, 'training', 'mcq', modelfile);
-      if (!existsSync(modelfilePath)) {
-        throw new Error(`MCQ Modelfile not found: ${modelfilePath}`);
-      }
-
-      const baseCheck = await runProcess('ollama', ['show', base], {
-        signal: job.abortController.signal,
-        onSpawn: (proc) => { job.currentProcess = proc; }
-      });
-      job.currentProcess = null;
-
-      if (baseCheck.code !== 0) {
-        updateJob(job, { message: `Pulling base model ${base}`, pct: null });
-        const basePull = await fetch(`${ollamaBase}/api/pull`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: base, stream: true }),
-          signal: job.abortController.signal
-        });
-        if (!basePull.ok) {
-          const msg = await basePull.text().catch(() => `Failed to pull ${base}`);
-          throw new Error(msg);
-        }
-        await streamOllamaPullToJob(basePull, job, `${base}: `);
-      }
-
-      updateJob(job, { message: `Creating ${modelId} from Modelfile`, pct: null });
-      const created = await runProcess('ollama', ['create', modelId, '-f', modelfilePath], {
-        cwd: MIRABILIS_ROOT,
-        signal: job.abortController.signal,
-        onSpawn: (proc) => { job.currentProcess = proc; }
-      });
-      job.currentProcess = null;
-      if (created.code !== 0) {
-        throw new Error((created.stderr || created.stdout || `ollama create failed for ${modelId}`).trim());
-      }
-    } else {
-      updateJob(job, { message: `Pulling ${modelId}`, pct: 0 });
-      const upstream = await fetch(`${ollamaBase}/api/pull`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelId, stream: true }),
-        signal: job.abortController.signal
-      });
-      if (!upstream.ok) {
-        const msg = await upstream.text().catch(() => 'Pull failed');
-        throw new Error(msg);
-      }
-      await streamOllamaPullToJob(upstream, job);
-    }
-
-    updateJob(job, { status: 'completed', message: 'Install complete', pct: 100, done: true });
-  } catch (error) {
-    const canceled = job.abortController.signal.aborted || String(error?.message || '').toLowerCase() === 'canceled';
-    if (canceled) {
-      updateJob(job, { status: 'canceled', message: 'Install canceled', done: true, error: null });
-    } else {
-      updateJob(job, {
-        status: 'failed',
-        message: 'Install failed',
-        done: true,
-        error: error?.message || 'unknown error'
-      });
-    }
-  } finally {
-    job.currentProcess = null;
-    pruneModelInstallJobs();
-  }
-}
-
-app.get('/api/models/install-jobs', async (_req, res) => {
-  pruneModelInstallJobs();
-  const jobs = Array.from(modelInstallJobs.values())
-    .sort((a, b) => Date.parse(b.updatedAt || 0) - Date.parse(a.updatedAt || 0))
-    .slice(0, 50)
-    .map(cloneJob);
-  return res.json({ jobs });
-});
-
-app.get('/api/models/install-jobs/:jobId', async (req, res) => {
-  pruneModelInstallJobs();
-  const job = modelInstallJobs.get(String(req.params.jobId || ''));
-  if (!job) return res.status(404).json({ error: 'Install job not found' });
-  return res.json({ job: cloneJob(job) });
-});
-
-app.post('/api/models/install-jobs', async (req, res) => {
-  if (isGoDark()) {
-    return res.status(403).json({ error: 'Go Dark is on: downloading a model would reach the internet. Turn Go Dark off to install models.' });
-  }
-  const modelId = String(req.body?.modelId || '').trim().toLowerCase();
-  if (!modelId || !SAFE_MODEL_RE.test(modelId)) {
-    return res.status(400).json({ error: 'Invalid model ID' });
-  }
-
-  for (const job of modelInstallJobs.values()) {
-    if (!job.done && job.modelId === modelId) {
-      return res.status(202).json({ job: cloneJob(job), deduped: true });
-    }
-  }
-
-  const job = {
-    id: uuidv4(),
-    modelId,
-    status: 'queued',
-    pct: null,
-    message: 'Queued',
-    error: null,
-    done: false,
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-    abortController: new AbortController(),
-    currentProcess: null
-  };
-  modelInstallJobs.set(job.id, job);
-
-  void runInstallJob(job);
-  return res.status(202).json({ job: cloneJob(job) });
-});
-
-app.post('/api/models/install-jobs/:jobId/cancel', async (req, res) => {
-  const job = modelInstallJobs.get(String(req.params.jobId || ''));
-  if (!job) return res.status(404).json({ error: 'Install job not found' });
-  if (job.done) return res.json({ job: cloneJob(job), alreadyDone: true });
-
-  updateJob(job, { status: 'canceling', message: 'Canceling install...' });
-  try { job.abortController.abort(); } catch { /* ignore */ }
-  try { job.currentProcess?.kill('SIGTERM'); } catch { /* ignore */ }
-
-  return res.json({ job: cloneJob(job), cancelRequested: true });
-});
+// Models: installed, update checks, the Ollama library, install jobs and uninstall
+// (routes/models.js). Mounted ahead of the Go Dark error handler, and no
+// /api/models/:param route above it shadows it. Installing, canceling and deleting
+// need the session token.
+app.use('/api/models', createModelsRouter({
+  guard: makePrivilegedGuard(mcpToken, 'model management'),
+  ollamaBaseUrl: () => config.ollamaBaseUrl,
+  isGoDark,
+  dataDir: dirname(config.chatStorePath),
+  rootDir: MIRABILIS_ROOT
+}));
 
 // Checks a model exists upstream, and its size, before a pull, so a typo fails in
 // the field instead of as a failed multi-gigabyte download.
@@ -1761,121 +1435,6 @@ app.get('/api/models/registry-lookup', async (req, res) => {
     return res.json({ status: 'unknown', reason: 'Go Dark is on, so the registry was not contacted.' });
   }
   res.json(await lookupModel(id));
-});
-
-app.post('/api/models/pull', async (req, res) => {
-  const { modelId } = req.body || {};
-  if (isGoDark()) {
-    return res.status(403).json({ error: 'Go Dark is on: downloading a model would reach the internet. Turn Go Dark off to install models.' });
-  }
-  if (!modelId || !SAFE_MODEL_RE.test(modelId)) {
-    return res.status(400).json({ error: 'Invalid model ID' });
-  }
-  const requestedModelId = String(modelId).trim().toLowerCase();
-  const isMcqModel = Object.prototype.hasOwnProperty.call(MCQ_MODEL_SPECS, requestedModelId);
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  const send = (event, payload) => {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
-  };
-
-  try {
-    const ollamaBase = config.ollamaBaseUrl || 'http://127.0.0.1:11434';
-
-    if (isMcqModel) {
-      const { base, modelfile } = MCQ_MODEL_SPECS[requestedModelId];
-      const modelfilePath = join(MIRABILIS_ROOT, 'training', 'mcq', modelfile);
-      if (!existsSync(modelfilePath)) {
-        send('error', { message: `MCQ Modelfile not found: ${modelfilePath}` });
-        return res.end();
-      }
-
-      send('progress', { status: `Preparing ${requestedModelId}`, pct: null });
-
-      const baseCheck = await runProcess('ollama', ['show', base]);
-      if (baseCheck.code !== 0) {
-        send('progress', { status: `Pulling base model ${base}`, pct: null });
-        const basePull = await fetch(`${ollamaBase}/api/pull`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: base, stream: true })
-        });
-        if (!basePull.ok) {
-          const msg = await basePull.text().catch(() => 'Base model pull failed');
-          send('error', { message: msg });
-          return res.end();
-        }
-        const baseResult = await streamOllamaPullToSSE(basePull, send, `${base}: `);
-        if (!baseResult.ok) {
-          send('error', { message: baseResult.error || `Failed to pull ${base}` });
-          return res.end();
-        }
-      }
-
-      send('progress', { status: `Creating ${requestedModelId} from Modelfile`, pct: null });
-      const created = await runProcess('ollama', ['create', requestedModelId, '-f', modelfilePath], {
-        cwd: MIRABILIS_ROOT
-      });
-      if (created.code !== 0) {
-        const message = (created.stderr || created.stdout || `ollama create failed for ${requestedModelId}`).trim();
-        send('error', { message });
-        return res.end();
-      }
-
-      send('done', { modelId: requestedModelId });
-      return res.end();
-    }
-
-    const upstream = await fetch(`${ollamaBase}/api/pull`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: requestedModelId, stream: true })
-    });
-
-    if (!upstream.ok) {
-      const msg = await upstream.text().catch(() => 'Pull failed');
-      send('error', { message: msg });
-      return res.end();
-    }
-
-    const result = await streamOllamaPullToSSE(upstream, send);
-    if (result.ok) {
-      send('done', { modelId: requestedModelId });
-    } else {
-      send('error', { message: result.error || 'Pull did not complete successfully' });
-    }
-  } catch (err) {
-    send('error', { message: err.message || 'Pull error' });
-  }
-  res.end();
-});
-
-// Model delete (remove from Ollama)
-
-app.delete('/api/models/:modelId', async (req, res) => {
-  const modelId = decodeURIComponent(req.params.modelId || '');
-  if (!modelId || !SAFE_MODEL_RE.test(modelId)) {
-    return res.status(400).json({ error: 'Invalid model ID' });
-  }
-  try {
-    const ollamaBase = config.ollamaBaseUrl || 'http://127.0.0.1:11434';
-    const upstream = await fetch(`${ollamaBase}/api/delete`, {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: modelId })
-    });
-    if (!upstream.ok) {
-      const msg = await upstream.text().catch(() => 'Delete failed');
-      return res.status(upstream.status).json({ error: msg });
-    }
-    return res.status(200).json({ ok: true });
-  } catch (err) {
-    return res.status(500).json({ error: err.message || 'Delete error' });
-  }
 });
 
 // Remote Control (localhost exec + SSH)
@@ -2667,7 +2226,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     try {
       const routed = routeModel({
         prompt: content,
-        availableModels: await listOllamaModels(config.ollamaBaseUrl),
+        availableModels: await routeCandidates(config),
         ramGb: Number((os.totalmem() / 1024 ** 3).toFixed(1))
       });
       if (routed.model) effectiveModel = routed.model;

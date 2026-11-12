@@ -21,10 +21,24 @@ try {
   process.exit(1);
 }
 
+// A dated remote list replaces the bundled one in every install, so a truncated or
+// regrouped file would strip the picker, Auto and the router everywhere at once.
+const MIN_MODELS = 12;
+const REQUIRED_GROUPS = ['Small & Fast', 'Powerful', 'Coding', 'Reasoning', 'Uncensored'];
+
+if (typeof catalog.updated !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(catalog.updated)) {
+  problems.push('"updated" must be a YYYY-MM-DD date; it decides whether installs replace their bundled list');
+}
+
 const entries = catalog.ollama;
 if (!Array.isArray(entries) || entries.length === 0) {
   problems.push('"ollama" must be a non-empty array');
 } else {
+  if (entries.length < MIN_MODELS) problems.push(`"ollama" has ${entries.length} models; at least ${MIN_MODELS} expected`);
+  const groups = new Set(entries.map((entry) => entry?.group));
+  for (const group of REQUIRED_GROUPS) {
+    if (!groups.has(group)) problems.push(`no model in the "${group}" group, which Auto and the router read`);
+  }
   const seen = new Map();
   entries.forEach((entry, i) => {
     const where = `ollama[${i}]${entry?.id ? ` (${entry.id})` : ''}`;

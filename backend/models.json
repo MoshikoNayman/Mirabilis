@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/MoshikoNayman/Mirabilis/main/backend/models.schema.json",
   "version": 1,
-  "updated": "2026-09-05",
+  "updated": "2026-11-12",
   "note": "Suggested local models and cloud fallback defaults. Edit and push to update every install; no app release needed. Cloud model lists are discovered live from each provider, so providerDefaults is only used when that listing fails.",
   "ollama": [
     {
@@ -9,7 +9,7 @@
       "label": "MCQ-Pro-12B",
       "group": "MCQ",
       "ollamaId": "mcq-pro-12b",
-      "size": "8.1 GB",
+      "size": "8.2 GB",
       "local": true
     },
     {
@@ -17,7 +17,7 @@
       "label": "MCQ-Ultra-31B",
       "group": "MCQ",
       "ollamaId": "mcq-ultra-31b",
-      "size": "~20 GB",
+      "size": "19-20 GB",
       "local": true
     },
     {
@@ -30,195 +30,201 @@
       "local": true
     },
     {
-      "id": "llama3.2:3b",
-      "label": "Llama 3.2 3B",
+      "id": "lfm3:1.7b",
+      "label": "LFM3 1.7B",
       "group": "Small & Fast",
-      "ollamaId": "llama3.2:3b",
-      "size": "2.0 GB"
+      "ollamaId": "lfm3:1.7b",
+      "size": "1.1-1.7 GB"
     },
     {
-      "id": "gemma3:1b",
-      "label": "Gemma 3 1B",
+      "id": "qwen3.5:4b",
+      "label": "Qwen 3.5 4B",
       "group": "Small & Fast",
-      "ollamaId": "gemma3:1b",
-      "size": "815 MB"
+      "ollamaId": "qwen3.5:4b",
+      "size": "3.3-4.0 GB"
     },
     {
-      "id": "gemma3",
-      "label": "Gemma 3 4B",
+      "id": "lfm2.5:8b",
+      "label": "LFM2.5 8B (MoE)",
       "group": "Small & Fast",
-      "ollamaId": "gemma3",
-      "size": "3.3 GB"
+      "ollamaId": "lfm2.5:8b",
+      "size": "5.2 GB"
     },
     {
-      "id": "phi4-mini",
-      "label": "Phi-4 Mini",
+      "id": "ministral-3:8b",
+      "label": "Ministral 3 8B",
       "group": "Small & Fast",
-      "ollamaId": "phi4-mini",
-      "size": "2.5 GB"
+      "ollamaId": "ministral-3:8b",
+      "size": "6.0 GB"
     },
     {
-      "id": "qwen2.5",
-      "label": "Qwen 2.5 7B",
+      "id": "qwen3.5:9b",
+      "label": "Qwen 3.5 9B",
       "group": "Small & Fast",
-      "ollamaId": "qwen2.5",
-      "size": "4.7 GB"
-    },
-    {
-      "id": "mistral",
-      "label": "Mistral 7B",
-      "group": "Small & Fast",
-      "ollamaId": "mistral",
-      "size": "4.1 GB"
-    },
-    {
-      "id": "llama3.1",
-      "label": "Llama 3.1 8B",
-      "group": "Small & Fast",
-      "ollamaId": "llama3.1",
-      "size": "4.7 GB"
-    },
-    {
-      "id": "gpt-oss:20b",
-      "label": "GPT-OSS 20B (OpenAI)",
-      "group": "Powerful",
-      "ollamaId": "gpt-oss:20b",
-      "size": "14 GB"
-    },
-    {
-      "id": "phi4",
-      "label": "Phi-4 14B",
-      "group": "Powerful",
-      "ollamaId": "phi4",
-      "size": "9.1 GB"
-    },
-    {
-      "id": "gemma3:12b",
-      "label": "Gemma 3 12B",
-      "group": "Powerful",
-      "ollamaId": "gemma3:12b",
-      "size": "8.1 GB"
-    },
-    {
-      "id": "gemma3:27b",
-      "label": "Gemma 3 27B",
-      "group": "Powerful",
-      "ollamaId": "gemma3:27b",
-      "size": "17 GB"
+      "ollamaId": "qwen3.5:9b",
+      "size": "6.6-7.6 GB"
     },
     {
       "id": "gemma4:e4b",
-      "label": "Gemma 4 E4B (MoE)",
-      "group": "Powerful",
+      "label": "Gemma 4 E4B",
+      "group": "Small & Fast",
       "ollamaId": "gemma4:e4b",
-      "size": "9.6 GB"
+      "size": "6.6-9.5 GB"
+    },
+    {
+      "id": "gemma4:12b",
+      "label": "Gemma 4 12B",
+      "group": "Powerful",
+      "ollamaId": "gemma4:12b",
+      "size": "7.7-8.0 GB"
+    },
+    {
+      "id": "qwen3.8:27b",
+      "label": "Qwen 3.8 27B",
+      "group": "Powerful",
+      "ollamaId": "qwen3.8:27b",
+      "size": "18 GB"
     },
     {
       "id": "gemma4:26b",
-      "label": "Gemma 4 26B",
+      "label": "Gemma 4 26B (MoE)",
       "group": "Powerful",
       "ollamaId": "gemma4:26b",
-      "size": "18 GB"
+      "size": "16-19 GB"
     },
     {
       "id": "gemma4:31b",
       "label": "Gemma 4 31B",
       "group": "Powerful",
       "ollamaId": "gemma4:31b",
-      "size": "20 GB"
+      "size": "19-20 GB"
     },
     {
-      "id": "qwen3",
-      "label": "Qwen 3 8B",
+      "id": "muse-glimmer:30b",
+      "label": "Muse Glimmer 30B (Meta)",
       "group": "Powerful",
-      "ollamaId": "qwen3",
-      "size": "5.2 GB"
+      "ollamaId": "muse-glimmer:30b",
+      "size": "18 GB"
     },
     {
-      "id": "qwen3:32b",
-      "label": "Qwen 3 32B",
+      "id": "qwen3.6:35b",
+      "label": "Qwen 3.6 35B (MoE)",
       "group": "Powerful",
-      "ollamaId": "qwen3:32b",
-      "size": "20 GB"
+      "ollamaId": "qwen3.6:35b",
+      "size": "23 GB"
     },
     {
-      "id": "llama3.3",
-      "label": "Llama 3.3 70B",
+      "id": "qwen3.8:27b-q8_0",
+      "label": "Qwen 3.8 27B (8-bit)",
       "group": "Powerful",
-      "ollamaId": "llama3.3",
-      "size": "43 GB"
+      "ollamaId": "qwen3.8:27b-q8_0",
+      "size": "30 GB"
+    },
+    {
+      "id": "qwen3.5:122b",
+      "label": "Qwen 3.5 122B (MoE)",
+      "group": "Powerful",
+      "ollamaId": "qwen3.5:122b",
+      "size": "81 GB"
+    },
+    {
+      "id": "rnj-1:8b",
+      "label": "Rnj-1 8B",
+      "group": "Coding",
+      "ollamaId": "rnj-1:8b",
+      "size": "5.1 GB"
+    },
+    {
+      "id": "mimo-v2.6:9b",
+      "label": "MiMo V2.6 9B (Xiaomi)",
+      "group": "Coding",
+      "ollamaId": "mimo-v2.6:9b",
+      "size": "6.6-8.7 GB"
+    },
+    {
+      "id": "devstral-small-2:24b",
+      "label": "Devstral Small 2 24B",
+      "group": "Coding",
+      "ollamaId": "devstral-small-2:24b",
+      "size": "15 GB"
+    },
+    {
+      "id": "flint:40b",
+      "label": "Flint 40B (MoE)",
+      "group": "Coding",
+      "ollamaId": "flint:40b",
+      "size": "23 GB"
+    },
+    {
+      "id": "qwen3-coder-next",
+      "label": "Qwen3 Coder Next 80B (MoE)",
+      "group": "Coding",
+      "ollamaId": "qwen3-coder-next",
+      "size": "52 GB"
+    },
+    {
+      "id": "nemotron-3-nano:4b",
+      "label": "Nemotron 3 Nano 4B (NVIDIA)",
+      "group": "Reasoning",
+      "ollamaId": "nemotron-3-nano:4b",
+      "size": "2.8-2.9 GB"
+    },
+    {
+      "id": "gpt-oss:20b",
+      "label": "GPT-OSS 20B (OpenAI)",
+      "group": "Reasoning",
+      "ollamaId": "gpt-oss:20b",
+      "size": "14 GB"
+    },
+    {
+      "id": "glm-4.7-flash",
+      "label": "GLM-4.7 Flash 30B (MoE)",
+      "group": "Reasoning",
+      "ollamaId": "glm-4.7-flash",
+      "size": "19 GB"
     },
     {
       "id": "gpt-oss:120b",
       "label": "GPT-OSS 120B (OpenAI)",
-      "group": "Powerful",
+      "group": "Reasoning",
       "ollamaId": "gpt-oss:120b",
       "size": "65 GB"
     },
     {
-      "id": "mixtral",
-      "label": "Mixtral 8x22B",
-      "group": "Powerful",
-      "ollamaId": "mixtral:8x22b",
-      "size": "80 GB"
+      "id": "lfm3-vl:2b",
+      "label": "LFM3 VL 2B",
+      "group": "Vision",
+      "ollamaId": "lfm3-vl:2b",
+      "size": "1.5-1.7 GB"
     },
     {
-      "id": "llama4",
-      "label": "Llama 4 Scout (MoE)",
-      "group": "Powerful",
-      "ollamaId": "llama4:scout",
-      "size": "67 GB"
+      "id": "glm-ocr",
+      "label": "GLM-OCR (documents)",
+      "group": "Vision",
+      "ollamaId": "glm-ocr",
+      "size": "2.7 GB"
     },
     {
-      "id": "qwen2.5-coder",
-      "label": "Qwen2.5 Coder 7B",
-      "group": "Coding",
-      "ollamaId": "qwen2.5-coder",
-      "size": "4.7 GB"
-    },
-    {
-      "id": "qwen3-coder:30b",
-      "label": "Qwen3 Coder 30B (MoE)",
-      "group": "Coding",
-      "ollamaId": "qwen3-coder:30b",
-      "size": "19 GB"
-    },
-    {
-      "id": "deepseek-r1",
-      "label": "DeepSeek R1 7B",
-      "group": "Reasoning",
-      "ollamaId": "deepseek-r1",
-      "size": "4.7 GB"
-    },
-    {
-      "id": "deepseek-r1:14b",
-      "label": "DeepSeek R1 14B",
-      "group": "Reasoning",
-      "ollamaId": "deepseek-r1:14b",
-      "size": "9.0 GB"
+      "id": "nemotron3:33b",
+      "label": "Nemotron 3 Nano Omni 33B",
+      "group": "Vision",
+      "ollamaId": "nemotron3:33b",
+      "size": "21-28 GB"
     },
     {
       "id": "dolphin3",
       "label": "Dolphin 3.0 8B",
       "group": "Uncensored",
       "ollamaId": "dolphin3",
-      "size": "4.7 GB",
+      "size": "4.9 GB",
       "uncensored": true
     },
     {
-      "id": "dolphin-llama3",
-      "label": "Dolphin Llama 3 8B",
+      "id": "hermes3:8b",
+      "label": "Hermes 3 8B",
       "group": "Uncensored",
-      "ollamaId": "dolphin-llama3",
+      "ollamaId": "hermes3:8b",
       "size": "4.7 GB",
-      "uncensored": true
-    },
-    {
-      "id": "dolphin-mistral",
-      "label": "Dolphin Mistral 7B",
-      "group": "Uncensored",
-      "ollamaId": "dolphin-mistral",
-      "size": "4.1 GB",
       "uncensored": true
     },
     {
@@ -230,30 +236,30 @@
       "uncensored": true
     },
     {
-      "id": "wizard-vicuna-uncensored",
-      "label": "Wizard Vicuna Uncens.",
+      "id": "hermes3:70b",
+      "label": "Hermes 3 70B",
       "group": "Uncensored",
-      "ollamaId": "wizard-vicuna-uncensored",
-      "size": "3.8 GB",
+      "ollamaId": "hermes3:70b",
+      "size": "40 GB",
       "uncensored": true
     },
     {
-      "id": "llama2-uncensored",
-      "label": "Llama 2 Uncensored",
+      "id": "r1-1776:70b",
+      "label": "R1 1776 70B (Perplexity)",
       "group": "Uncensored",
-      "ollamaId": "llama2-uncensored",
-      "size": "3.8 GB",
+      "ollamaId": "r1-1776:70b",
+      "size": "43 GB",
       "uncensored": true
     }
   ],
   "providerDefaults": {
     "_comment": "Last-resort model per cloud provider, used ONLY when the live /models listing fails (no key, offline, provider down). Normal operation ignores these entirely and uses what the provider reports.",
-    "openai": "gpt-4o-mini",
-    "grok": "grok-3-mini",
-    "groq": "llama-3.3-70b-versatile",
-    "openrouter": "meta-llama/llama-3.3-70b-instruct:free",
-    "gemini": "gemini-2.5-flash",
-    "cerebras": "llama-3.3-70b",
-    "claude": "claude-sonnet-5"
+    "openai": "gpt-6-luna",
+    "grok": "grok-4.3",
+    "groq": "openai/gpt-oss-20b",
+    "openrouter": "openrouter/free",
+    "gemini": "gemini-3.5-flash-lite",
+    "cerebras": "gpt-oss-120b",
+    "claude": "claude-haiku-5-5"
   }
 }

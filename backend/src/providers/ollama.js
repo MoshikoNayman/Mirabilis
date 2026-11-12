@@ -2,6 +2,43 @@
 
 const OLLAMA_BASE_URL = 'http://127.0.0.1:11434';
 
+// /api/tags is about 500 bytes a model and /api/show tens of KB. A body far
+// past that is a broken host, not a model list.
+const MAX_TAGS_BYTES = 4 * 1024 * 1024;
+const MAX_SHOW_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Parse a JSON body, refusing one larger than maxBytes.
+ * @param {Response} res
+ * @param {number} maxBytes
+ */
+async function readJson(res, maxBytes) {
+  if (Number(res.headers.get('content-length')) > maxBytes) throw new Error('response too large');
+  if (!res.body) return JSON.parse(await res.text());
+  const reader = res.body.getReader();
+  /** @type {Uint8Array[]} */
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error('response too large');
+    }
+    chunks.push(value);
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+/** @param {unknown} value @returns {string | null} ISO time, or null when unparseable */
+function toIso(value) {
+  if (typeof value !== 'string' || !value) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+
 export async function listOllamaModels(baseUrl) {
   const base = baseUrl || OLLAMA_BASE_URL;
   try {
@@ -9,14 +46,21 @@ export async function listOllamaModels(baseUrl) {
     // otherwise hang the model picker until the OS timeout.
     const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return [];
-    const data = await res.json();
-    return (data.models || []).map(m => ({
+    const data = await readJson(res, MAX_TAGS_BYTES);
+    const models = Array.isArray(data?.models) ? data.models : [];
+    return models.filter((m) => m && typeof m.name === 'string' && m.name).map(m => ({
       id: m.name,
       name: m.name,
       size: m.size ? `${(m.size / 1e9).toFixed(1)} GB` : 'unknown',
       sizeBytes: typeof m.size === 'number' ? m.size : null,
       paramSize: m.details?.parameter_size || null,
-      quant: m.details?.quantization_level || null
+      quant: m.details?.quantization_level || null,
+      // sha256 of the local manifest, 64 hex with no prefix. The registry
+      // reports the same value, so update checks compare the two.
+      digest: typeof m.digest === 'string' && m.digest ? m.digest : null,
+      modifiedAt: toIso(m.modified_at),
+      family: m.details?.family || null,
+      format: m.details?.format || null
     }));
   } catch (error) {
     console.error('Failed to list Ollama models:', error.message);
@@ -34,9 +78,18 @@ const METADATA_TIMEOUT_MS = 3000;
 /** @type {Map<string, number>} */
 const _modelInfoFailedAt = new Map();
 
-export async function getOllamaModelInfo(baseUrl, model) {
+/**
+ * Facts from /api/show. Never throws; a failure answers with nulls and [].
+ * @param {string | undefined} baseUrl
+ * @param {string} model
+ * @param {{ digest?: string | null }} [opts] the /api/tags digest, so a model
+ *   that was pulled again gets fresh facts instead of the cached ones
+ * @returns {Promise<import('../types.js').OllamaModelInfo>}
+ */
+export async function getOllamaModelInfo(baseUrl, model, { digest = null } = {}) {
   const base = baseUrl || OLLAMA_BASE_URL;
-  const key = `${base}::${model}`;
+  const nameKey = `${base}::${model}`;
+  const key = digest ? `${nameKey}@${digest}` : nameKey;
   if (_modelInfoCache.has(key)) return _modelInfoCache.get(key);
   /** @type {import('../types.js').OllamaModelInfo} */
   const unknown = { contextWindow: null, paramCount: null, capabilities: [], vision: false };
@@ -56,7 +109,7 @@ export async function getOllamaModelInfo(baseUrl, model) {
       _modelInfoFailedAt.set(key, Date.now());
       return unknown;
     }
-    const data = await res.json();
+    const data = await readJson(res, MAX_SHOW_BYTES);
     const info = data.model_info || {};
     /** @type {number | null} */
     let ctx = null;
@@ -72,6 +125,8 @@ export async function getOllamaModelInfo(baseUrl, model) {
       vision: caps.includes('vision')
     };
     _modelInfoCache.set(key, out);
+    // Name-only callers (the send path) then see the facts of the current pull.
+    if (key !== nameKey) _modelInfoCache.set(nameKey, out);
     _modelInfoFailedAt.delete(key);
     return out;
   } catch {

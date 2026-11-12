@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import {
   Badge, Button, SegmentedControl, Spinner, Switch,
-  AlertIcon, CheckIcon, ChevronRightIcon, CopyIcon, ExternalIcon, MoonIcon, PlayIcon,
+  AlertIcon, ChevronRightIcon, ExternalIcon, MoonIcon, PlayIcon,
   PlugIcon, PlusIcon, RefreshIcon, ShieldIcon, TerminalIcon, TrashIcon
 } from '../ui/primitives';
 import { appStore, useAppStore } from '../../store/useAppStore';
@@ -19,7 +19,7 @@ import {
   saveMcpEndpoint
 } from '../../lib/connectors';
 import { getSessionToken } from '../../lib/sessionToken';
-import { SettingsGroup, SettingsList, SettingsRow, SettingsNotice } from './SettingsSheet';
+import { SettingsGroup, SettingsList, SettingsRow, SettingsNotice, SettingsCopyButton as CopyButton } from './SettingsSheet';
 
 const FEATURE = 'Connectors';
 const POLL_MS = 3000;
@@ -42,59 +42,6 @@ const monoBg = { background: 'color-mix(in srgb, var(--text-main) 4%, transparen
 const errorText = 'text-[length:var(--text-xs)] text-rose-600 dark:text-rose-300';
 const mutedXs = 'text-[length:var(--text-xs)] text-[color:var(--text-muted)]';
 const muted2xs = 'text-[length:var(--text-2xs)] text-[color:var(--text-muted)]';
-
-// The Clipboard API can be refused (desktop shell permissions); a hidden
-// textarea copy still works there.
-async function copyText(text) {
-  const active = typeof document !== 'undefined' ? document.activeElement : null;
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch { /* fall through */ }
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.top = '0';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    return ok;
-  } catch {
-    return false;
-  } finally {
-    if (active && typeof active.focus === 'function' && active !== document.activeElement) active.focus();
-  }
-}
-
-function CopyButton({ text, label = 'Copy', disabled }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef(null);
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  async function onCopy() {
-    if (!text) return;
-    if (await copyText(text)) {
-      setCopied(true);
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => setCopied(false), 1600);
-    } else {
-      appStore.toast('Could not copy. Copy the text manually.', { kind: 'error' });
-    }
-  }
-
-  return (
-    <Button size="sm" variant="ghost" onClick={onCopy} disabled={disabled || !text} aria-label={copied ? 'Copied' : label}>
-      {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
-      {copied ? 'Copied' : 'Copy'}
-    </Button>
-  );
-}
 
 function Avatar({ name, large = false }) {
   return (

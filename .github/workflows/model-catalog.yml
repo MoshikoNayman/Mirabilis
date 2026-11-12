@@ -9,6 +9,10 @@ name: Model catalog
 # users. backend/models.json is read at RUNTIME from the repository, so an
 # error here reaches every install without an app release: that cuts both ways,
 # which is exactly why it is worth a check.
+#
+# The same run is the canary for Settings > Models: it reads ollama.com's HTML
+# (search and tags pages, no API), so a markup change fails here on Monday
+# instead of emptying the pane for every user.
 
 on:
   schedule:
@@ -17,11 +21,15 @@ on:
   pull_request:
     paths:
       - 'backend/models.json'
+      - 'backend/src/ollamaLibrary.js'
+      - 'backend/src/ollamaRegistry.js'
       - 'scripts/check-model-catalog.mjs'
   push:
     branches: [main]
     paths:
       - 'backend/models.json'
+      - 'backend/src/ollamaLibrary.js'
+      - 'backend/src/ollamaRegistry.js'
       - 'scripts/check-model-catalog.mjs'
 
 jobs:
@@ -40,5 +48,5 @@ jobs:
       - name: The catalog file is well formed
         run: node scripts/validate-model-catalog.mjs
 
-      - name: Every suggested model still exists upstream
+      - name: Every suggested model still exists upstream, and ollama.com still parses
         run: node scripts/check-model-catalog.mjs
