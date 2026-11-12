@@ -138,6 +138,16 @@ jobs:
       - name: The app starts with the documented flags
         run: node scripts/smoke-start.mjs --no-image --no-ollama
 
+      # The built-in This computer MCP server asks each OS its own way (log show,
+      # journalctl, Get-WinEvent, launchctl, systemctl, CIM, ping, du). The unit
+      # tests feed it recorded output; only a real run proves the commands and
+      # the parsing on every platform. It needs nothing installed, so it runs
+      # even when an earlier step failed.
+      - name: This computer MCP server answers every tool
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: node scripts/smoke-machine-mcp.mjs
+
   # Dependency advisories. Fast, and needs no installs: --package-lock-only
   # audits the lockfile directly, which also keeps the desktop tree auditable
   # without pulling down an Electron binary.

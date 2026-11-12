@@ -52,9 +52,21 @@ export function scrub(text) {
 }
 
 /**
- * @typedef {(command: string, args: string[], opts?: {timeoutMs?: number, env?: Record<string, string>, signal?: AbortSignal}) => Promise<{stdout: string, stderr: string}>} RunCommand
+ * @typedef {(command: string, args: string[], opts?: {timeoutMs?: number, env?: Record<string, string>, signal?: AbortSignal, maxBuffer?: number, tailBytes?: number}) => Promise<{stdout: string, stderr: string, dropped?: number}>} RunCommand
  * Same contract as services/proc.js runCommand: resolves on exit 0, otherwise rejects
  * with an error carrying `code` ('ENOENT' when missing), `exitCode`, `stdout`, `stderr`.
+ * A runner that honours tailBytes keeps only the newest output and reports `dropped` bytes.
+ */
+
+/**
+ * @typedef {object} ProbeResult
+ * @property {boolean} ok        exit 0
+ * @property {string} stdout     what the command printed, also when it failed or timed out
+ * @property {string} stderr
+ * @property {string} error      short reason when not ok, else ''
+ * @property {boolean} missing   the command is not installed
+ * @property {boolean} timedOut
+ * @property {number} dropped    older output bytes left out (tailBytes runs only)
  */
 
 /** Real host facts; tests replace any of them. */
@@ -93,20 +105,20 @@ function safe(fn, fallback) {
 }
 
 /** @param {any} value @param {number} min @param {number} max @param {number} fallback */
-function clampInt(value, min, max, fallback) {
+export function clampInt(value, min, max, fallback) {
   const n = Math.floor(Number(value));
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, n));
 }
 
 /** @param {string} text @param {number} limit */
-function clip(text, limit) {
+export function clip(text, limit) {
   const s = String(text ?? '');
   return s.length > limit ? `${s.slice(0, limit - 3)}...` : s;
 }
 
 /** @param {string} text */
-function firstLine(text) {
+export function firstLine(text) {
   return String(text ?? '').trim().split('\n')[0] || '';
 }
 
@@ -135,15 +147,16 @@ function baseName(p) {
 }
 
 /**
- * Bounded execFile with no shell and a hidden console on Windows.
+ * Bounded execFile with no shell and a hidden console on Windows. Stdin is closed at
+ * once: PowerShell with a redirected stdin waits for it before exiting.
  * @type {RunCommand}
  */
-function execRunner(command, args, { timeoutMs = COMMAND_TIMEOUT_MS, env, signal } = {}) {
+export function execRunner(command, args, { timeoutMs = COMMAND_TIMEOUT_MS, env, signal, maxBuffer = 8 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
-    execFile(command, args, {
+    const child = execFile(command, args, {
       timeout: timeoutMs,
       killSignal: 'SIGKILL',
-      maxBuffer: 8 * 1024 * 1024,
+      maxBuffer,
       windowsHide: true,
       encoding: 'utf8',
       env: env ? { ...process.env, ...env } : process.env,
@@ -151,10 +164,14 @@ function execRunner(command, args, { timeoutMs = COMMAND_TIMEOUT_MS, env, signal
     }, (error, stdout, stderr) => {
       if (!error) { resolve({ stdout, stderr }); return; }
       const err = /** @type {any} */ (error);
-      if (err.killed && !signal?.aborted) err.message = `${command} timed out after ${timeoutMs}ms`;
+      if (err.killed && !signal?.aborted && err.code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+        err.message = `${command} timed out after ${timeoutMs}ms`;
+      }
       Object.assign(err, { exitCode: typeof err.code === 'number' ? err.code : null, stdout, stderr });
       reject(err);
     });
+    child.stdin?.on('error', () => { /* the command exited first */ });
+    child.stdin?.end();
   });
 }
 
@@ -165,6 +182,106 @@ function subprocessEnv(platform) {
   for (const dir of EXTRA_PATH) if (!parts.includes(dir)) parts.push(dir);
   // Numbers from ps and df stay parseable whatever the user's locale.
   return { PATH: parts.join(':'), LC_ALL: 'C' };
+}
+
+/** @param {number} ms */
+const seconds = (ms) => `${Math.round(ms / 100) / 10}s`;
+
+/**
+ * A command runner that never rejects: failures come back as a short reason, and
+ * whatever the command printed before it failed is kept.
+ * @param {{platform?: string, runCommand?: RunCommand}} [opts]
+ */
+export function createProbeRunner({ platform = process.platform, runCommand } = {}) {
+  const runner = typeof runCommand === 'function' ? runCommand : execRunner;
+  const baseEnv = subprocessEnv(platform);
+  /**
+   * @param {string} command
+   * @param {string[]} args
+   * @param {AbortSignal} [signal]
+   * @param {{timeoutMs?: number, env?: Record<string, string>, maxBuffer?: number, tailBytes?: number}} [opts]
+   * @returns {Promise<ProbeResult>}
+   */
+  return async function run(command, args, signal, { timeoutMs = COMMAND_TIMEOUT_MS, env, maxBuffer, tailBytes } = {}) {
+    /** @type {Record<string, any>} */
+    const opts = { timeoutMs, env: env ? { ...(baseEnv || {}), ...env } : baseEnv, signal };
+    if (maxBuffer) opts.maxBuffer = maxBuffer;
+    if (tailBytes) opts.tailBytes = tailBytes;
+    try {
+      const res = await runner(command, args, opts);
+      return {
+        ok: true, stdout: String(res?.stdout ?? ''), stderr: String(res?.stderr ?? ''), error: '',
+        missing: false, timedOut: false, dropped: Number(res?.dropped) || 0
+      };
+    } catch (err) {
+      const e = /** @type {any} */ (err) || {};
+      const message = String(e.message || e);
+      const missing = e.code === 'ENOENT';
+      const timedOut = !missing && /timed out/i.test(message);
+      let error;
+      if (missing) error = `${command} is not available on this system`;
+      else if (timedOut) error = `${command} did not finish within ${seconds(timeoutMs)}`;
+      else if (signal?.aborted) error = `${command} was cancelled`;
+      else error = `${command} failed: ${clip(firstLine(e.stderr) || firstLine(message), 160)}`;
+      return {
+        ok: false, stdout: String(e.stdout ?? ''), stderr: String(e.stderr ?? ''), error, missing, timedOut,
+        dropped: Number(e.dropped) || 0
+      };
+    }
+  };
+}
+
+/**
+ * Storage volumes from `df -kP`, without pseudo filesystems, system-only mounts and
+ * loop devices. On macOS, one row per APFS container: its volumes share the space,
+ * so "/" alone looks nearly empty.
+ * @param {string} stdout
+ * @param {string} platform
+ */
+export function parseDfVolumes(stdout, platform) {
+  /** @type {Array<{fs: string, mount: string, size: number, used: number, avail: number, pct: number}>} */
+  const rows = [];
+  for (const line of String(stdout ?? '').split('\n').slice(1)) {
+    const m = line.match(/^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)%\s+(\S.*)$/);
+    if (!m) continue;
+    const [, fs, sizeK, usedK, availK, pct, mountRaw] = m;
+    const mount = mountRaw.trim();
+    const size = Number(sizeK) * 1024;
+    if (!(size > 0)) continue;
+    if (fs.startsWith('map ') || fs.startsWith('/dev/loop')) continue;
+    if (PSEUDO_FS.has(fs) && !(fs === 'overlay' && mount === '/')) continue;
+    if (/^\/(dev|run|sys|proc|snap)(\/|$)/.test(mount) || mount.includes('/CoreSimulator/')) continue;
+    rows.push({ fs, mount, size, used: Number(usedK) * 1024, avail: Number(availK) * 1024, pct: Number(pct) });
+  }
+  /** @type {Array<{mount: string, size: number, used: number, avail: number, pct: number}>} */
+  let disks;
+  if (platform === 'darwin') {
+    /** @type {Map<string, typeof rows>} */
+    const groups = new Map();
+    for (const row of rows) {
+      const key = row.fs.match(/^\/dev\/(disk\d+)/)?.[1] || row.fs;
+      const list = groups.get(key) || [];
+      list.push(row);
+      groups.set(key, list);
+    }
+    disks = [];
+    for (const list of groups.values()) {
+      const mounts = list.map((x) => x.mount);
+      const mount = mounts.includes('/') ? '/'
+        : mounts.includes('/System/Volumes/Data') ? '/System/Volumes/Data'
+          : mounts.find((x) => !x.startsWith('/System/Volumes/'));
+      if (!mount) continue;
+      const size = Math.max(...list.map((x) => x.size));
+      const avail = Math.min(...list.map((x) => x.avail));
+      disks.push({ mount, size, used: size - avail, avail, pct: Math.round(((size - avail) / size) * 100) });
+    }
+  } else {
+    disks = rows;
+  }
+  disks.sort((a, b) => (a.mount === '/' ? -1 : b.mount === '/' ? 1 : b.size - a.size));
+  return disks.slice(0, MAX_DISKS).map((d) => ({
+    mount: d.mount, sizeGB: diskGB(d.size), usedGB: diskGB(d.used), freeGB: diskGB(d.avail), usedPercent: d.pct
+  }));
 }
 
 /**
@@ -262,33 +379,11 @@ export async function tailTextFile(file, { lines, filter, budget = TEXT_BUDGET }
  * @param {string} [opts.workDir]         Base for relative log paths (default: home).
  */
 export function createSystemTools({ platform = process.platform, runCommand, host, workDir } = {}) {
-  const runner = typeof runCommand === 'function' ? runCommand : execRunner;
   /** @type {HostApi} */
   const h = { ...DEFAULT_HOST, ...(host || {}) };
-  const env = subprocessEnv(platform);
   const isWin = platform === 'win32';
   const isMac = platform === 'darwin';
-
-  /**
-   * Run one probe. Never rejects: failures come back as a short reason.
-   * @param {string} command
-   * @param {string[]} args
-   * @param {AbortSignal} [signal]
-   */
-  async function run(command, args, signal) {
-    try {
-      const res = await runner(command, args, { timeoutMs: COMMAND_TIMEOUT_MS, env, signal });
-      return { ok: true, stdout: String(res?.stdout ?? ''), error: '' };
-    } catch (err) {
-      const e = /** @type {any} */ (err) || {};
-      const message = String(e.message || e);
-      let error;
-      if (e.code === 'ENOENT') error = `${command} is not available on this system`;
-      else if (/timed out/i.test(message)) error = `${command} did not finish within ${COMMAND_TIMEOUT_MS / 1000}s`;
-      else error = `${command} failed: ${clip(firstLine(e.stderr) || firstLine(message), 160)}`;
-      return { ok: false, stdout: String(e.stdout ?? ''), error };
-    }
-  }
+  const run = createProbeRunner({ platform, runCommand });
 
   // Processes
 
@@ -461,55 +556,9 @@ export function createSystemTools({ platform = process.platform, runCommand, hos
       }
     }
     const r = await run('df', ['-kP'], signal);
-    /** @type {Array<{fs: string, mount: string, size: number, used: number, avail: number, pct: number}>} */
-    const rows = [];
-    for (const line of r.stdout.split('\n').slice(1)) {
-      const m = line.match(/^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)%\s+(\S.*)$/);
-      if (!m) continue;
-      const [, fs, sizeK, usedK, availK, pct, mountRaw] = m;
-      const mount = mountRaw.trim();
-      const size = Number(sizeK) * 1024;
-      if (!(size > 0)) continue;
-      if (fs.startsWith('map ') || fs.startsWith('/dev/loop')) continue;
-      if (PSEUDO_FS.has(fs) && !(fs === 'overlay' && mount === '/')) continue;
-      if (/^\/(dev|run|sys|proc|snap)(\/|$)/.test(mount) || mount.includes('/CoreSimulator/')) continue;
-      rows.push({ fs, mount, size, used: Number(usedK) * 1024, avail: Number(availK) * 1024, pct: Number(pct) });
-    }
-    if (!rows.length) {
-      notes.push(`disks: ${r.error || 'df listed no volumes'}`);
-      return [];
-    }
-    /** @type {Array<{mount: string, size: number, used: number, avail: number, pct: number}>} */
-    let disks;
-    if (isMac) {
-      // APFS volumes share their container's space, so "/" alone looks nearly
-      // empty. One row per container, with the container's real usage.
-      /** @type {Map<string, typeof rows>} */
-      const groups = new Map();
-      for (const row of rows) {
-        const key = row.fs.match(/^\/dev\/(disk\d+)/)?.[1] || row.fs;
-        const list = groups.get(key) || [];
-        list.push(row);
-        groups.set(key, list);
-      }
-      disks = [];
-      for (const list of groups.values()) {
-        const mounts = list.map((x) => x.mount);
-        const mount = mounts.includes('/') ? '/'
-          : mounts.includes('/System/Volumes/Data') ? '/System/Volumes/Data'
-            : mounts.find((x) => !x.startsWith('/System/Volumes/'));
-        if (!mount) continue;
-        const size = Math.max(...list.map((x) => x.size));
-        const avail = Math.min(...list.map((x) => x.avail));
-        disks.push({ mount, size, used: size - avail, avail, pct: Math.round(((size - avail) / size) * 100) });
-      }
-    } else {
-      disks = rows;
-    }
-    disks.sort((a, b) => (a.mount === '/' ? -1 : b.mount === '/' ? 1 : b.size - a.size));
-    return disks.slice(0, MAX_DISKS).map((d) => ({
-      mount: d.mount, sizeGB: diskGB(d.size), usedGB: diskGB(d.used), freeGB: diskGB(d.avail), usedPercent: d.pct
-    }));
+    const disks = parseDfVolumes(r.stdout, platform);
+    if (!disks.length) notes.push(`disks: ${r.error || 'df listed no volumes'}`);
+    return disks;
   }
 
   /** @param {AbortSignal} [signal] */
@@ -862,9 +911,7 @@ export function createSystemTools({ platform = process.platform, runCommand, hos
     read_log: {
       kind: 'read',
       mutating: false,
-      description: 'Read the end of a text log file, optionally only lines containing some text (any case). '
-        + (isMac ? 'For the macOS unified log use run_command with `log show --last 10m`.'
-          : platform === 'linux' ? 'For the systemd journal use run_command with `journalctl -n 200 --no-pager`.' : ''),
+      description: 'Read the end of a text log file, optionally only lines containing some text (any case).',
       parameters: {
         path: 'string (log file path; ~ is your home folder)',
         lines: `number (optional: lines from the end to read, default ${LOG_DEFAULT_LINES}, max ${LOG_MAX_LINES})`,

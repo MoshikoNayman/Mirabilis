@@ -193,7 +193,9 @@ function ConnectorRow({ connector, busy, onOpen, onToggle }) {
           {/* Narrow rows have no room for the pill, so the status leads the subtitle. The pill stays the described text. */}
           <span aria-hidden="true" className="shrink-0 font-medium text-[color:var(--text-main)] min-[480px]:hidden">{status.label}</span>
           <span className="min-w-0 truncate min-[480px]:shrink-0">{sub.kind}</span>
-          <span className="hidden min-w-0 truncate font-mono min-[480px]:inline" title={sub.detail}>{sub.detail}</span>
+          {sub.detail ? (
+            <span className="hidden min-w-0 truncate font-mono min-[480px]:inline" title={sub.detail}>{sub.detail}</span>
+          ) : null}
         </div>
       </div>
       <span className="hidden shrink-0 min-[480px]:inline-flex">
@@ -374,7 +376,6 @@ function ToolRow({ connector, tool, open, onToggleOpen, onPermission }) {
               <span className="break-all font-mono text-[length:var(--text-xs)] font-medium text-[color:var(--text-main)]">
                 {tool.name}
               </span>
-              {tool.title && tool.title !== tool.name ? <span className={muted2xs}>{tool.title}</span> : null}
               {tool.readOnly ? <Badge>Read-only</Badge> : null}
             </span>
             {/* Server-written and often long: two lines until opened, the rest on hover. */}
@@ -419,6 +420,8 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
 
   const state = c.enabled ? c.status.state : 'off';
   const isHttp = c.transport === 'http';
+  // Mirabilis sets the built-in's command, folder and variables at every start, so none show; it cannot be removed.
+  const builtin = c.builtin;
   const target = isHttp ? c.url : commandLine(c.command, c.args);
   const secretKeys = [...c.envKeys, ...c.headerKeys];
   const statusText = state === 'error' ? '' : statusLine(c);
@@ -494,7 +497,9 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
                   <p className="mt-1 whitespace-pre-wrap break-words font-mono text-[length:var(--text-2xs)]">{c.status.error}</p>
                 ) : null}
                 <p className="mt-1">
-                  {isHttp ? 'Check the URL and token, then restart.' : 'Check the command and logs, then restart.'}
+                  {isHttp
+                    ? 'Check the URL and token, then restart.'
+                    : builtin ? 'Check the logs, then restart.' : 'Check the command and logs, then restart.'}
                 </p>
               </SettingsNotice>
             ) : (
@@ -503,31 +508,33 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
           </div>
         ) : null}
 
-        <SettingsList className="mt-4">
-          <SettingsRow
-            label={isHttp ? 'URL' : 'Command'}
-            detail={<code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{target}</code>}
-          >
-            <CopyButton text={target} label={isHttp ? 'Copy URL' : 'Copy command'} />
-          </SettingsRow>
-          {c.cwd ? (
+        {builtin ? null : (
+          <SettingsList className="mt-4">
             <SettingsRow
-              label="Working folder"
-              detail={<code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{c.cwd}</code>}
-            />
-          ) : null}
-          {c.hasSecrets || secretKeys.length ? (
-            <SettingsRow
-              label="Secrets"
-              description="Values hidden"
-              detail={secretKeys.length ? (
-                <code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
-                  {secretKeys.join(', ')}
-                </code>
-              ) : null}
-            />
-          ) : null}
-        </SettingsList>
+              label={isHttp ? 'URL' : 'Command'}
+              detail={<code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{target}</code>}
+            >
+              <CopyButton text={target} label={isHttp ? 'Copy URL' : 'Copy command'} />
+            </SettingsRow>
+            {c.cwd ? (
+              <SettingsRow
+                label="Working folder"
+                detail={<code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{c.cwd}</code>}
+              />
+            ) : null}
+            {c.hasSecrets || secretKeys.length ? (
+              <SettingsRow
+                label="Secrets"
+                description="Values hidden"
+                detail={secretKeys.length ? (
+                  <code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
+                    {secretKeys.join(', ')}
+                  </code>
+                ) : null}
+              />
+            ) : null}
+          </SettingsList>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button size="sm" variant="soft" onClick={() => onRestart(c)} disabled={!c.enabled} aria-disabled={busy ? true : undefined}>
@@ -538,10 +545,12 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
             <TerminalIcon size={13} />
             {logsOpen ? 'Hide logs' : 'View logs'}
           </Button>
-          <Button size="sm" variant="danger" className="ml-auto" onClick={() => setConfirming(true)} disabled={!!busy || confirming}>
-            <TrashIcon size={13} />
-            Remove
-          </Button>
+          {builtin ? null : (
+            <Button size="sm" variant="danger" className="ml-auto" onClick={() => setConfirming(true)} disabled={!!busy || confirming}>
+              <TrashIcon size={13} />
+              Remove
+            </Button>
+          )}
         </div>
 
         {confirming ? (

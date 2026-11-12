@@ -1,12 +1,14 @@
 // @ts-check
 // Connectors: MCP servers Mirabilis uses as a client. Stores them in connectors.json,
-// keeps the enabled ones running and offers their tools to agent runs.
+// keeps the enabled ones running and offers their tools to agent runs. The built-in
+// This computer connector is always listed first and can be switched off, not removed.
 
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { copyFile, mkdir, open, readFile, rename } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { APP_VERSION } from '../version.js';
 import { redact } from '../agent/auditLog.js';
@@ -18,7 +20,10 @@ import { augmentPath, buildChildEnv, createStdioClient, expandTilde, pathOf } fr
 
 export const PROTOCOL_VERSION = '2025-06-18';
 export const GO_DARK_ERROR = 'Blocked by Go Dark';
+export const THIS_COMPUTER_ID = 'this-computer';
 
+/** Mirabilis's own MCP server for this machine, run by the This computer connector. */
+const MACHINE_SERVER = fileURLToPath(new URL('./machineServer.js', import.meta.url));
 const STORE_FILE = 'connectors.json';
 const LEGACY_FILE = 'mcp-servers.json';
 const INIT_TIMEOUT_MS = 20_000;
@@ -63,6 +68,22 @@ const PERMISSIONS = ['allow', 'ask', 'off'];
  * @property {string} createdAt
  * @property {string} updatedAt
  * @property {{defaultPermission: Permission|null, allowedTools: string[]|null}} [importRules]  from mcp-servers.json, applied once tools are known
+ * @property {boolean} [builtin]  ships with Mirabilis: command computed at every start, only switch and permissions saved
+ */
+
+/**
+ * A connector that ships with Mirabilis.
+ * @typedef {object} BuiltinConnector
+ * @property {string} id
+ * @property {string} name
+ * @property {boolean} [enabled]  the switch on first start; on unless false
+ * @property {() => {command: string, args: string[], env: Record<string, string>, cwd: string}} spawn  called at every start
+ */
+
+/**
+ * @typedef {object} StoreContents
+ * @property {ConnectorRecord[]} records  custom connectors
+ * @property {Map<string, any>} builtins  saved entries of built-in connectors, by id
  */
 
 /**
@@ -424,8 +445,63 @@ function normalizeStored(raw) {
   return record;
 }
 
-/** @param {string} text @returns {ConnectorRecord[]|null} */
-function parseStore(text) {
+/**
+ * This computer: the troubleshooting server in machineServer.js, run by the
+ * backend's own runtime, so the desktop app needs no Node of its own.
+ * @param {object} opts
+ * @param {string} opts.dataDir  where the server reads go-dark.json
+ * @param {Record<string, string|undefined>} [opts.env]  the backend's environment
+ * @param {string} [opts.script]  the server entry; tests point it elsewhere
+ * @returns {BuiltinConnector}
+ */
+export function thisComputerConnector({ dataDir, env = process.env, script = MACHINE_SERVER }) {
+  return {
+    id: THIS_COMPUTER_ID,
+    name: 'This computer',
+    enabled: true,
+    spawn: () => {
+      /** @type {Record<string, string>} */
+      const childEnv = {
+        // The desktop backend runs on Electron's binary, which acts as Node only with
+        // this set; without it the child opens a second app window. Node ignores it.
+        ELECTRON_RUN_AS_NODE: '1',
+        MIRABILIS_DATA_DIR: path.resolve(dataDir)
+      };
+      // The operator jail holds here as in agent runs: read_log resolves paths through it.
+      if (env.MIRABILIS_MCP_FS_ROOT) childEnv.MIRABILIS_MCP_FS_ROOT = path.resolve(env.MIRABILIS_MCP_FS_ROOT);
+      return { command: process.execPath, args: [script], env: childEnv, cwd: os.homedir() };
+    }
+  };
+}
+
+/**
+ * A built-in connector as the manager holds it. Its switch and tool permissions
+ * come from connectors.json; what it runs never does.
+ * @param {BuiltinConnector} def
+ * @param {any} saved  its entry in connectors.json, if any
+ * @returns {ConnectorRecord}
+ */
+function builtinRecord(def, saved) {
+  const record = /** @type {ConnectorRecord} */ (normalizeStored({
+    id: def.id,
+    name: def.name,
+    transport: 'stdio',
+    enabled: saved ? saved.enabled !== false : def.enabled !== false,
+    tools: saved?.tools,
+    toolInfo: saved?.toolInfo
+  }));
+  record.builtin = true;
+  return record;
+}
+
+/** A record as connectors.json keeps it: all of a custom one, the switch and permissions of a built-in. */
+function storedForm(record) {
+  if (!record.builtin) return record;
+  return { id: record.id, enabled: record.enabled, tools: record.tools, toolInfo: record.toolInfo };
+}
+
+/** @param {string} text @param {Set<string>} builtinIds @returns {StoreContents|null} */
+function parseStore(text, builtinIds) {
   let parsed;
   try {
     parsed = JSON.parse(text);
@@ -434,39 +510,50 @@ function parseStore(text) {
   }
   const list = Array.isArray(parsed) ? parsed : parsed?.connectors;
   if (!Array.isArray(list)) return null;
-  return /** @type {ConnectorRecord[]} */ (list.map(normalizeStored).filter(Boolean));
+  /** @type {StoreContents} */
+  const out = { records: [], builtins: new Map() };
+  for (const raw of list) {
+    if (raw && typeof raw === 'object' && builtinIds.has(raw.id)) {
+      out.builtins.set(raw.id, raw);
+      continue;
+    }
+    const record = normalizeStored(raw);
+    if (record) out.records.push(record);
+  }
+  return out;
 }
 
 /**
  * Read connectors.json, falling back to .bak. An unreadable file with no usable
  * backup is moved aside (never overwritten) and the list starts empty.
  * @param {string} file
- * @returns {Promise<{exists: boolean, records: ConnectorRecord[], rewrite?: boolean}>}
+ * @param {Set<string>} builtinIds
+ * @returns {Promise<StoreContents & {exists: boolean, rewrite?: boolean}>}
  */
-async function loadStore(file) {
+async function loadStore(file, builtinIds) {
   let text;
   try {
     text = await readFile(file, 'utf8');
   } catch (err) {
-    if (err?.code === 'ENOENT') return { exists: false, records: [] };
+    if (err?.code === 'ENOENT') return { exists: false, records: [], builtins: new Map() };
     throw err;
   }
-  const records = parseStore(text);
-  if (records) return { exists: true, records };
-  /** @type {ConnectorRecord[]|null} */
+  const store = parseStore(text, builtinIds);
+  if (store) return { exists: true, ...store };
+  /** @type {StoreContents|null} */
   let backup = null;
   try {
-    backup = parseStore(await readFile(`${file}.bak`, 'utf8'));
+    backup = parseStore(await readFile(`${file}.bak`, 'utf8'), builtinIds);
   } catch { /* no backup */ }
   // Move the bad file aside so the next save cannot rotate it over the good .bak.
   const quarantine = `${file}.corrupt-${Date.now()}`;
   try { await rename(file, quarantine); } catch { /* best effort */ }
   if (backup) {
     console.warn(`[connectors] ${file} was unreadable; recovered from ${file}.bak and moved the bad copy to ${quarantine}`);
-    return { exists: true, records: backup, rewrite: true };
+    return { exists: true, ...backup, rewrite: true };
   }
   console.warn(`[connectors] ${file} was unreadable and had no usable backup; moved it to ${quarantine}`);
-  return { exists: true, records: [], rewrite: true };
+  return { exists: true, records: [], builtins: new Map(), rewrite: true };
 }
 
 /**
@@ -660,9 +747,13 @@ async function within(promise, ms) {
  * @param {() => boolean} [opts.isGoDark]
  * @param {Record<string, string|undefined>} [opts.env]  base environment for local servers (PATH and a short allow list)
  * @param {typeof fetch} [opts.fetch]  for remote connectors; defaults to the global, Go Dark guarded fetch
+ * @param {BuiltinConnector[]} [opts.builtins]  connectors that ship with Mirabilis; defaults to This computer
  */
-export function createConnectorManager({ dataDir, isGoDark = () => false, env = process.env, fetch: fetchImpl } = /** @type {any} */ ({})) {
+export function createConnectorManager({ dataDir, isGoDark = () => false, env = process.env, fetch: fetchImpl, builtins } = /** @type {any} */ ({})) {
   if (!dataDir) throw new TypeError('createConnectorManager needs dataDir.');
+  /** @type {BuiltinConnector[]} */
+  const builtinDefs = Array.isArray(builtins) ? builtins : [thisComputerConnector({ dataDir, env })];
+  const builtinIds = new Set(builtinDefs.map((def) => def.id));
   const file = path.join(dataDir, STORE_FILE);
   const home = os.homedir();
   const platform = process.platform;
@@ -713,7 +804,7 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
 
   /** Serialized writes; the snapshot is taken now so order is preserved. */
   function persist() {
-    const text = JSON.stringify({ version: 1, connectors: records }, null, 2);
+    const text = JSON.stringify({ version: 1, connectors: records.map(storedForm) }, null, 2);
     const run = writeChain.then(() => writeAtomic(file, text));
     writeChain = run.catch(() => {});
     return run;
@@ -795,6 +886,18 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
         log(rt, record, `[mirabilis] Could not save the tool list: ${err?.message || err}`);
       }
     }
+  }
+
+  /**
+   * What a local connector runs. A built-in's command is computed at every start,
+   * so a stale or edited connectors.json cannot change it.
+   * @param {ConnectorRecord} record
+   */
+  function spawnSpec(record) {
+    if (!record.builtin) return { command: record.command, args: record.args, env: record.env, cwd: record.cwd };
+    const def = /** @type {BuiltinConnector} */ (builtinDefs.find((d) => d.id === record.id));
+    const spec = def.spawn();
+    return { command: String(spec.command), args: (spec.args || []).map(String), env: { ...spec.env }, cwd: String(spec.cwd || '') };
   }
 
   /** @param {ConnectorRecord} record */
@@ -899,17 +1002,18 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
           onNotification: (m) => onNotification(record.id, generation, m)
         });
       } else {
-        const cwd = record.cwd ? path.resolve(home, expandTilde(record.cwd, home)) : home;
+        const spec = spawnSpec(record);
+        const cwd = spec.cwd ? path.resolve(home, expandTilde(spec.cwd, home)) : home;
         if (!isDirectory(cwd)) {
-          fail(rt, record, `Working folder not found: ${record.cwd}`);
-          log(rt, record, `[mirabilis] Working folder not found: ${record.cwd}`);
+          fail(rt, record, `Working folder not found: ${spec.cwd}`);
+          log(rt, record, `[mirabilis] Working folder not found: ${spec.cwd}`);
           return;
         }
-        log(rt, record, `[mirabilis] Starting ${[record.command, ...record.args].join(' ')}`);
+        log(rt, record, `[mirabilis] Starting ${[spec.command, ...spec.args].join(' ')}`);
         client = createStdioClient({
-          command: record.command,
-          args: record.args,
-          env: buildChildEnv(env, record.env, { home, platform }),
+          command: spec.command,
+          args: spec.args,
+          env: buildChildEnv(env, spec.env, { home, platform }),
           cwd,
           onStderr: (line) => { if (rt.generation === generation) log(rt, record, line); },
           onNotification: (m) => onNotification(record.id, generation, m),
@@ -1043,6 +1147,8 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
       id: record.id,
       name: record.name,
       transport: record.transport,
+      // A built-in's command, folder and variables are computed at start, so all show empty.
+      builtin: record.builtin === true,
       command: record.command,
       args: [...record.args],
       cwd: record.cwd,
@@ -1092,16 +1198,25 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
       if (!initPromise) {
         initPromise = (async () => {
           await mkdir(dataDir, { recursive: true, mode: 0o700 });
-          const loaded = await loadStore(file);
-          records = loaded.records;
+          const loaded = await loadStore(file, builtinIds);
+          let custom = loaded.records;
           // Rewrite at once after a recovery, so a missing file never re-runs the import.
-          if (loaded.rewrite) await persist();
+          let rewrite = Boolean(loaded.rewrite);
           if (!loaded.exists) {
             const legacy = await readLegacy(dataDir);
             if (legacy) {
-              records = legacy;
-              await persist();
+              custom = legacy;
+              rewrite = true;
             }
+          }
+          // Built-ins first. One missing from the file is new, and starts with its default switch.
+          const added = builtinDefs.some((def) => !loaded.builtins.has(def.id));
+          records = [...builtinDefs.map((def) => builtinRecord(def, loaded.builtins.get(def.id))), ...custom];
+          if (rewrite) {
+            await persist();
+          } else if (added) {
+            // Best effort: a data folder that cannot be written must not keep the list from loading.
+            await persist().catch((err) => console.warn(`[connectors] Could not save ${file}: ${err?.message || err}`));
           }
           // Staggered, so a boot with several connectors does not launch them all at once.
           records.filter((r) => r.enabled).forEach((record, i) => {
@@ -1149,7 +1264,7 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
       await manager.init();
       assertOpen();
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw badRequest('Send the connector as a JSON object.');
-      if (records.length >= MAX_CONNECTORS) throw badRequest(`You can add up to ${MAX_CONNECTORS} connectors.`);
+      if (records.filter((r) => !r.builtin).length >= MAX_CONNECTORS) throw badRequest(`You can add up to ${MAX_CONNECTORS} connectors.`);
       let draft;
       const presetId = [input.presetId, input.preset].find((v) => v != null && v !== '');
       if (presetId !== undefined) {
@@ -1199,6 +1314,7 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
     /**
      * Change name, enabled, command, args, env, cwd, url, headers or per-tool
      * permissions. env and headers merge: a string sets a key, null removes it.
+     * A built-in takes only enabled and tools.
      * @param {string} id
      * @param {any} patch
      */
@@ -1207,6 +1323,9 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
       assertOpen();
       const record = mustGet(id);
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw badRequest('Send the changes as a JSON object.');
+      if (record.builtin && Object.keys(patch).some((key) => patch[key] !== undefined && key !== 'enabled' && key !== 'tools')) {
+        throw badRequest('Only on/off and tool permissions can change here.');
+      }
       /** @type {ConnectorRecord} */
       const next = structuredClone(record);
       const has = (key) => patch[key] !== undefined;
@@ -1280,6 +1399,7 @@ export function createConnectorManager({ dataDir, isGoDark = () => false, env = 
     async remove(id) {
       await manager.init();
       const record = mustGet(id);
+      if (record.builtin) throw badRequest('Built-in connectors cannot be removed. Switch it off.');
       await stopConnector(record.id);
       records = records.filter((r) => r.id !== record.id);
       runtimes.delete(record.id);

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { installEgressGuard, loadGoDark, setGoDark, isGoDark, egressAllowed, EgressBlockedError } from './egress.js';
+import { installEgressGuard, loadGoDark, setGoDark, isGoDark, egressAllowed, isLocalHost, readGoDark, GO_DARK_FILE, EgressBlockedError } from './egress.js';
 
 installEgressGuard();
 
@@ -44,4 +44,31 @@ test('the state survives a restart', async () => {
   assert.equal(mode, 0o600);
   await setGoDark(false);
   assert.equal(await loadGoDark(dir), false);
+});
+
+test('isLocalHost classifies bare hosts exactly as URLs are classified', () => {
+  for (const host of ['localhost', 'LOCALHOST', 'localhost.', '127.0.0.1', '127.1', '::1', '[::1]', '192.168.1.1', '10.0.0.5', '172.16.0.1', '172.31.255.255', 'nas.local', 'app.localhost']) {
+    assert.equal(isLocalHost(host), true, host);
+  }
+  for (const host of ['example.com', '8.8.8.8', '172.32.0.1', '169.254.1.1', 'fd00::1', '::ffff:8.8.8.8', '', '  ', 'a b', 'user@10.0.0.1', '10.0.0.1/x', 'http://localhost', '[::1', 'local']) {
+    assert.equal(isLocalHost(host), false, host);
+  }
+});
+
+test('readGoDark reads the saved state fresh and treats anything unreadable as off', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-egress-'));
+  assert.equal(await readGoDark(dir), false, 'no file yet');
+  assert.equal(await readGoDark(''), false, 'no data folder');
+  await fs.writeFile(path.join(dir, GO_DARK_FILE), JSON.stringify({ on: true }));
+  assert.equal(await readGoDark(dir), true);
+  await fs.writeFile(path.join(dir, GO_DARK_FILE), '{not json');
+  assert.equal(await readGoDark(dir), false);
+  await fs.writeFile(path.join(dir, GO_DARK_FILE), JSON.stringify({ on: 'yes' }));
+  assert.equal(await readGoDark(dir), false, 'only a real true turns it on');
+  // setGoDark writes what readGoDark reads.
+  await loadGoDark(dir);
+  await setGoDark(true);
+  assert.equal(await readGoDark(dir), true);
+  await setGoDark(false);
+  assert.equal(await readGoDark(dir), false);
 });

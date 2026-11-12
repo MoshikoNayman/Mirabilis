@@ -84,6 +84,36 @@ Both need the session token.
 Connectors are MCP servers Mirabilis starts or calls, so agent runs can use
 their tools. Manage them in Settings, Connectors.
 
+### This computer
+
+A built-in local connector, listed first and on by default: Mirabilis's own
+MCP server for the machine it runs on, macOS, Windows or Linux
+(`backend/src/mcp/machineServer.js`). It runs on the backend's own runtime, so
+it needs nothing installed. Switching off Start with Mirabilis stops its
+process and takes its tools away from agent runs. It cannot be removed, and
+only the switch and tool permissions change.
+
+| Tool | What it does |
+|---|---|
+| `system_overview` | OS, CPU, load, memory, disks, uptime and the top processes |
+| `list_processes` | Processes by CPU or memory, filtered by name |
+| `network_overview` | Interfaces, gateway, DNS servers and listening ports |
+| `read_log` | The end of a text log file, optionally filtered |
+| `disk_usage` | Volume usage and the largest entries in a folder, home by default |
+| `system_logs` | Recent system log entries: `log show`, `journalctl` or `Get-WinEvent` |
+| `services` | Services and their state |
+| `startup_items` | What starts at login or boot |
+| `hardware_info` | CPU, memory, GPUs with VRAM, displays |
+| `ping_host` | Ping a host 1 to 4 times: loss and round-trip times |
+| `dns_lookup` | Resolve a name, and list the configured DNS servers |
+| `check_port` | Whether a TCP port is open, closed or times out, with latency |
+| `kill_process` | Stop a process by pid; never Mirabilis itself |
+
+Every tool but `kill_process` is read-only, so they start at Allow and
+`kill_process` at Ask; Read only never offers it. Agents see them as
+`this_computer__<tool>`. With Go Dark on, `ping_host`, `dns_lookup` and
+`check_port` refuse targets outside this machine and the local network.
+
 ### Adding one
 
 - Catalog: ready-made servers. Filesystem, Memory, Sequential Thinking and
@@ -95,8 +125,9 @@ their tools. Manage them in Settings, Connectors.
 - Custom, URL: a streamable HTTP server you run yourself, here or on another
   machine, with an optional bearer token.
 
-In the list a command shows as `Local`, a URL on this computer (`127.0.0.1`,
-`localhost` or `::1`) as `Local URL`, and any other URL as `Remote`.
+In the list This computer shows as `Built in`, a command as `Local`, a URL on
+this computer (`127.0.0.1`, `localhost` or `::1`) as `Local URL`, and any other
+URL as `Remote`.
 
 Local connectors are child processes of Mirabilis, so a local server needs no
 script or port of its own. Enabled ones start when the backend starts, in the
@@ -147,7 +178,8 @@ catalog marks those.
 ### Storage and API
 
 Connectors are saved in `<data-dir>/connectors.json` (see
-[CONFIGURATION.md](CONFIGURATION.md)). On first start, HTTP servers from an
+[CONFIGURATION.md](CONFIGURATION.md)); This computer keeps only its switch and
+tool permissions there. On first start, HTTP servers from an
 older `mcp-servers.json` are imported once: an `authToken` becomes an
 `Authorization: Bearer` header, a server that required approval gets Ask on
 every tool, and an enforced allowlist turns the other tools Off.
@@ -156,11 +188,11 @@ All routes need the session token:
 
 | Route | Does |
 |---|---|
-| `GET /api/connectors` | List connectors with status and tools. Secret values are never returned, only their names. |
+| `GET /api/connectors` | List connectors with status and tools, This computer first with `builtin: true`. Secret values are never returned, only their names. |
 | `GET /api/connectors/catalog` | The catalog, with `available` per entry and a field's `default` when this machine has it. |
 | `POST /api/connectors` | Add `{ presetId, fields }` (`preset` works too) or a custom connector. |
-| `PATCH /api/connectors/:id` | Rename, enable, change the command or URL, or set `tools: { name: "allow" \| "ask" \| "off" }`. |
-| `DELETE /api/connectors/:id` | Remove and stop it. |
+| `PATCH /api/connectors/:id` | Rename, enable, change the command or URL, or set `tools: { name: "allow" \| "ask" \| "off" }`. This computer takes only `enabled` and `tools`, else `400`. |
+| `DELETE /api/connectors/:id` | Remove and stop it. This computer answers `400`. |
 | `POST /api/connectors/:id/restart` | Restart it. |
 | `GET /api/connectors/:id/logs` | Its last output lines. |
 | `POST /api/connectors/:id/tools/:tool/call` | Call a tool with `{ args }`. |

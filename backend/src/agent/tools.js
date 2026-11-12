@@ -323,7 +323,7 @@ export function runShell(command, { cwd, timeoutMs, signal, platform }) {
  * @param {string} [opts.workDir]   Project folder: default cwd and base for relative paths. Else home.
  * @param {string} [opts.dataDir]   Data folder; with runId, writes keep the old bytes there.
  * @param {string} [opts.runId]
- * @param {Record<string, any>} [opts.extraTools]  System, self and connector tools.
+ * @param {Record<string, any>} [opts.extraTools]  Self and connector tools.
  * @param {AbortSignal} [opts.signal] Cancels an in-flight tool call when the run stops.
  * @param {Gate} [opts.gate]
  * @param {number} [opts.commandTimeoutMs]
@@ -740,6 +740,11 @@ export function createToolRegistry({
       // A stop pressed during a decide step must not let the next tool call start.
       if (signal?.aborted) return { ok: false, error: 'Run cancelled.' };
       const input = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
+      // Small models drop the connector prefix: list_processes for this_computer__list_processes.
+      if (!Object.prototype.hasOwnProperty.call(all, name)) {
+        const matches = visibleNames().filter((n) => n.endsWith(`__${name}`));
+        if (matches.length === 1) name = matches[0];
+      }
       const tool = Object.prototype.hasOwnProperty.call(all, name) ? all[name] : null;
       if (!tool) {
         const available = visibleNames();

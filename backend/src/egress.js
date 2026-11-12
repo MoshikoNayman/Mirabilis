@@ -6,6 +6,8 @@ import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { isLocalHostUrl } from './security.js';
 
+export const GO_DARK_FILE = 'go-dark.json';
+
 let goDark = false;
 let stateFile = '';
 let installed = false;
@@ -41,6 +43,31 @@ export function egressAllowed(url) {
   return !goDark || isLocalHostUrl(url);
 }
 
+/**
+ * The same classification for a bare host name or address, as tools such as ping
+ * receive it: true for this machine and the LAN.
+ * @param {string} host
+ */
+export function isLocalHost(host) {
+  const h = String(host ?? '').trim().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '');
+  if (!h || /[\s/@?#\\[\]]/.test(h)) return false;
+  return isLocalHostUrl(`http://${h.includes(':') ? `[${h}]` : h}`);
+}
+
+/**
+ * Go Dark as saved in a data folder, read fresh on every call. For processes that do
+ * not share this module's state, such as the built-in machine server.
+ * @param {string} dataDir
+ */
+export async function readGoDark(dataDir) {
+  if (!dataDir) return false;
+  try {
+    return JSON.parse(await readFile(path.join(dataDir, GO_DARK_FILE), 'utf8'))?.on === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Throw the standard refusal when Go Dark blocks this URL. */
 export function assertEgressAllowed(url) {
   if (!egressAllowed(url)) throw new EgressBlockedError(hostOf(url));
@@ -59,12 +86,8 @@ export function installEgressGuard() {
 
 /** @param {string} dataDir */
 export async function loadGoDark(dataDir) {
-  stateFile = path.join(dataDir, 'go-dark.json');
-  try {
-    goDark = JSON.parse(await readFile(stateFile, 'utf8'))?.on === true;
-  } catch {
-    goDark = false;
-  }
+  stateFile = path.join(dataDir, GO_DARK_FILE);
+  goDark = await readGoDark(dataDir);
   return goDark;
 }
 

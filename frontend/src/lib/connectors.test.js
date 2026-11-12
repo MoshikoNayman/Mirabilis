@@ -35,6 +35,13 @@ describe('normalizeConnector', () => {
     expect(c.headerKeys).toEqual(['Authorization']);
     expect(JSON.stringify(c)).not.toContain('secret');
   });
+
+  it('marks a connector built in only when the backend says true', () => {
+    expect(normalizeConnector(undefined).builtin).toBe(false);
+    expect(normalizeConnector({ builtin: 'true' }).builtin).toBe(false);
+    expect(normalizeConnector({ builtin: 1 }).builtin).toBe(false);
+    expect(normalizeConnector({ id: 'this-computer', builtin: true }).builtin).toBe(true);
+  });
 });
 
 describe('connectorStatus', () => {
@@ -69,6 +76,16 @@ describe('connectorKind', () => {
       expect(connectorKind(http(url)), url).toBe('Remote');
     }
   });
+
+  it('calls the connector that ships with Mirabilis Built in, whatever its transport', () => {
+    const builtin = normalizeConnector({
+      id: 'this-computer', name: 'This computer', transport: 'stdio', builtin: true, command: '', args: [], cwd: ''
+    });
+    expect(connectorKind(builtin)).toBe('Built in');
+    expect(connectorKind({ builtin: true, transport: 'http', url: 'https://mcp.example.com/mcp' })).toBe('Built in');
+    expect(connectorKind(normalizeConnector({ builtin: false, command: 'npx' }))).toBe('Local');
+    expect(connectorKind(normalizeConnector({ builtin: 'yes', transport: 'http', url: 'http://127.0.0.1:9000/mcp' }))).toBe('Local URL');
+  });
 });
 
 describe('subtitle and command line', () => {
@@ -79,6 +96,13 @@ describe('subtitle and command line', () => {
     expect(connectorSubtitle(remote)).toEqual({ kind: 'Remote', detail: 'mcp.example.com:8443' });
     const loopback = normalizeConnector({ transport: 'http', url: 'http://127.0.0.1:30030/mcp' });
     expect(connectorSubtitle(loopback)).toEqual({ kind: 'Local URL', detail: '127.0.0.1:30030' });
+  });
+
+  it('keeps the built-in command out of the subtitle', () => {
+    expect(connectorSubtitle(normalizeConnector({ builtin: true, command: '', args: [] }))).toEqual({ kind: 'Built in', detail: '' });
+    // Even if a backend sent the internal command, the row shows only the kind.
+    const leaky = normalizeConnector({ builtin: true, command: '/Applications/Mirabilis.app/Contents/MacOS/Mirabilis', args: ['machineServer.js'] });
+    expect(connectorSubtitle(leaky)).toEqual({ kind: 'Built in', detail: '' });
   });
 
   it('quotes arguments that need it', () => {

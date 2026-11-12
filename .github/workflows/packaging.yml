@@ -24,6 +24,8 @@ on:
       - 'frontend/package-lock.json'
       - 'backend/package.json'
       - 'backend/package-lock.json'
+      # The packaged app runs it by path; verify-build.js checks it ships.
+      - 'backend/src/mcp/machineServer.js'
       - '.github/workflows/packaging.yml'
   workflow_dispatch:
     inputs:

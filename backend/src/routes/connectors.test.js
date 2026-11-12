@@ -1,5 +1,6 @@
 // /api/connectors on a bare express app with a fake guard: auth, CRUD, per-tool
 // permissions, a user-initiated tool call, logs and restart against the stdio fake server.
+// The built-in This computer connector runs the fake server too.
 
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createConnectorManager } from '../mcp/connectors.js';
+import { createConnectorManager, THIS_COMPUTER_ID, thisComputerConnector } from '../mcp/connectors.js';
 import { createConnectorsRouter } from './connectors.js';
 
 const FAKE = fileURLToPath(new URL('../mcp/testdata/fakeMcpServer.mjs', import.meta.url));
@@ -24,7 +25,7 @@ let dataDir = '';
 
 before(async () => {
   dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-connectors-route-'));
-  manager = createConnectorManager({ dataDir });
+  manager = createConnectorManager({ dataDir, builtins: [thisComputerConnector({ dataDir, script: FAKE })] });
   /** @type {import('express').RequestHandler} */
   const guard = (req, res, next) => {
     if (req.headers.authorization === `Bearer ${TOKEN}`) next();
@@ -65,6 +66,9 @@ async function call(method, route = '', body, { auth = true, raw } = {}) {
   return { status: res.status, body: text ? JSON.parse(text) : null };
 }
 
+/** Ids in list order. */
+const listedIds = async () => (await call('GET')).body.connectors.map((c) => c.id);
+
 /** @param {number} pid */
 function gone(pid) {
   try {
@@ -86,7 +90,7 @@ test('every route answers 401 without the session token, and nothing is created'
   }
   const attempt = await call('POST', '', { name: 'Fake', command: process.execPath, args: [FAKE] }, { auth: false });
   assert.equal(attempt.status, 401);
-  assert.deepEqual((await call('GET')).body, { connectors: [] });
+  assert.deepEqual(await listedIds(), [THIS_COMPUTER_ID]);
 });
 
 test('the router will not mount without a guard', () => {
@@ -108,7 +112,7 @@ test('full lifecycle: create, list, permissions, tool calls, logs, restart, togg
   assert.equal(c.status.toolCount, 2);
   assert.deepEqual(c.tools.map((t) => [t.name, t.readOnly, t.permission]), [['echo', true, 'allow'], ['write_note', false, 'ask']]);
 
-  assert.deepEqual((await call('GET')).body.connectors.map((x) => x.id), [c.id]);
+  assert.deepEqual(await listedIds(), [THIS_COMPUTER_ID, c.id]);
   assert.equal((await call('GET', `/${c.id}`)).body.connector.name, 'Fake');
   const renamed = await call('PATCH', `/${c.id}`, { name: 'Fake Renamed' });
   assert.equal(renamed.status, 200);
@@ -168,7 +172,33 @@ test('full lifecycle: create, list, permissions, tool calls, logs, restart, togg
     assert.equal(res.status, 404, `${method} ${route}`);
     assert.equal(typeof res.body.error, 'string');
   }
-  assert.deepEqual((await call('GET')).body, { connectors: [] });
+  assert.deepEqual(await listedIds(), [THIS_COMPUTER_ID]);
+});
+
+test('This computer: listed first, switched off and on, never removed or reconfigured', async () => {
+  const listed = (await call('GET')).body.connectors;
+  assert.deepEqual(listed.map((c) => [c.id, c.name, c.builtin, c.command, c.cwd]), [[THIS_COMPUTER_ID, 'This computer', true, '', '']]);
+
+  const removed = await call('DELETE', `/${THIS_COMPUTER_ID}`);
+  assert.equal(removed.status, 400);
+  assert.deepEqual(removed.body, { error: 'Built-in connectors cannot be removed. Switch it off.' });
+  for (const patch of [{ name: 'Mine' }, { command: 'node', args: ['x'] }, { env: { A: '1' } }, { url: 'http://localhost/mcp' }, { enabled: false, cwd: '' }]) {
+    const res = await call('PATCH', `/${THIS_COMPUTER_ID}`, patch);
+    assert.equal(res.status, 400, JSON.stringify(patch));
+    assert.deepEqual(res.body, { error: 'Only on/off and tool permissions can change here.' });
+  }
+
+  const off = await call('PATCH', `/${THIS_COMPUTER_ID}`, { enabled: false });
+  assert.equal(off.status, 200);
+  assert.deepEqual([off.body.connector.enabled, off.body.connector.status.state], [false, 'off']);
+  const on = await call('PATCH', `/${THIS_COMPUTER_ID}`, { enabled: true, tools: { write_note: 'off' } });
+  assert.equal(on.status, 200);
+  assert.equal(on.body.connector.status.state, 'ready', on.body.connector.status.error);
+  assert.equal(on.body.connector.tools.find((t) => t.name === 'write_note').permission, 'off');
+  const refused = await call('POST', `/${THIS_COMPUTER_ID}/tools/write_note/call`, { args: { note: 'n' } });
+  assert.equal(refused.status, 400);
+  const echo = await call('POST', `/${THIS_COMPUTER_ID}/tools/echo/call`, { args: { text: 'here' } });
+  assert.deepEqual(echo.body, { result: { text: 'here', isError: false } });
 });
 
 test('bad input gets a 400 with a plain error', async () => {
@@ -180,7 +210,7 @@ test('bad input gets a 400 with a plain error', async () => {
   assert.equal(malformed.body.error, 'The request body is not valid JSON.');
   const notObject = await call('POST', '', [1, 2]);
   assert.equal(notObject.status, 400);
-  assert.deepEqual((await call('GET')).body, { connectors: [] });
+  assert.deepEqual(await listedIds(), [THIS_COMPUTER_ID]);
 });
 
 test('Junos from a folder: plain 400s until it has jmcp.py and devices.json, then a local connector', async () => {
@@ -201,7 +231,7 @@ test('Junos from a folder: plain 400s until it has jmcp.py and devices.json, the
     const noDevices = await add({ folder: dir, devices: 'lab.json' });
     assert.equal(noDevices.status, 400);
     assert.equal(noDevices.body.error, 'Devices file not found: lab.json');
-    assert.deepEqual((await call('GET')).body, { connectors: [] }, 'nothing saved on a 400');
+    assert.deepEqual(await listedIds(), [THIS_COMPUTER_ID], 'nothing saved on a 400');
 
     await fs.writeFile(path.join(dir, 'devices.json'), '{}');
     const res = await add({ folder: dir }, { enabled: false });

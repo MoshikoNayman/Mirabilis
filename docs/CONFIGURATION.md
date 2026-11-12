@@ -86,7 +86,7 @@ Go Dark blocks web search regardless of the key.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MIRABILIS_MCP_FS_ROOT` | (unset, no jail) | Operator jail. Confines the agent and MCP file tools, and where commands start, to one subtree, at every Access level including Bypass. It does not limit what a running shell command can reach. |
+| `MIRABILIS_MCP_FS_ROOT` | (unset, no jail) | Operator jail. Confines the agent and MCP file tools, This computer's `read_log` included, and where commands start, to one subtree, at every Access level including Bypass. It does not limit what a running shell command can reach. |
 | `MIRABILIS_AGENT_FANOUT_CONCURRENCY` | `2` | Sub-agents generating at once, maximum 8. A single local engine serves one request per model at a time, so more only holds more live contexts. Raise it for an engine that serves in parallel. |
 | `MIRABILIS_AGENT_MAX_CONCURRENT_RUNS` | `2` | Runs executing at once. Each has its own budget and, above Read only, can run its own commands. |
 | `MIRABILIS_MCP_TOKEN` | generated | Bearer token for `/mcp` and the privileged routes (agent runs, Access, connectors). Generated and saved to the data directory when unset. |
@@ -192,6 +192,22 @@ starts. A Junos entry looks like this, with `cwd` set to the server folder:
   "cwd": "~/junos-mcp-server", "preset": "junos"
 }
 ```
+
+The built-in This computer entry holds only its switch, its tool permissions
+and `toolInfo`, a cache of its tool list. The first start adds it, on:
+
+```json
+{
+  "id": "this-computer", "enabled": true,
+  "tools": { "kill_process": "ask", "system_overview": "allow" },
+  "toolInfo": { "kill_process": { "title": "...", "description": "...", "readOnly": false } }
+}
+```
+
+What it runs is set at every start, never read from the file:
+`backend/src/mcp/machineServer.js` on the backend's own runtime, from the home
+folder, with `ELECTRON_RUN_AS_NODE=1`, `MIRABILIS_DATA_DIR` set to the data
+folder (it reads `go-dark.json` there) and `MIRABILIS_MCP_FS_ROOT` when set.
 
 See [MCP.md](MCP.md).
 

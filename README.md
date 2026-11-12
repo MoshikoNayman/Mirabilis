@@ -113,7 +113,10 @@ file.
 
 Connectors add tools from MCP servers. Pick one from the catalog (Filesystem,
 Git, Fetch, Junos and more) or add any local command or remote URL, then set
-each tool to Allow, Ask or Off. See [docs/MCP.md](docs/MCP.md).
+each tool to Allow, Ask or Off. See [docs/MCP.md](docs/MCP.md). The built-in
+This computer connector holds the troubleshooting tools: processes, disks,
+logs, services, hardware and network checks. Switched off, its process stops
+and its tools leave agent runs.
 
 ## Features
 

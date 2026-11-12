@@ -22,7 +22,7 @@ import { ACCESS_LEVELS, lowerLevel, normalizeLevel } from './permissions.js';
 import { createRunStore } from './runStore.js';
 import { getFsRoot, safeResolvePath } from './sandbox.js';
 import { createSelfTools } from './selfTools.js';
-import { createSystemTools, scrub } from './systemTools.js';
+import { scrub } from './systemTools.js';
 import { createRunRules, createToolRegistry, pruneRunBackups } from './tools.js';
 
 /** Live runs, so a client that reconnects can still stop one or answer its approvals. */
@@ -485,8 +485,8 @@ export function createAgentRouter({
         })()
       });
 
-      const systemTools = createSystemTools({ workDir: projectDir || undefined });
       const selfTools = createSelfTools({ sourceRoot, dataDir: dataFolder, getStatus });
+      // The system tools arrive here too, from the built-in This computer connector.
       const connectorTools = () => {
         if (level === 'chat') return {};
         try { return connectors?.agentTools?.() || {}; } catch { return {}; }
@@ -500,7 +500,7 @@ export function createAgentRouter({
         runId: id,
         signal: abort.signal,
         gate,
-        extraTools: { ...systemTools, ...selfTools, ...connectorTools() },
+        extraTools: { ...selfTools, ...connectorTools() },
         audit: (kind, payload) => auditor.note(kind, payload)
       });
       const registry = buildRegistry();

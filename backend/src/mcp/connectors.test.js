@@ -1,5 +1,6 @@
 // Connector manager end to end: the stdio fake server, a fake streamable-HTTP server,
-// Go Dark, migration from mcp-servers.json, and secrets that never leave the manager.
+// Go Dark, migration from mcp-servers.json, secrets that never leave the manager, and
+// the built-in This computer connector (pointed at the fake server).
 
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,9 +8,12 @@ import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createConnectorManager, describeParameters, formatToolResult, GO_DARK_ERROR, slug, toolKey } from './connectors.js';
+import {
+  createConnectorManager, describeParameters, formatToolResult, GO_DARK_ERROR, slug, THIS_COMPUTER_ID,
+  thisComputerConnector, toolKey
+} from './connectors.js';
 import { buildCatalog } from './catalog.js';
 
 const FAKE = fileURLToPath(new URL('./testdata/fakeMcpServer.mjs', import.meta.url));
@@ -36,13 +40,34 @@ async function tempDir(prefix = 'mirabilis-connectors-') {
   return dir;
 }
 
-/** @param {any} [opts] */
+/** No built-ins unless a test asks for them, so the real machine server never starts here. @param {any} [opts] */
 async function newManager(opts = {}) {
   const dataDir = opts.dataDir || await tempDir();
-  const manager = createConnectorManager({ ...opts, dataDir });
+  const manager = createConnectorManager({ builtins: [], ...opts, dataDir });
   managers.push(manager);
   await manager.init();
   return { manager, dataDir };
+}
+
+/**
+ * A stand-in for machineServer.js: writes what it was started with to probe.json in
+ * MIRABILIS_DATA_DIR, then runs the fake server.
+ */
+async function envProbe() {
+  const file = path.join(await tempDir('mirabilis-probe-'), 'probe.mjs');
+  await fs.writeFile(file, [
+    "import fs from 'node:fs';",
+    "import path from 'node:path';",
+    'const seen = {',
+    '  electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,',
+    '  dataDir: process.env.MIRABILIS_DATA_DIR ?? null,',
+    '  cwd: process.cwd(),',
+    '  openAiKey: process.env.OPENAI_API_KEY ?? null',
+    '};',
+    "fs.writeFileSync(path.join(process.env.MIRABILIS_DATA_DIR, 'probe.json'), JSON.stringify(seen));",
+    `await import(${JSON.stringify(pathToFileURL(FAKE).href)});`
+  ].join('\n'));
+  return file;
 }
 
 /** @param {any} [extra] */
@@ -243,7 +268,7 @@ test('agentTools offers ready tools with prompt-ready parameters and drops tools
 
 test('settings and permissions survive a restart of the manager', async () => {
   const dataDir = await tempDir();
-  const first = createConnectorManager({ dataDir });
+  const first = createConnectorManager({ dataDir, builtins: [] });
   managers.push(first);
   await first.init();
   const c = await first.create(fakeStdio());
@@ -568,7 +593,7 @@ test('Junos from its folder: the venv python runs it, and it starts and stops wi
   // Stands in for the venv python: runs the fake server, whatever it is given.
   await fs.writeFile(path.join(dir, '.venv', 'bin', 'python'), `#!/bin/sh\nexec "${process.execPath}" "${FAKE}"\n`, { mode: 0o755 });
   const dataDir = await tempDir();
-  const first = createConnectorManager({ dataDir });
+  const first = createConnectorManager({ dataDir, builtins: [] });
   managers.push(first);
   await first.init();
   const c = await first.create({ preset: 'junos', fields: { folder: dir } });
@@ -598,6 +623,142 @@ test('a Junos connector saved before the folder field still runs as saved', asyn
   assert.ok(await waitFor(() => manager.get('old-junos')?.status.state === 'ready'), manager.get('old-junos')?.status.error || '');
   const c = manager.get('old-junos');
   assert.deepEqual([c.command, c.args, c.cwd, c.preset], [old.command, old.args, old.cwd, 'junos']);
+});
+
+// This computer
+
+/** @param {any} manager */
+const builtinReady = (manager) => waitFor(() => manager.get(THIS_COMPUTER_ID)?.status.state === 'ready');
+
+test('This computer runs machineServer.js on this runtime as Node, from home, with the operator jail when set', () => {
+  assert.deepEqual(thisComputerConnector({ dataDir: 'data', env: {} }).spawn(), {
+    command: process.execPath,
+    args: [fileURLToPath(new URL('./machineServer.js', import.meta.url))],
+    env: { ELECTRON_RUN_AS_NODE: '1', MIRABILIS_DATA_DIR: path.resolve('data') },
+    cwd: os.homedir()
+  });
+  const jailed = thisComputerConnector({ dataDir: 'data', env: { MIRABILIS_MCP_FS_ROOT: 'jail' } }).spawn();
+  assert.equal(jailed.env.MIRABILIS_MCP_FS_ROOT, path.resolve('jail'));
+});
+
+test('This computer: on by default and listed first, started as Node with the data folder, tools offered to agents', async () => {
+  const dataDir = await tempDir();
+  const file = path.join(dataDir, 'connectors.json');
+  // Saved before the built-in existed; it must come through exactly as it was.
+  const custom = {
+    id: 'c1', name: 'Saved', transport: 'stdio', command: process.execPath, args: [FAKE], env: { FAKE_MCP_SECRET: SECRET },
+    cwd: '', url: '', headers: {}, enabled: false, tools: { echo: 'off' }, toolInfo: {}, preset: null,
+    createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z'
+  };
+  await fs.writeFile(file, JSON.stringify({ version: 1, connectors: [custom] }));
+  const probe = await envProbe();
+  const { manager } = await newManager({
+    dataDir,
+    env: { ...process.env, OPENAI_API_KEY: 'sk-backend-secret-000000000000' },
+    builtins: [thisComputerConnector({ dataDir, script: probe })]
+  });
+  assert.deepEqual(manager.list().map((c) => [c.id, c.name, c.builtin, c.enabled]), [
+    [THIS_COMPUTER_ID, 'This computer', true, true],
+    ['c1', 'Saved', false, false]
+  ]);
+  assert.ok(await builtinReady(manager), manager.get(THIS_COMPUTER_ID).status.error || 'not ready');
+  const c = manager.get(THIS_COMPUTER_ID);
+  assert.deepEqual([c.transport, c.command, c.args, c.cwd, c.envKeys, c.hasSecrets, c.preset], ['stdio', '', [], '', [], false, null]);
+  assert.deepEqual(c.tools.map((t) => [t.name, t.permission]), [['echo', 'allow'], ['write_note', 'ask']]);
+
+  assert.ok(manager.logs(THIS_COMPUTER_ID).includes(`[mirabilis] Starting ${process.execPath} ${probe}`), 'run by this runtime');
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dataDir, 'probe.json'), 'utf8')), {
+    electronRunAsNode: '1',
+    dataDir,
+    cwd: await fs.realpath(os.homedir()),
+    openAiKey: null
+  });
+
+  const tools = manager.agentTools();
+  assert.deepEqual(Object.keys(tools).sort(), ['this_computer__echo', 'this_computer__write_note']);
+  assert.equal(tools.this_computer__echo.connectorId, THIS_COMPUTER_ID);
+  assert.equal(tools.this_computer__echo.description, 'Returns the text it is given. (connector: This computer)');
+  assert.deepEqual(await tools.this_computer__echo.execute({ text: 'from this computer' }), { text: 'from this computer' });
+
+  const stored = JSON.parse(await fs.readFile(file, 'utf8')).connectors;
+  assert.deepEqual(stored.map((r) => r.id), [THIS_COMPUTER_ID, 'c1']);
+  assert.deepEqual(Object.keys(stored[0]).sort(), ['enabled', 'id', 'toolInfo', 'tools'], 'only the switch and permissions are saved');
+  assert.deepEqual(stored[0].tools, { echo: 'allow', write_note: 'ask' });
+  assert.deepEqual(stored[1], custom);
+});
+
+test('This computer: a stale saved command is ignored, and switched off it stops and stays off', async () => {
+  const dataDir = await tempDir();
+  const file = path.join(dataDir, 'connectors.json');
+  // An older or edited file: only the switch and the permissions may count.
+  await fs.writeFile(file, JSON.stringify({ version: 1, connectors: [{
+    id: THIS_COMPUTER_ID, name: 'Renamed', transport: 'stdio', command: 'mirabilis-no-such-command-xyz', args: ['--stale'],
+    env: { STALE_KEY: 'stale-secret-value' }, cwd: path.join(dataDir, 'missing'), enabled: true, tools: { write_note: 'off' }
+  }] }));
+  const builtins = [thisComputerConnector({ dataDir, script: FAKE })];
+  const { manager } = await newManager({ dataDir, builtins });
+  assert.ok(await builtinReady(manager), manager.get(THIS_COMPUTER_ID).status.error || 'not ready');
+  const c = manager.get(THIS_COMPUTER_ID);
+  assert.deepEqual([c.name, c.command, c.args, c.cwd, c.envKeys], ['This computer', '', [], '', []]);
+  assert.ok(manager.logs(THIS_COMPUTER_ID).includes(`[mirabilis] Starting ${process.execPath} ${FAKE}`), manager.logs(THIS_COMPUTER_ID).join('\n'));
+  assert.equal(c.tools.find((t) => t.name === 'write_note').permission, 'off', 'saved permissions apply');
+  assert.deepEqual(Object.keys(manager.agentTools()), ['this_computer__echo']);
+  const saved = JSON.parse(await fs.readFile(file, 'utf8')).connectors;
+  assert.deepEqual(saved, [{
+    id: THIS_COMPUTER_ID,
+    enabled: true,
+    tools: { write_note: 'off', echo: 'allow' },
+    toolInfo: {
+      echo: { title: 'Echo', description: 'Returns the text it is given.', readOnly: true },
+      write_note: { title: 'write_note', description: 'Saves a note.', readOnly: false }
+    }
+  }], 'the next save drops the stale fields');
+
+  const pid = c.status.pid;
+  const off = await manager.update(THIS_COMPUTER_ID, { enabled: false });
+  assert.equal(off.status.state, 'off');
+  assert.ok(gone(pid), 'switching it off stops the program');
+  assert.deepEqual(manager.agentTools(), {});
+  await manager.shutdown();
+
+  const { manager: again } = await newManager({ dataDir, builtins });
+  assert.deepEqual(again.list().map((x) => [x.id, x.enabled, x.status.state]), [[THIS_COMPUTER_ID, false, 'off']]);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(again.get(THIS_COMPUTER_ID).status.pid, null, 'it does not start while off');
+  assert.equal(again.get(THIS_COMPUTER_ID).tools.length, 2, 'it still lists its tools');
+  const on = await again.update(THIS_COMPUTER_ID, { enabled: true });
+  assert.equal(on.status.state, 'ready', on.status.error);
+});
+
+test('This computer cannot be removed, and only its switch and tool permissions change', async () => {
+  const dataDir = await tempDir();
+  const def = thisComputerConnector({ dataDir, script: FAKE });
+  let spawns = 0;
+  const counted = { ...def, spawn: () => { spawns += 1; return def.spawn(); } };
+  const { manager } = await newManager({ dataDir, builtins: [counted] });
+  assert.ok(await builtinReady(manager), manager.get(THIS_COMPUTER_ID).status.error || 'not ready');
+  const created = JSON.parse(await fs.readFile(path.join(dataDir, 'connectors.json'), 'utf8')).connectors;
+  assert.deepEqual(created.map((r) => [r.id, r.enabled]), [[THIS_COMPUTER_ID, true]], 'a fresh data folder gets it, on');
+  await assert.rejects(manager.remove(THIS_COMPUTER_ID),
+    (err) => err.status === 400 && err.message === 'Built-in connectors cannot be removed. Switch it off.');
+  const patches = [
+    { name: 'Mine' }, { command: 'node' }, { args: ['x'] }, { env: { A: '1' } }, { cwd: os.homedir() },
+    { url: 'http://localhost/mcp' }, { headers: { A: 'b' } }, { transport: 'stdio' }, { enabled: false, name: 'This computer' }
+  ];
+  for (const patch of patches) {
+    await assert.rejects(manager.update(THIS_COMPUTER_ID, patch),
+      (err) => err.status === 400 && err.message === 'Only on/off and tool permissions can change here.', JSON.stringify(patch));
+  }
+  const changed = await manager.update(THIS_COMPUTER_ID, { tools: { echo: 'ask' } });
+  assert.equal(changed.tools.find((t) => t.name === 'echo').permission, 'ask');
+  assert.equal(changed.status.state, 'ready', 'a refused change stopped nothing');
+  assert.equal((await manager.restart(THIS_COMPUTER_ID)).status.state, 'ready');
+  assert.equal(spawns, 2, 'what it runs is worked out at every start');
+
+  // Its name is taken, so its agent tool names stay its own.
+  const twin = await manager.create(fakeStdio({ name: 'This computer', enabled: false }));
+  assert.deepEqual([twin.name, twin.builtin], ['This computer 2', false]);
+  assert.deepEqual(manager.list().map((x) => x.id), [THIS_COMPUTER_ID, twin.id], 'the built-in stays first');
 });
 
 test('slug and toolKey make safe, bounded agent tool names', () => {

@@ -4,7 +4,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { createSystemTools, tailTextFile, formatDuration, scrub, COMMAND_TIMEOUT_MS } from './systemTools.js';
+import {
+  createSystemTools, createProbeRunner, execRunner, parseDfVolumes, tailTextFile, formatDuration, scrub, COMMAND_TIMEOUT_MS
+} from './systemTools.js';
 
 // Fixtures: real command output, trimmed.
 
@@ -625,6 +627,45 @@ test('scrub removes the credential shapes plain redact misses, and leaves counts
   for (const [input, expected] of cases) assert.equal(scrub(input), expected, input);
 });
 
+test('createProbeRunner never rejects, passes buffer and tail options through and keeps partial output', async () => {
+  const calls = [];
+  const run = createProbeRunner({
+    platform: 'linux',
+    runCommand: async (command, _args, opts) => {
+      calls.push(opts);
+      if (command === 'tail') return { stdout: 'newest\n', stderr: '', dropped: 4096 };
+      if (command === 'slow') throw Object.assign(new Error('slow timed out after 1500ms'), { code: null, stdout: 'partial' });
+      if (command === 'bad') throw Object.assign(new Error('Command failed: bad'), { code: 2, exitCode: 2, stdout: 'some', stderr: 'bad: no such thing\nmore' });
+      throw Object.assign(new Error('spawn x ENOENT'), { code: 'ENOENT' });
+    }
+  });
+  assert.deepEqual(await run('tail', [], undefined, { tailBytes: 1024, maxBuffer: 2048, timeoutMs: 5000 }), {
+    ok: true, stdout: 'newest\n', stderr: '', error: '', missing: false, timedOut: false, dropped: 4096
+  });
+  assert.deepEqual([calls[0].tailBytes, calls[0].maxBuffer, calls[0].timeoutMs, calls[0].env.LC_ALL], [1024, 2048, 5000, 'C']);
+  await run('x', []);
+  assert.equal('tailBytes' in calls[1], false, 'options not asked for are not sent');
+  const slow = await run('slow', [], undefined, { timeoutMs: 1500 });
+  assert.deepEqual([slow.ok, slow.timedOut, slow.stdout, slow.error], [false, true, 'partial', 'slow did not finish within 1.5s']);
+  const bad = await run('bad', []);
+  assert.deepEqual([bad.ok, bad.missing, bad.stdout, bad.error], [false, false, 'some', 'bad failed: bad: no such thing']);
+  const missing = await run('x', []);
+  assert.deepEqual([missing.missing, missing.error, missing.dropped], [true, 'x is not available on this system', 0]);
+});
+
+test('execRunner closes stdin at once, so a command that reads it is not left waiting', async () => {
+  const started = Date.now();
+  const res = await execRunner(process.execPath, ['-e', "process.stdin.resume(); process.stdin.on('end', () => console.log('stdin closed'))"], { timeoutMs: 5000 });
+  assert.equal(res.stdout.trim(), 'stdin closed');
+  assert.ok(Date.now() - started < 4000);
+});
+
+test('parseDfVolumes groups APFS containers on macOS and keeps real mounts elsewhere', () => {
+  assert.deepEqual(parseDfVolumes(DARWIN['df -kP'], 'darwin').map((d) => d.mount), ['/', '/Volumes/Backup Drive']);
+  assert.deepEqual(parseDfVolumes(LINUX['df -kP'], 'linux').map((d) => d.mount), ['/', '/data', '/boot/efi']);
+  assert.deepEqual(parseDfVolumes('', 'linux'), []);
+});
+
 test('formatDuration reads like a person wrote it', () => {
   assert.equal(formatDuration(42), '0m 42s');
   assert.equal(formatDuration(3_725), '1h 2m');
@@ -642,8 +683,6 @@ test('tools are read-only with descriptions and parameter docs', () => {
     assert.equal(typeof tool.execute, 'function', name);
     for (const doc of Object.values(tool.parameters)) assert.equal(typeof doc, 'string', name);
   }
-  assert.match(tools.read_log.description, /log show/, 'macOS points at the unified log');
-  assert.match(createSystemTools({ platform: 'linux' }).read_log.description, /journalctl/);
 });
 
 // The real thing, on the machine running the tests. Shape and size only.

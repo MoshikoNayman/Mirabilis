@@ -15,7 +15,8 @@ file says where to look.
 - A chat message streams back over Server-Sent Events and is saved to `chats.json` in the data folder.
 - An agent run is a job with a work budget. It plans, calls tools, checks its result and stops when
   the budget says so. Access (Chat only, Read only, Ask first, Bypass) decides what tools may do.
-- Connectors are MCP servers Mirabilis uses as a client. Mirabilis is also an MCP server at `/mcp`.
+- Connectors are MCP servers Mirabilis uses as a client; the built-in This computer connector
+  holds the system tools. Mirabilis is also an MCP server at `/mcp`.
 - Go Dark keeps the backend's own requests on this machine or the local network. Commands run in
   Bypass and local connectors are not filtered (see Go Dark).
 
@@ -44,7 +45,8 @@ Backend (`backend/src`, Node ESM):
 - `backend/src/providerScope.js`: whether a provider sends data off the device. Go Dark uses it.
 - `backend/src/egress.js`: Go Dark. `backend/src/security.js`: host guard, tokens, URL checks.
 - `backend/src/agent/`: agent runs. Loop, budget, tools, Access, approvals, audit log.
-- `backend/src/mcp/`: `mcpServer.js` (Mirabilis as a server) and the connector client.
+- `backend/src/mcp/`: `mcpServer.js` (Mirabilis as a server), the connector client, and
+  `machineServer.js` with `machineTools.js` (the built-in This computer server).
 - `backend/src/storage/`: JSON stores. `backend/src/routes/`: routers mounted by `server.js`.
 - Features beside chat: `backend/src/recall.js` (search past chats with local embeddings),
   `backend/src/configVault.js` (cited answers over a folder of config files), IntelLedger
@@ -98,10 +100,10 @@ streams back as SSE `progress` events, then `result`.
   by a validation pass; a failed check triggers a repair. When the budget runs out, a wrap-up
   reports what was established.
 - Tools (`backend/src/agent/tools.js`): `list_dir`, `read_file`, `search_files`, `write_file`,
-  `edit_file`, `run_command`, plus the system tools (`backend/src/agent/systemTools.js`:
-  `system_overview`, `list_processes`, `network_overview`, `read_log`), the self tools
-  (`backend/src/agent/selfTools.js`: `mirabilis_status`, `mirabilis_logs`,
-  `mirabilis_architecture`) and connector tools. Each has a kind: read, write, command, connector.
+  `edit_file`, `run_command`, plus the self tools (`backend/src/agent/selfTools.js`:
+  `mirabilis_status`, `mirabilis_logs`, `mirabilis_architecture`) and connector tools. The system
+  tools are connector tools of This computer (`this_computer__system_overview` and the rest, see
+  Connectors), so its switch turns them off. Each has a kind: read, write, command, connector.
 - Every call passes `decide()` in `backend/src/agent/permissions.js` first: allow, ask or deny.
 - Ask: `backend/src/agent/approvals.js` emits `approval-required`; the approval card above the
   composer posts allow, always or deny to `/api/agent/runs/:id/approvals/:approvalId`. Waiting
@@ -139,7 +141,8 @@ One setting, saved by the backend in `access.json` in the data folder and served
   refuses any host that is not this machine or a private LAN address (`isLocalHostUrl`).
 - Chat and agent routes refuse cloud providers up front with a plain 403.
 - Remote HTTP connectors stop with "Blocked by Go Dark". Local (stdio) connectors keep running,
-  and their own network use is up to them.
+  and their own network use is up to them. This computer reads `go-dark.json` at each call:
+  `ping_host`, `dns_lookup` and `check_port` refuse targets outside this machine and the LAN.
 - With Go Dark on, a command that uses the network (`ping`, `curl`, `git fetch`) is denied in
   Read only and asked about in Ask first, with no "always" offered. In Bypass commands are not
   filtered.
@@ -159,6 +162,12 @@ One setting, saved by the backend in `access.json` in the data folder and served
   time, Junos and more) and whether `npx`, `uvx` or `python3` is installed.
 - Each tool has a permission: Allow, Ask or Off. A tool marked read-only by its server starts at
   Allow, the rest at Ask. Agents see a tool as `<connector>__<tool>`.
+- This computer (id `this-computer`): built in, listed first, on by default, never removed. Each
+  start runs `backend/src/mcp/machineServer.js` with `process.execPath`, `ELECTRON_RUN_AS_NODE=1`
+  and `MIRABILIS_DATA_DIR`; `connectors.json` keeps only its switch and permissions. Its tools
+  (`backend/src/mcp/machineTools.js`, listed in `docs/MCP.md`) reuse
+  `backend/src/agent/systemTools.js` and add disk, log, service, startup, hardware and network
+  checks, plus `kill_process`, the one tool that is not read-only.
 - Routes: `backend/src/routes/connectors.js` at `/api/connectors`. The Settings pane is
   `frontend/src/components/settings/ConnectorsPane.jsx`.
 
@@ -188,7 +197,7 @@ sets it to Electron's user data folder (on macOS `~/Library/Application Support/
 |---|---|
 | `chats.json` (+ `.bak`) | Every saved chat. Off-the-Record chats live in memory only. |
 | `access.json` | Access level and always-allowed commands. |
-| `connectors.json` | Connectors and per-tool permissions. |
+| `connectors.json` | Connectors and per-tool permissions, including the This computer switch. |
 | `go-dark.json` | Go Dark on or off. |
 | `provider-keys.json` | Cloud provider API keys. |
 | `mcp-token` | The local session and MCP token. |
@@ -226,8 +235,8 @@ Logs go to `backend.log`, `frontend.log` and `image-service.log` in the system t
 
 ## Where to look when something is wrong
 
-- Reply failed or slow: `mirabilis_logs` (backend), then `system_overview` for memory pressure and
-  CPU, and `mirabilis_status` for Ollama and the installed models.
+- Reply failed or slow: `mirabilis_logs` (backend), then `this_computer__system_overview` for
+  memory pressure and CPU, and `mirabilis_status` for Ollama and the installed models.
 - A connector fails: its status and stderr lines in Settings, Connectors, or `GET /api/connectors/:id/logs`.
 - What did a run do: `agent-runs/<runId>.jsonl` in the data folder.
 - How a feature works: find its route in `backend/src/server.js` or `backend/src/routes/`, then read

@@ -41,6 +41,7 @@ const SLOW_MS = 45000;
  * @property {string} url
  * @property {boolean} enabled
  * @property {string|null} preset
+ * @property {boolean} builtin      ships with Mirabilis; it can be switched off, not removed
  * @property {boolean} hasSecrets
  * @property {string[]} envKeys     names only; values never leave the backend
  * @property {string[]} headerKeys
@@ -126,6 +127,7 @@ export function normalizeConnector(raw) {
     url: str(c.url),
     enabled,
     preset: typeof c.preset === 'string' && c.preset ? c.preset : null,
+    builtin: c.builtin === true,
     hasSecrets: c.hasSecrets === true,
     envKeys: keysOf(c.envKeys ?? c.env),
     headerKeys: keysOf(c.headerKeys ?? c.headers),
@@ -285,12 +287,13 @@ export function commandLine(command, args = []) {
 const LOOPBACK_HOSTS = ['127.0.0.1', 'localhost', '::1', '[::1]'];
 
 /**
- * Kind label: Local is a command Mirabilis starts, Local URL a server on this
- * computer, Remote any other URL.
- * @param {{ transport?: string, url?: string }} c
- * @returns {'Local'|'Local URL'|'Remote'}
+ * Kind label: Built in ships with Mirabilis, Local is a command Mirabilis
+ * starts, Local URL a server on this computer, Remote any other URL.
+ * @param {{ builtin?: boolean, transport?: string, url?: string }} c
+ * @returns {'Built in'|'Local'|'Local URL'|'Remote'}
  */
 export function connectorKind(c) {
+  if (c?.builtin === true) return 'Built in';
   if (c?.transport !== 'http') return 'Local';
   let host = '';
   try { host = new URL(String(c.url || '')).hostname.toLowerCase(); } catch { /* not a URL */ }
@@ -298,12 +301,14 @@ export function connectorKind(c) {
 }
 
 /**
- * Row subtitle: what kind of connector and where it runs.
+ * Row subtitle: what kind of connector and where it runs. The built-in's
+ * command is internal, so it has no detail.
  * @param {Connector} c
  * @returns {{ kind: string, detail: string }}
  */
 export function connectorSubtitle(c) {
   const kind = connectorKind(c);
+  if (c.builtin) return { kind, detail: '' };
   if (c.transport === 'http') {
     let host = c.url;
     try { host = new URL(c.url).host || c.url; } catch { /* keep the raw text */ }

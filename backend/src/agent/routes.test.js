@@ -302,7 +302,8 @@ test('Access and Connectors refuse a caller without the session token', async ()
   const access = await (await fetch(`${baseUrl}/api/access`, { headers: authJson() })).json();
   assert.equal(access.level, 'chat', 'the default is Chat only');
   const connectors = await (await fetch(`${baseUrl}/api/connectors`, { headers: authJson() })).json();
-  assert.deepEqual(connectors.connectors, []);
+  assert.deepEqual(connectors.connectors.map((c) => [c.id, c.name, c.builtin, c.enabled]), [['this-computer', 'This computer', true, true]],
+    'only the built-in This computer connector, on by default');
 });
 
 test('Chat only with a single-shot effort is sent back to the chat route', async () => {
@@ -337,6 +338,16 @@ test('a request can lower the saved level but never raise it', async () => {
 
 test('a single-shot effort with tools on runs the short assist loop, told where it is', async () => {
   await setAccess({ level: 'read' });
+  // The system tools come from the built-in This computer connector, which starts with the backend.
+  let machine = null;
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    const { connectors } = await (await fetch(`${baseUrl}/api/connectors`, { headers: authJson() })).json();
+    machine = connectors.find((c) => c.id === 'this-computer');
+    if (machine?.status?.state !== 'starting' || Date.now() > deadline) break;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  assert.equal(machine?.status?.state, 'ready', machine?.status?.error || 'This computer did not start');
   seenPrompts.length = 0;
   script = () => '{"action":"finish","summary":"assisted"}';
   const { frames } = await runStream({ goal: 'what is using my CPU?', effort: 'fast', provider: 'ollama', fsRoot: projDir });
@@ -357,8 +368,13 @@ test('a single-shot effort with tools on runs the short assist loop, told where 
   assert.ok(system.includes(`Project folder: ${projDir}.`), system);
   assert.match(system, /You cannot change anything; when a fix needs a change, give the exact command or edit/);
   assert.match(system, /Effort: fast\./, 'the chosen effort\'s style travels with the assist profile');
-  for (const tool of ['system_overview', 'list_processes', 'network_overview', 'read_log', 'mirabilis_status', 'mirabilis_logs', 'mirabilis_architecture', 'run_command']) {
+  for (const tool of ['mirabilis_status', 'mirabilis_logs', 'mirabilis_architecture', 'run_command',
+    'this_computer__system_overview', 'this_computer__list_processes', 'this_computer__network_overview', 'this_computer__read_log']) {
     assert.ok(system.includes(`- ${tool}:`), `${tool} should be offered`);
+  }
+  // No native copies of the system tools, and Read only leaves out the one that changes things.
+  for (const tool of ['system_overview', 'list_processes', 'network_overview', 'read_log', 'this_computer__kill_process']) {
+    assert.ok(!system.includes(`- ${tool}:`), `${tool} should not be offered`);
   }
   script = null;
   await setAccess({ level: 'chat' });

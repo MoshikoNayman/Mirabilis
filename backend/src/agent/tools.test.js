@@ -542,6 +542,17 @@ test('connector tools: Off is never offered; Read only offers only the read-only
   assert.deepEqual(calls.map((c) => c.mcpTool), ['read', 'write']);
 });
 
+test('a connector tool called without its prefix resolves when the match is unique', async () => {
+  const calls = [];
+  const r = createToolRegistry({ level: 'read', extraTools: fakeConnectorTools(calls) });
+  assert.equal((await r.dispatch('read', { path: 'x' })).ok, true);
+  assert.deepEqual(calls.map((c) => c.mcpTool), ['read']);
+  // A hidden tool stays hidden under its short name.
+  const denied = await r.dispatch('wipe', {});
+  assert.equal(denied.ok, false);
+  assert.match(denied.error, /Unknown tool "wipe"/);
+});
+
 test('connector tools in Ask first: Allow runs, Ask asks, Always saves the permission', async () => {
   const calls = [];
   const persisted = [];
@@ -650,11 +661,11 @@ test('the blocklist is shared, so both callers enforce the same rules', () => {
 test('the prompt describes the offered tools, and says when a tool takes no arguments', () => {
   const r = createToolRegistry({
     level: 'read',
-    extraTools: { system_overview: { kind: 'read', description: 'Snapshot.', parameters: {}, execute: async () => ({}) } }
+    extraTools: { mirabilis_status: { kind: 'read', description: 'Snapshot.', parameters: {}, execute: async () => ({}) } }
   });
   const text = r.describeForPrompt();
   assert.match(text, /read_file/);
-  assert.match(text, /- system_overview: Snapshot\.\n {6}\(no arguments\)/);
+  assert.match(text, /- mirabilis_status: Snapshot\.\n {6}\(no arguments\)/);
 });
 
 test('extra tools cannot replace a built-in', async () => {

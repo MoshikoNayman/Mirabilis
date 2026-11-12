@@ -80,6 +80,32 @@ const checks = [
     hint: 'Add docs to build.extraResources in desktop/package.json, copy docs/ in build.sh and build.bat, and keep docs/ARCHITECTURE.md.'
   },
   {
+    // The built-in This computer connector runs this file from resources/backend. The
+    // backend ships whole, so a filter or a staging exclude that drops it breaks only
+    // the packaged app.
+    name: 'Machine MCP server is packaged',
+    ok: (() => {
+      try {
+        const extra = require(path.join(DESKTOP_DIR, 'package.json')).build.extraResources || [];
+        const entry = extra.find((r) => (typeof r === 'string' ? r : r.from) === 'backend');
+        const filter = entry && typeof entry === 'object' && entry.filter ? [].concat(entry.filter) : ['**/*'];
+        const listed = Boolean(entry) && filter.includes('**/*') && filter.every((f) => !f.startsWith('!') || f.includes('node_modules'));
+        // Staging may leave out node_modules and .git, nothing else.
+        const onlyDeps = (names) => names.every((n) => n === 'node_modules' || n === '.git');
+        const sh = readText(path.join(DESKTOP_DIR, 'build.sh')).replace(/\r\n/g, '\n').replace(/\\\n/g, ' ');
+        const rsync = sh.split('\n').find((l) => l.includes('rsync -a "$MIRABILIS/backend/"')) || '';
+        const robocopy = readText(path.join(DESKTOP_DIR, 'build.bat')).split(/\r?\n/)
+          .find((l) => l.includes('robocopy "%MIRABILIS%\\backend"')) || '';
+        const staged = rsync !== '' && robocopy !== ''
+          && onlyDeps([...rsync.matchAll(/--exclude[ =](\S+)/g)].map((m) => m[1]))
+          && onlyDeps(((/\/XD\s+([^/]*)/i.exec(robocopy) || [])[1] || '').split(/\s+/).filter(Boolean))
+          && !/\/XF\b/i.test(robocopy);
+        return listed && staged && exists(path.join(ROOT_DIR, 'backend', 'src', 'mcp', 'machineServer.js'));
+      } catch { return false; }
+    })(),
+    hint: 'Keep backend/src/mcp/machineServer.js, ship backend whole in build.extraResources, and stage all of backend/ but node_modules and .git in build.sh and build.bat.'
+  },
+  {
     name: 'Windows icon',
     ok: exists(path.join(DESKTOP_DIR, 'icons', 'Mirabilis.ico')),
     hint: 'desktop/icons/Mirabilis.ico is missing.'
