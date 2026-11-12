@@ -2,6 +2,36 @@
 
 Versions use Junos-style tags. Newest first.
 
+## [26.4R1-S2] - 2026-11-12
+
+- This computer: built-in MCP server for Mac, Windows and Linux, listed first
+  in Connectors. 13 tools: overview, processes, network, logs, disk, services,
+  startup items, hardware, ping, DNS, port check, and stop a process (asks
+  first). On by default; switching it off stops the process.
+- Network tools honor Go Dark; Mirabilis refuses to stop itself.
+- The disk check on a Mac home skips the folders macOS asks about.
+- Settings > Models, Installed: size, quantization, context, capabilities,
+  loaded state, free disk, and the Ollama version with its update command.
+- Update checks compare each model's digest with the registry (6 h cache,
+  or on demand); Update all.
+- Settings > Models, Discover: live search of the Ollama library with
+  capability filters, Popular or Newest, and every tag with its size, context
+  and a fit verdict for this machine.
+- Downloads show bytes, speed and time left; an interrupted one resumes on
+  retry. Go Dark stops a running download.
+- The picker's Manage models row replaces the Add field and one-click delete.
+- Catalog refresh: 34 current picks, 23 retired. A dated catalog on main
+  replaces the bundled one, so retired picks leave without a release.
+- Auto, the router lanes and the uncensored pick read the catalog groups and
+  each model's capabilities instead of hand-kept name lists.
+- Cloud fallbacks: gpt-6-luna, grok-4.3, gpt-oss on Groq and Cerebras,
+  openrouter/free, gemini-3.5-flash-lite, claude-haiku-5-5. Cost table updated.
+- Claude 5 and later: no temperature, top_p, top_k or assistant prefill.
+  GPT-5 and later on OpenAI: max_completion_tokens with room for reasoning.
+- Fixed: the MCP chat tool failed when called without a model.
+- Fixed: a stalled cloud host could hang the model picker.
+- The weekly catalog check also guards the ollama.com page parser.
+
 ## [26.4R1-S1] - 2026-11-11
 
 - Autonomous runs (High effort, 1 hour, 5 hours): plan, act, validate, repair
