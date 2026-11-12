@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-Version 26.4R1-S2. Author: Moshiko Nayman.
+Version 26.4R1-S3. Author: Moshiko Nayman.
 
 Mirabilis is a local-first AI chat app. It runs a model on your own machine
 through Ollama or another local engine, or talks to a cloud provider with your

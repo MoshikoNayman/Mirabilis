@@ -2,6 +2,21 @@
 
 Versions use Junos-style tags. Newest first.
 
+## [26.4R1-S3] - 2026-11-12
+
+- Security: Electron 44.11.2 (was 44.2.0). Fixes seven Electron advisories,
+  blocks the compromised eMudhra certificates, and brings the Chromium, V8 and
+  Node security patches since 44.2.0.
+- Security: the Linux AppImage no longer searches its launch folder for
+  libraries (electron-builder 26.18.1, GHSA-7g7r-gx96-252g).
+- Security: images in replies load only from this machine; remote ones show
+  as links, so a reply cannot send chat data out, even under Go Dark.
+- Windows and Linux updates install again. Installer names had a space, which
+  GitHub turned into a dot, so every update download was a 404.
+- electron-updater 6.8.12: credentials stay on the same origin across redirects.
+- CI gates Electron and the installer builder on advisories; each release
+  checks that every update feed file downloads.
+
 ## [26.4R1-S2] - 2026-11-12
 
 - This computer: built-in MCP server for Mac, Windows and Linux, listed first
