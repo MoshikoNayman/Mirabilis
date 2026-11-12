@@ -2,7 +2,7 @@
 
 Versions use Junos-style tags. Newest first.
 
-## [Unreleased]
+## [26.4R1-S1] - 2026-11-11
 
 - Autonomous runs (High effort, 1 hour, 5 hours): plan, act, validate, repair
   under a hard budget enforced in code. Answer styles stay single-shot.
@@ -22,16 +22,21 @@ Versions use Junos-style tags. Newest first.
   Replaces the old MCP panel; `mcp-servers.json` entries are imported once.
 - Settings sheet (Cmd+,) replaces the Options menu: Access, Connectors,
   Chat tools, Voice, Remote Control, Labs.
+- Local MCP servers start and stop with Mirabilis; no separate script.
+  The Junos preset finds `~/junos-mcp-server` and runs it with its own venv.
+- On/off switch for Mirabilis's own MCP server (`mcp-endpoint.json`).
+- Connectors are labeled Local, Local URL or Remote.
 - Desktop quits gracefully, so connector processes stop with the app.
 - Run log redaction covers bearer tokens, `*_token` keys and URL passwords.
-- Token count under the composer opens the context breakdown; header dial removed.
+- Token count under the composer opens the context breakdown.
 - UI copy trimmed across menus, Settings, sheets and IntelLedger.
 - Sub-agents share the parent budget, two at a time by default.
 - `POST /api/agent/runs` streams progress; stop kills the process group.
-- Run panel with tool calls and budget meters; context usage ring.
+- Run panel with tool calls and budget meters.
 - Fixed: command blocklist gaps (`rm -rf $HOME`, `--no-preserve-root`).
 - Fixed: path jail checks real paths, so symlinks cannot escape the root.
 - `search_files` is case-insensitive by default.
+- CI and release builds on macos-15; GitHub Actions on Node 24.
 
 ## [26.3R1-S1] - 2026-07-19
 
