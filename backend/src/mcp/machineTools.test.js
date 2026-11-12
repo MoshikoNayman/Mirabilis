@@ -662,16 +662,19 @@ test('disk_usage on a Mac home names the folders macOS asks about instead of rea
   await fs.writeFile(path.join(dir, 'Library', 'Containers', 'app', 'data.bin'), Buffer.alloc(3_000_000, 1));
   await fs.writeFile(path.join(dir, 'Library', 'Keep', 'cache.bin'), Buffer.alloc(1_000_000, 1));
   const calls = [];
-  const m = createMachineTools({ platform: 'darwin', runCommand: hybridRunner({ 'df -kP': DARWIN_DF }, calls), host: { homedir: () => dir } });
+  // -I is BSD du; GNU du on a Linux test host has no such flag, so this call is stubbed.
+  const libraryDu = `du -s -k -x -I Containers -I Group Containers -I Mobile Documents ${path.join(dir, 'Library')}`;
+  const table = { 'df -kP': DARWIN_DF, [libraryDu]: `980\t${path.join(dir, 'Library')}\n` };
+  const m = createMachineTools({ platform: 'darwin', runCommand: hybridRunner(table, calls), host: { homedir: () => dir } });
   const out = json(await m.call('disk_usage', {}));
   assert.deepEqual(out.notMeasured, ['Desktop', 'Documents']);
   assert.equal(out.partial, true);
   assert.ok(out.notes.some((n) => n === 'macOS asks before reading Desktop, Documents; pass one as the path to measure it.'), JSON.stringify(out.notes));
   const du = calls.filter((c) => c.key.startsWith('du ')).map((c) => c.key);
   assert.ok(!du.some((k) => k.endsWith(path.join(dir, 'Desktop')) || k.endsWith(path.join(dir, 'Documents'))), 'the protected folders are never opened');
-  assert.ok(du.includes(`du -s -k -x -I Containers -I Group Containers -I Mobile Documents ${path.join(dir, 'Library')}`), du.join('\n'));
+  assert.ok(du.includes(libraryDu), du.join('\n'));
   const library = out.entries.find((e) => e.name === 'Library');
-  assert.match(library.size, /^over (1(\.\d)? MB|\d+ KB)$/, 'other apps\' data is left out');
+  assert.equal(library.size, 'over 1 MB', 'other apps\' data is left out');
   // Named directly, a protected folder is measured.
   const docs = json(await m.call('disk_usage', { path: '~/Documents' }));
   assert.deepEqual(docs.entries.map((e) => e.name), ['doc.bin']);
