@@ -11,7 +11,7 @@
   },
   "build": {
     "productName": "Mirabilis AI",
-    "artifactName": "Mirabilis AI-${version}-${arch}.${ext}",
+    "artifactName": "Mirabilis-AI-${version}-${arch}.${ext}",
     "appId": "com.mirabilis.ai",
     "asar": true,
     "files": [
@@ -26,6 +26,13 @@
       {
         "from": "backend",
         "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "backend/node_modules",
+        "to": "backend/node_modules",
         "filter": [
           "**/*"
         ]

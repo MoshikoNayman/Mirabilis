@@ -46,7 +46,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json
@@ -103,7 +103,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json
@@ -154,7 +154,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json
@@ -185,3 +185,27 @@ jobs:
             desktop/dist/*.AppImage
             desktop/dist/latest*.yml
             desktop/dist/SHA256SUMS-linux.txt
+
+  # End to end: an installed app downloads exactly the names in these feeds, so
+  # each must resolve on the published release. A space in the asset names once
+  # made every update a 404 while each build looked fine.
+  feeds:
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Every file the update feeds name downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          dir="$(mktemp -d)"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'latest*.yml' --dir "$dir"
+          status=0
+          for feed in "$dir"/latest*.yml; do
+            for name in $(sed -nE 's/^[[:space:]]*-?[[:space:]]*(url|path):[[:space:]]*//p' "$feed" | tr -d "'\"" | sort -u); do
+              code="$(curl -s -o /dev/null -I -w '%{http_code}' "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$name")"
+              echo "$code $(basename "$feed") $name"
+              case "$code" in 200|302) ;; *) status=1 ;; esac
+            done
+          done
+          exit $status

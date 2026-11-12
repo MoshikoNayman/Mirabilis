@@ -106,6 +106,30 @@ const checks = [
     hint: 'Keep backend/src/mcp/machineServer.js, ship backend whole in build.extraResources, and stage all of backend/ but node_modules and .git in build.sh and build.bat.'
   },
   {
+    // electron-builder 26 skips a node_modules folder at the top of an
+    // extraResources source, so the backend's dependencies need their own entry.
+    name: 'Backend dependencies are packaged',
+    ok: (() => {
+      try {
+        const extra = require(path.join(DESKTOP_DIR, 'package.json')).build.extraResources || [];
+        return extra.some((r) => r && typeof r === 'object' && r.from === 'backend/node_modules' && r.to === 'backend/node_modules');
+      } catch { return false; }
+    })(),
+    hint: 'Add { "from": "backend/node_modules", "to": "backend/node_modules" } to build.extraResources in desktop/package.json.'
+  },
+  {
+    // The feeds name the file with dashes and GitHub turns a space into a dot,
+    // so a space in the name makes every update download a 404.
+    name: 'Installer names have no spaces',
+    ok: (() => {
+      try {
+        const name = require(path.join(DESKTOP_DIR, 'package.json')).build.artifactName;
+        return typeof name === 'string' && !/\s/.test(name);
+      } catch { return false; }
+    })(),
+    hint: 'Remove the spaces from build.artifactName in desktop/package.json.'
+  },
+  {
     name: 'Windows icon',
     ok: exists(path.join(DESKTOP_DIR, 'icons', 'Mirabilis.ico')),
     hint: 'desktop/icons/Mirabilis.ico is missing.'

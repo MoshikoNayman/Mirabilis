@@ -11,9 +11,9 @@ From the [latest release](https://github.com/MoshikoNayman/Mirabilis/releases/la
 
 | Platform | Asset |
 |---|---|
-| macOS, Apple Silicon | `Mirabilis.AI-<version>-arm64.dmg` |
-| Windows x64 | `Mirabilis.AI-<version>-x64.exe` (NSIS, choose install folder, desktop shortcut) |
-| Linux x64 | `Mirabilis.AI-<version>-x86_64.AppImage` |
+| macOS, Apple Silicon | `Mirabilis-AI-<version>-arm64.dmg` |
+| Windows x64 | `Mirabilis-AI-<version>-x64.exe` (NSIS, choose install folder, desktop shortcut) |
+| Linux x64 | `Mirabilis-AI-<version>-x86_64.AppImage` |
 
 Check the download against the release's checksum file:
 
@@ -89,9 +89,15 @@ Settings are in `update-settings.json` in the app data folder, mode `0600`:
   if they are missing.
 - macOS releases need both the `.dmg` (manual install) and the `.zip` (the only
   format Squirrel.Mac updates from).
-- electron-builder is pinned to 25.1.8. Version 26 does not copy `node_modules`
-  out of `extraResources`, and the packaged backend fails on its first import.
-  Both build scripts run `verify-release.js`, which fails when the packaged
-  backend has no `node_modules`.
-- `npm audit` does not cover the bundled Electron runtime. Keep Electron within
-  the three most recent majors, which are the ones that get security fixes.
+- electron-builder 26 skips a `node_modules` folder at the top of an
+  `extraResources` source, so `backend/node_modules` has its own entry in
+  `desktop/package.json`. Without it the packaged backend fails on its first
+  import; `verify-release.js` fails the build when it is missing.
+- `artifactName` has no spaces. The feed files name assets with dashes and
+  GitHub turns a space into a dot, so a space makes every update a 404.
+  `verify-release.js` checks each file a feed names is in `dist`.
+- The audit job gates `electron` and `app-builder-lib` at moderate even though
+  they are devDependencies: one is the runtime in every installer, the other
+  writes the AppImage launcher and the NSIS installer. Keep Electron on the
+  latest patch of one of the three newest majors; Chromium fixes arrive only
+  that way.

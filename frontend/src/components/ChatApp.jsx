@@ -37,6 +37,7 @@ import { ACCESS_LEVELS, ACCESS_TONE_COLOR, accessMeta, lowerAccess, fetchAccess,
 import { hasUsableKey, providerNeedsKey, missingKeyMessage } from '../lib/providerKeys';
 import { needsServerModelSwitch } from '../lib/providerCapabilities';
 import { EFFORT_LABELS } from '../lib/effort';
+import { isLocalImageSrc, remoteImageLink } from '../lib/markdownMedia';
 import {
   pickAutoModel, pickUncensoredModel, modelFit, fitDetail, itemSize, FIT_LABELS, rowIdForName, isInstalledName,
   startInstallJob, followInstallJob, cancelInstallJob, listInstallJobs, deleteInstalledModel
@@ -705,6 +706,17 @@ const MD_STATIC_COMPONENTS = {
   a: ({ href, children }) => (
     <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:brightness-90">{children}</a>
   ),
+  // A remote image becomes a link: loading it could carry chat data off the machine.
+  img: ({ src, alt }) => {
+    const origins = [API_BASE, typeof window === 'undefined' ? '' : window.location.origin];
+    if (isLocalImageSrc(src, origins)) {
+      return <img src={src} alt={alt || ''} loading="lazy" className="my-2 max-w-full rounded-lg" />;
+    }
+    const link = remoteImageLink(src, alt);
+    return link.href
+      ? <a href={link.href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:brightness-90">{link.label}</a>
+      : <span>{link.label}</span>;
+  },
   table: ({ children }) => (
     <div className="my-2 overflow-x-auto rounded-lg border border-[var(--hairline)]">
       <table className="w-full text-sm">{children}</table>
