@@ -155,13 +155,14 @@ jobs:
   # The gate is on what SHIPS. Production trees fail the build at high; dev
   # trees are reported and do not, because they are build and test tooling that
   # never reaches a user and is often only fixable by a major bump of the
-  # toolchain. The desktop dev tree is the live example: every advisory there is
-  # electron or electron-builder, neither of which runs on a user's machine as
-  # a library.
+  # toolchain.
   #
-  # NOTE: this does NOT cover the Electron runtime that electron-builder bundles
-  # into the installer. That is a shipped Chromium, and npm audit says nothing
-  # about it. Track the Electron major separately.
+  # Two desktop devDependencies do ship: electron is the runtime inside every
+  # installer, and app-builder-lib writes the AppImage launcher and the NSIS
+  # installer. --omit=dev skips both, which once let seven Electron advisories
+  # and an AppImage library-path flaw through a green audit, so they have their
+  # own gate at moderate. Chromium fixes with no advisory still arrive only by
+  # bumping electron: keep it on the latest patch of a supported major.
   audit:
     runs-on: ubuntu-22.04
     steps:
@@ -181,6 +182,22 @@ jobs:
       - name: Desktop production dependencies
         working-directory: desktop
         run: npm audit --package-lock-only --omit=dev --audit-level=high
+
+      # Only advisories filed against these two packages; a toolchain advisory
+      # they merely depend on stays in the report below.
+      - name: Desktop runtime and installer builder
+        working-directory: desktop
+        run: |
+          npm audit --package-lock-only --json > "$RUNNER_TEMP/desktop-audit.json" || true
+          jq -e 'has("vulnerabilities")' "$RUNNER_TEMP/desktop-audit.json" > /dev/null || {
+            echo "npm audit did not run"; cat "$RUNNER_TEMP/desktop-audit.json"; exit 1; }
+          jq -r '.vulnerabilities[].via[] | objects
+            | select(.name == "electron" or .name == "app-builder-lib")
+            | select(.severity != "low")
+            | "\(.severity) \(.name) \(.range) \(.title) \(.url)"' \
+            "$RUNNER_TEMP/desktop-audit.json" | sort -u > "$RUNNER_TEMP/shipped.txt"
+          if [ -s "$RUNNER_TEMP/shipped.txt" ]; then cat "$RUNNER_TEMP/shipped.txt"; exit 1; fi
+          echo "electron, app-builder-lib: no advisories at moderate or above"
 
       # Visible, not blocking.
       - name: Development toolchain (report only)

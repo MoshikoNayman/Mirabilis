@@ -95,10 +95,10 @@
     }
   },
   "dependencies": {
-    "electron-updater": "^6.3.9"
+    "electron-updater": "^6.8.12"
   },
   "devDependencies": {
-    "electron": "^44.2.0",
-    "electron-builder": "25.1.8"
+    "electron": "^44.11.2",
+    "electron-builder": "26.18.1"
   }
 }
