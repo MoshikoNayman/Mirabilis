@@ -2,6 +2,23 @@
 
 Versions use Junos-style tags. Newest first.
 
+## [26.4R1-S4] - 2026-11-13
+
+- Ultra effort: the goal is split in code, one agent per part works in
+  parallel, each result faces a check that tries to refute it, then the lead
+  merges and checks the whole. A goal that does not split runs solo.
+- Agents in the Effort menu for 1 hour, 5 hours and Ultra: up to 3, 6 or 8.
+- Sub-agents run 8 at once on cloud providers and vLLM, 2 on a local engine.
+- Parallel agents cannot overwrite a file another agent changed.
+- Run panel: Splitting, Agents 1/3, one row per agent; approvals name the agent.
+- Agent steps ask Ollama not to think. A thinking model spent the step's token
+  cap on thoughts and returned nothing.
+- Agent calls retry once on a rate limit or a busy engine.
+- Menus show labels only. Bypass is now Bypass permissions. Shorter messages
+  across Settings, Voice, Go Dark and engine errors.
+- Fixed: Chat only runs failed their check for lack of tool evidence.
+- A run that stops or fails after a split returns the agents' results.
+
 ## [26.4R1-S3] - 2026-11-12
 
 - Security: Electron 44.11.2 (was 44.2.0). Fixes seven Electron advisories,
