@@ -69,7 +69,6 @@ function LevelCard({ level, checked, pending, disabled, onSelect, buttonRef, idB
           <span id={`${idBase}-label`} className="text-[length:var(--text-sm)] font-semibold text-[color:var(--text-main)]">
             {level.label}
           </span>
-          {level.id === 'chat' ? <Badge>Default</Badge> : null}
           {pending ? <Spinner size={12} /> : null}
         </span>
         <span id={`${idBase}-facts`} className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[length:var(--text-2xs)]">
@@ -286,7 +285,7 @@ export default function AccessPane({ workspaceRoot, onOpenWorkspace }) {
         ) : null}
       </SettingsGroup>
 
-      <SettingsGroup title="Where it works">
+      <SettingsGroup title="Workspace">
         <SettingsList>
           <SettingsRow
             label="Project folder"

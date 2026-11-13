@@ -606,7 +606,7 @@ export function maskToken(token) {
 /** @typedef {'claude-code'|'cursor'|'vscode'} McpClientId */
 
 export const MCP_CLIENTS = /** @type {const} */ ([
-  { id: 'claude-code', label: 'Claude Code', hint: 'Run in a terminal' },
+  { id: 'claude-code', label: 'Claude Code', hint: '' },
   { id: 'cursor', label: 'Cursor', hint: 'Add to ~/.cursor/mcp.json' },
   { id: 'vscode', label: 'VS Code', hint: 'Add to .vscode/mcp.json' }
 ]);

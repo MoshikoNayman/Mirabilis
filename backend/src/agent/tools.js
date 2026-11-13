@@ -4,7 +4,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, realpathSync } from 'node:fs';
 import { copyFile, mkdir, open, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -64,7 +64,13 @@ const SBIN_DIRS = ['/usr/sbin', '/sbin'];
  * @property {(args: any, ctx?: {signal?: AbortSignal}) => Promise<any>} execute
  */
 
-/** @typedef {{allowWrites: boolean, commandRules: string[], connectorTools: string[]}} RunRules */
+/**
+ * @typedef {object} RunRules
+ * @property {boolean} allowWrites
+ * @property {string[]} commandRules
+ * @property {string[]} connectorTools
+ * @property {Map<string, number>} [writeClaims]  file (claimKey) to the sub-agent changing it in the current fan-out
+ */
 
 /**
  * @typedef {object} Gate
@@ -79,7 +85,27 @@ const SBIN_DIRS = ['/usr/sbin', '/sbin'];
 
 /** A fresh set of run-scoped grants. @returns {RunRules} */
 export function createRunRules() {
-  return { allowWrites: false, commandRules: [], connectorTools: [] };
+  return { allowWrites: false, commandRules: [], connectorTools: [], writeClaims: new Map() };
+}
+
+/**
+ * One write claim per file, however it is spelled: a symlinked folder resolves to where the
+ * write lands, and case folds on macOS and Windows, whose disks ignore it by default.
+ * @param {string} file  an absolute path
+ * @param {string} platform
+ */
+function claimKey(file, platform) {
+  let real = file;
+  // A new file does not exist yet: resolve the nearest folder that does.
+  for (let probe = file; ; probe = path.dirname(probe)) {
+    try {
+      real = realpathSync.native(probe) + file.slice(probe.length);
+      break;
+    } catch {
+      if (path.dirname(probe) === probe) break;
+    }
+  }
+  return platform === 'darwin' || platform === 'win32' ? real.toLowerCase() : real;
 }
 
 /** Keep the end of command output, where test runners print failures and summaries. */
@@ -451,7 +477,7 @@ export function createToolRegistry({
   const assertNotBlocked = (cmd) => {
     if (currentLevel() !== 'bypass' && !isSafeCommand(cmd)) {
       throw new Error('Command blocked: it matches a destructive pattern (recursive rm, mkfs, dd to a disk, shutdown). '
-        + 'Bypass does not apply this check.');
+        + 'Bypass permissions does not apply this check.');
     }
   };
 
@@ -756,6 +782,25 @@ export function createToolRegistry({
         };
       }
 
+      // One file, one agent: a sub-agent may not change a file another sub-agent claimed
+      // in this fan-out. Claimed before anyone is asked; the lead is never checked.
+      let newClaim = '';
+      if (tool.kind === 'write' && Number.isInteger(ctx.subAgent) && runRules.writeClaims) {
+        let claimPath = '';
+        try { claimPath = String(input.path ?? '').trim() ? rp(input.path) : ''; } catch { claimPath = ''; }
+        const key = claimPath ? claimKey(claimPath, platform) : '';
+        const owner = key ? runRules.writeClaims.get(key) : undefined;
+        if (owner !== undefined && owner !== ctx.subAgent) {
+          return { ok: false, error: `Agent ${owner + 1} is changing ${claimPath}. Leave this file to that agent.` };
+        }
+        if (key && owner === undefined) {
+          runRules.writeClaims.set(key, /** @type {number} */ (ctx.subAgent));
+          newClaim = key;
+        }
+      }
+      /** A write that did not happen gives its file back. */
+      const release = () => { if (newClaim) runRules.writeClaims?.delete(newClaim); };
+
       const verdict = decide({
         level: /** @type {any} */ (currentLevel()),
         tool: name,
@@ -772,17 +817,22 @@ export function createToolRegistry({
         goDark: goDark(),
         platform
       });
-      if (verdict.action === 'deny') return { ok: false, error: verdict.reason, denied: true };
+      if (verdict.action === 'deny') {
+        release();
+        return { ok: false, error: verdict.reason, denied: true };
+      }
 
       if (verdict.action === 'ask') {
         let prepared;
         try {
           prepared = await prepareApproval(name, input);
         } catch (err) {
+          release();
           return { ok: false, error: String(err?.message || err) };
         }
         if (!broker) {
-          return { ok: false, error: 'This action needs your approval, and this run has no way to ask. Run it yourself, or use Bypass.' };
+          release();
+          return { ok: false, error: 'This action needs your approval, and this run has no way to ask. Run it yourself, or use Bypass permissions.' };
         }
         const request = {
           ...verdict.request,
@@ -796,9 +846,13 @@ export function createToolRegistry({
         const pending = broker.request(request);
         // Waiting on the user is not work: the budget clock stops meanwhile.
         const decision = await (typeof ctx.pause === 'function' ? ctx.pause(pending) : pending);
-        if (decision === 'cancelled' || signal?.aborted) return { ok: false, error: 'Run cancelled.' };
+        if (decision === 'cancelled' || signal?.aborted) {
+          release();
+          return { ok: false, error: 'Run cancelled.' };
+        }
         if (decision !== 'allow' && decision !== 'always') {
           const why = broker.noteFor ? broker.noteFor(pending.approvalId) : '';
+          release();
           return { ok: false, error: `The user denied this action.${why ? ` Note: ${why}` : ''}`, denied: true };
         }
         if (decision === 'always') await applyAlways(verdict.request?.alwaysRule, name, tool);
@@ -808,6 +862,7 @@ export function createToolRegistry({
         const result = await tool.execute(input, { signal });
         return { ok: true, result };
       } catch (error) {
+        release();
         return { ok: false, error: String(error?.message || error) };
       }
     },

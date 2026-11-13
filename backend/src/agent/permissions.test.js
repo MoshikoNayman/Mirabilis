@@ -17,7 +17,6 @@ test('levels, meta and helpers are consistent', () => {
   assert.deepEqual(ACCESS_LEVELS, ['chat', 'read', 'ask', 'bypass']);
   for (const id of ACCESS_LEVELS) {
     assert.ok(ACCESS_META[id].label);
-    assert.ok(ACCESS_META[id].summary);
   }
   assert.equal(normalizeLevel('nope'), 'chat');
   assert.equal(normalizeLevel(undefined), 'chat');

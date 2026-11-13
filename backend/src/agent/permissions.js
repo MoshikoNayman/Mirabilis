@@ -7,12 +7,12 @@ import { classifyCommand, matchesAllowRules, ruleForCommand } from './commandPol
 /** @type {Array<'chat'|'read'|'ask'|'bypass'>} */
 export const ACCESS_LEVELS = ['chat', 'read', 'ask', 'bypass'];
 
-// Summaries match the composer Access menu hints in frontend/src/lib/access.js.
+// Labels match frontend/src/lib/access.js.
 export const ACCESS_META = {
-  chat: { label: 'Chat only', summary: 'No computer access' },
-  read: { label: 'Read only', summary: 'Reads, never changes' },
-  ask: { label: 'Ask first', summary: 'Asks before changes' },
-  bypass: { label: 'Bypass', summary: 'Runs anything, never asks' }
+  chat: { label: 'Chat only' },
+  read: { label: 'Read only' },
+  ask: { label: 'Ask first' },
+  bypass: { label: 'Bypass permissions' }
 };
 
 /** @param {any} x @returns {'chat'|'read'|'ask'|'bypass'} */
@@ -28,7 +28,7 @@ export function lowerLevel(a, b) {
 }
 
 // Returned to the model on a denial.
-const GO_DARK_REASON = 'Go Dark is on, so network commands are paused. Turn off Go Dark or use Bypass.';
+const GO_DARK_REASON = 'Go Dark is on, so network commands are paused. Turn off Go Dark or use Bypass permissions.';
 // Shown on the approval card, beside its "Uses network" badge.
 const GO_DARK_ASK_REASON = 'Go Dark is on.';
 
@@ -104,7 +104,7 @@ export function decide(p) {
   }
 
   if (level === 'bypass') {
-    return { action: 'allow', reason: 'Bypass: runs without approval.' };
+    return { action: 'allow', reason: 'Bypass permissions: runs without approval.' };
   }
 
   if (kind === 'read' || kind === 'internal') {

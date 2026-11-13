@@ -104,6 +104,60 @@ export function parseAgentAction(text) {
   };
 }
 
+/** Most parts one split may hold, and how long each part may be. */
+const MAX_SPLIT_PARTS = 16;
+const MAX_PART_CHARS = 2_000;
+const MAX_FOLDED_PART_CHARS = 4_000;
+
+/**
+ * Read the parts out of a split reply: {"parts": [...]}, {"tasks": [...]} or a bare
+ * array, each part a string or {goal}. Parts beyond `max` are folded round-robin into
+ * the kept ones as an "Also:" line, so no part is dropped. Unreadable gives [].
+ * @param {string} text
+ * @param {number} [max]
+ * @returns {string[]}
+ */
+export function parseSplit(text, max = MAX_SPLIT_PARTS) {
+  const raw = String(text || '');
+  /** @type {any[]|null} */
+  let items = null;
+  const jsonText = extractJsonObject(raw);
+  const parsed = jsonText ? tolerantParse(jsonText) : null;
+  if (parsed && typeof parsed === 'object') {
+    if (Array.isArray(parsed.parts)) items = parsed.parts;
+    else if (Array.isArray(parsed.tasks)) items = parsed.tasks;
+  }
+  if (!items) {
+    // Small models often reply with the array alone.
+    const start = raw.indexOf('[');
+    const end = raw.lastIndexOf(']');
+    const bare = start !== -1 && end > start ? tolerantParse(raw.slice(start, end + 1)) : null;
+    if (Array.isArray(bare)) items = bare;
+  }
+  if (!items) return [];
+
+  /** @type {string[]} */
+  const parts = [];
+  for (const item of items) {
+    const value = typeof item === 'string' ? item : item?.goal;
+    if (typeof value !== 'string') continue;
+    const part = value.trim().slice(0, MAX_PART_CHARS);
+    if (!part || parts.includes(part)) continue;
+    parts.push(part);
+    if (parts.length >= MAX_SPLIT_PARTS) break;
+  }
+
+  const limit = Math.floor(Number(max) || 0);
+  if (limit < 1) return [];
+  if (parts.length <= limit) return parts;
+  const kept = parts.slice(0, limit);
+  parts.slice(limit).forEach((extra, i) => {
+    const at = i % limit;
+    kept[at] = `${kept[at]}\nAlso: ${extra}`.slice(0, MAX_FOLDED_PART_CHARS);
+  });
+  return kept;
+}
+
 /** The contract, stated for the model. */
 export function protocolInstructions(toolDescription) {
   return [

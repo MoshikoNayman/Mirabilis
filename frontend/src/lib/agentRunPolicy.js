@@ -1,6 +1,7 @@
 // @ts-check
 // Agent run rules kept out of ChatApp.jsx so they are testable: where a message
-// goes, what context a run carries, how approvals are tracked, how a failure reads.
+// goes, what context a run carries, how approvals and progress are tracked, how a
+// failure reads.
 
 import { ACCESS_LEVELS, accessMeta, normalizeAccess } from './access.js';
 
@@ -60,10 +61,14 @@ export function chooseSendRoute({ agentic, access, imageRequest, explicitImage =
  * @property {boolean} network
  * @property {string} tool
  * @property {string} cwd   folder a command runs in; '' for other actions
+ * @property {number|null} subAgent  index of the sub-agent that asks; null for the lead
  */
 
 /** @param {unknown} v @returns {string} */
 const text = (v) => (typeof v === 'string' ? v : '');
+
+/** A sub-agent index from an event, or null for the lead. @param {unknown} v @returns {number|null} */
+const agentIndex = (v) => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : null);
 
 /**
  * The approval card's view of an approval-required event; null without an id.
@@ -83,7 +88,8 @@ export function toApproval(payload) {
     alwaysLabel: text(p.alwaysLabel) || null,
     network: p.network === true,
     tool: text(p.tool),
-    cwd: text(p.cwd)
+    cwd: text(p.cwd),
+    subAgent: agentIndex(p.subAgent)
   };
 }
 
@@ -206,6 +212,238 @@ export function describeRunError(status, body) {
     if (!raw.startsWith('{') && !raw.startsWith('[') && raw.length <= 300) return raw;
   }
   return `Request failed (${status})`;
+}
+
+/* Run progress. The lead's events and its sub-agents' share one feed; a
+   sub-agent's carry its index as subAgent and the lead's clock as at. Only the
+   lead's events move the headline and the meters. */
+
+/**
+ * Stop reasons from backend/src/agent/budget.js and runStore.js.
+ * @type {Readonly<Record<string, string>>}
+ */
+export const STOP_LABEL = Object.freeze({
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  failed: 'Failed',
+  'wall-clock-exhausted': 'Time limit',
+  'iterations-exhausted': 'Step limit',
+  'tool-calls-exhausted': 'Tool limit',
+  'token-budget-exhausted': 'Token limit',
+  'backend-restarted': 'Backend restarted'
+});
+
+/**
+ * A sub-agent's name in the log and the popover: A1 for index 0, '' for the lead.
+ * @param {unknown} subAgent
+ * @returns {string}
+ */
+export function agentTag(subAgent) {
+  const index = agentIndex(subAgent);
+  return index === null ? '' : `A${index + 1}`;
+}
+
+/** What an agent row can say. */
+export const AGENT_STATES = Object.freeze(/** @type {const} */ (['queued', 'working', 'waiting', 'passed', 'unverified', 'stopped', 'failed']));
+
+/** @typedef {typeof AGENT_STATES[number]} AgentState */
+
+/**
+ * Text color of a row's state word: theme pairs that pass AA as small text on the
+ * popover, as its other warnings do. States not listed stay muted.
+ * @type {Readonly<Partial<Record<AgentState, string>>>}
+ */
+export const AGENT_STATE_TEXT = Object.freeze({
+  unverified: 'text-amber-700 dark:text-amber-300',
+  failed: 'text-red-700 dark:text-red-300'
+});
+
+/**
+ * @typedef {object} AgentRow
+ * @property {number} subAgent  0-based, unique within the run
+ * @property {string} goal      its part, at most 200 characters
+ * @property {AgentState} state
+ */
+
+/** Rows a run keeps; the oldest drop first. */
+const MAX_AGENT_ROWS = 16;
+
+/**
+ * @param {AgentState} state
+ * @param {any} p the agent's own event
+ * @returns {AgentState}
+ */
+function nextAgentState(state, p) {
+  switch (p.type) {
+    case 'run-start': return 'working';
+    case 'approval-required': return 'waiting';
+    // Only ends a wait: a late resolve never revives a finished agent.
+    case 'approval-resolved': return state === 'waiting' ? 'working' : state;
+    case 'run-error': return 'failed';
+    case 'run-end':
+      if (p.stopReason === 'completed') return p.validated === true ? 'passed' : 'unverified';
+      return p.stopReason === 'failed' ? 'failed' : 'stopped';
+    default: return state;
+  }
+}
+
+/**
+ * Agent rows after one event: fanout-start lists its agents as queued, and each
+ * agent's own events move its row. The same array comes back when nothing changes.
+ * @param {AgentRow[]|undefined} rows
+ * @param {any} payload progress event; an approval event carries the asking agent's index
+ * @returns {AgentRow[]}
+ */
+export function reduceAgents(rows, payload) {
+  const current = Array.isArray(rows) ? rows : [];
+  const p = payload && typeof payload === 'object' ? payload : {};
+  if (p.type === 'fanout-start') {
+    const known = new Set(current.map((r) => r.subAgent));
+    /** @type {AgentRow[]} */
+    const added = [];
+    for (const a of Array.isArray(p.agents) ? p.agents : []) {
+      const index = agentIndex(a?.subAgent);
+      if (index === null || known.has(index)) continue;
+      known.add(index);
+      added.push({ subAgent: index, goal: text(a.goal), state: 'queued' });
+    }
+    return added.length ? [...current, ...added].slice(-MAX_AGENT_ROWS) : current;
+  }
+  const index = agentIndex(p.subAgent);
+  const at = index === null ? -1 : current.findIndex((r) => r.subAgent === index);
+  if (at === -1) return current;
+  const state = nextAgentState(current[at].state, p);
+  if (state === current[at].state) return current;
+  const next = [...current];
+  next[at] = { ...current[at], state };
+  return next;
+}
+
+/**
+ * The run after one progress event. The lead's events set the budget and the
+ * phase; a fan-out counts its agents as they finish. The same object comes back
+ * when nothing changes.
+ * @param {any} run the composer's run state
+ * @param {any} payload
+ * @returns {any}
+ */
+export function applyRunEvent(run, payload) {
+  if (!run || !payload || typeof payload !== 'object') return run;
+  /** @type {Record<string, any>} */
+  const patch = {};
+  if (agentIndex(payload.subAgent) === null) {
+    if (payload.budget) patch.budget = payload.budget;
+    if (payload.type === 'phase') patch.phase = payload.phase;
+    else if (payload.type === 'iteration') patch.phase = 'act';
+    else if (payload.type === 'fanout-start') {
+      patch.phase = 'agents';
+      patch.fanout = { total: Math.max(0, Number(payload.count) || 0), done: 0 };
+    } else if (payload.type === 'fanout-end') {
+      patch.phase = 'act';
+      patch.fanout = null;
+    }
+  } else if ((payload.type === 'run-end' || payload.type === 'run-error') && run.fanout) {
+    patch.fanout = { ...run.fanout, done: Math.min(run.fanout.total, run.fanout.done + 1) };
+  }
+  const agents = reduceAgents(run.agents, payload);
+  if (agents !== run.agents) patch.agents = agents;
+  return Object.keys(patch).length > 0 ? { ...run, ...patch } : run;
+}
+
+/** Rows whose agent had not ended when the feed did. */
+const OPEN_STATES = new Set(['queued', 'working', 'waiting']);
+
+/**
+ * A run that ended without its result: Stop, a failed or broken stream. The feed stopped,
+ * so no agent will report again: open rows end as stopped (failed with the run), the
+ * fan-out closes, and the clock keeps the last time the panel showed.
+ * @param {any} run
+ * @param {{ status: string, stopReason?: string, error?: string }} end
+ * @returns {any}
+ */
+export function settleRun(run, end) {
+  if (!run) return run;
+  const ended = end.status === 'failed' ? 'failed' : 'stopped';
+  const rows = Array.isArray(run.agents) ? run.agents : [];
+  const agents = rows.some((r) => OPEN_STATES.has(r.state))
+    ? rows.map((r) => (OPEN_STATES.has(r.state) ? { ...r, state: ended } : r))
+    : run.agents;
+  const events = Array.isArray(run.events) ? run.events : [];
+  const lastAt = events.length ? Number(events[events.length - 1].at) || 0 : 0;
+  const budget = run.budget && lastAt > (Number(run.budget.elapsedMs) || 0)
+    ? { ...run.budget, elapsedMs: lastAt }
+    : run.budget;
+  return { ...run, ...end, agents, fanout: null, budget };
+}
+
+/** @param {any} p fanout-start @returns {string} */
+function fanoutLine(p) {
+  const n = Math.max(0, Number(p.count) || 0);
+  const head = n === 1 ? '1 agent' : `${n} agents, ${Math.min(n, Number(p.concurrency) || n)} at a time`;
+  const deferred = Number(p.deferred) || 0;
+  return deferred > 0 ? `${head}, ${deferred} deferred` : head;
+}
+
+/** A spawn_agents result that started no agent: a refusal, or no budget for an Ultra fan-out. */
+const NO_FANOUT = /^\{"spawned":0[,}]/;
+
+/** Why a tool call failed, from its observation. @param {any} p @returns {string} */
+function failureText(p) {
+  const raw = String(p.observation ?? '');
+  if (NO_FANOUT.test(raw)) {
+    try {
+      const error = JSON.parse(raw).error;
+      if (typeof error === 'string' && error) return error.slice(0, 90);
+    } catch { /* a cut copy reads as it is */ }
+  }
+  return raw.replace(/^ERROR:\s*/, '').slice(0, 90);
+}
+
+/** @param {any} p @returns {string|null} */
+function leadLine(p) {
+  switch (p.type) {
+    case 'phase': return `phase: ${p.phase}`;
+    case 'plan': return `plan: ${String(p.plan).slice(0, 120)}`;
+    case 'split': return Number(p.count) >= 2 ? `split: ${Number(p.count)} parts` : 'split: solo';
+    // A fan-out reads as its own lines; one that started no agent says why.
+    case 'tool-call':
+      return p.tool === 'spawn_agents' ? null : `${p.tool}(${JSON.stringify(p.args ?? {}).slice(0, 60)})`;
+    case 'tool-result': {
+      const noFanout = p.tool === 'spawn_agents' && NO_FANOUT.test(String(p.observation ?? ''));
+      if (p.ok && !noFanout) return p.tool === 'spawn_agents' ? null : `  ${p.tool} done`;
+      return `  ${p.tool} failed: ${failureText(p)}`;
+    }
+    case 'invalid-action': return `  retrying: ${p.error}`;
+    case 'finish-proposed': return 'proposed a result';
+    case 'validation': return `validation ${p.passed ? 'passed' : 'failed'}${p.reason ? `: ${String(p.reason).slice(0, 70)}` : ''}`;
+    case 'repair': return `repairing: ${String(p.reason).slice(0, 80)}`;
+    case 'fanout-start': return fanoutLine(p);
+    case 'fanout-end': return `agents done (${Number(p.spentToolCalls) || 0} tool calls)`;
+    default: return null;
+  }
+}
+
+/**
+ * Run log line for one progress event, or null when it adds nothing. The lead's
+ * lines read as they always have; a sub-agent's carry its tag after any indent.
+ * @param {any} payload
+ * @returns {string|null}
+ */
+export function runEventLine(payload) {
+  const p = payload && typeof payload === 'object' ? payload : {};
+  const tag = agentTag(p.subAgent);
+  if (tag) {
+    // The headline shows the lead's phase and plan; an agent's would crowd the log.
+    if (p.type === 'phase' || p.type === 'plan') return null;
+    if (p.type === 'run-end') {
+      return p.stopReason === 'completed' ? null : `${tag} stopped: ${STOP_LABEL[text(p.stopReason)] || text(p.stopReason)}`;
+    }
+    if (p.type === 'run-error') return `${tag} failed: ${String(p.error ?? '').slice(0, 80)}`;
+  }
+  const line = leadLine(p);
+  if (!line || !tag) return line;
+  const indent = line.length - line.trimStart().length;
+  return `${line.slice(0, indent)}${tag} ${line.slice(indent)}`;
 }
 
 /* Run context. A run's goal is only the new message and the backend does not

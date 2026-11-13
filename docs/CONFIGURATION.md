@@ -116,8 +116,8 @@ Go Dark blocks web search regardless of the key.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MIRABILIS_MCP_FS_ROOT` | (unset, no jail) | Operator jail. Confines the agent and MCP file tools, This computer's `read_log` included, and where commands start, to one subtree, at every Access level including Bypass. It does not limit what a running shell command can reach. |
-| `MIRABILIS_AGENT_FANOUT_CONCURRENCY` | `2` | Sub-agents generating at once, maximum 8. A single local engine serves one request per model at a time, so more only holds more live contexts. Raise it for an engine that serves in parallel. |
+| `MIRABILIS_MCP_FS_ROOT` | (unset, no jail) | Operator jail. Confines the agent and MCP file tools, This computer's `read_log` included, and where commands start, to one subtree, at every Access level including Bypass permissions. It does not limit what a running shell command can reach. |
+| `MIRABILIS_AGENT_FANOUT_CONCURRENCY` | (unset) | Sub-agents generating at once, 1 to 8. Unset: 2 on a local engine (Ollama, llama.cpp, KoboldCpp, a Custom endpoint on this machine or LAN), which serves one request per model at a time; 8 on cloud providers, vLLM and a remote Custom endpoint. Set, it applies to every provider. |
 | `MIRABILIS_AGENT_MAX_CONCURRENT_RUNS` | `2` | Runs executing at once. Each has its own budget and, above Read only, can run its own commands. |
 | `MIRABILIS_MCP_TOKEN` | generated | Bearer token for `/mcp` and the privileged routes (agent runs, Access, connectors). Generated and saved to the data directory when unset. |
 
@@ -132,7 +132,7 @@ One setting decides what the assistant may do on this computer. It is saved in
 | Chat only | No tools. A single-shot effort goes to the normal chat route. |
 | Read only | Read files anywhere, inspect the system, run commands that are proven read-only, use connector tools their server marks read-only. Never changes anything and never asks. |
 | Ask first | Everything Read only does, freely. Anything that changes something, or is not known to be read-only, pauses until you allow or deny it. |
-| Bypass | Everything, with no approvals, no command blocklist and no folder jail. |
+| Bypass permissions | Everything, with no approvals, no command blocklist and no folder jail. |
 
 - A run's request may lower the saved level, never raise it. Lowering the saved
   level while a run is going applies to its next tool call.
@@ -147,8 +147,8 @@ One setting decides what the assistant may do on this computer. It is saved in
   to `allowCommands`; rules apply in Ask first only. On a file change it allows
   changes for the rest of that run. On a connector tool it sets that tool to
   Allow.
-- Bypass still applies `MIRABILIS_MCP_FS_ROOT`, the work budget, the run log,
-  and connector tools set to Off. Go Dark does not filter commands in Bypass.
+- Bypass permissions still applies `MIRABILIS_MCP_FS_ROOT`, the work budget, the run log,
+  and connector tools set to Off. Go Dark does not filter commands in Bypass permissions.
 - The blocklist (recursive `rm`, `mkfs`, `dd` to a device, fork bombs,
   `shutdown`, recursive `chmod` on `/`) applies in Read only and Ask first. It
   catches accidents, not a determined prompt.
@@ -169,7 +169,16 @@ Real confinement needs an OS sandbox (container, VM, Seatbelt, namespaces).
 | Assist (Instant to Thorough, Access above Chat only) | 10 min | 16 | 40 | none |
 | High effort | 30 min | 12 | 60 | none |
 | 1 hour | 60 min | 80 | 500 | up to 3 |
+| Ultra | 2 hours | 160 | 1000 | up to 8, 4 by default |
 | 5 hours | 5 hours | 400 | 2500 | up to 6 |
+
+Agents in the Effort menu sets the sub-agent cap for 1 hour, 5 hours and Ultra,
+from 1 (no sub-agents) to the tier limit. A request can only lower it. Ultra
+splits each goal into independent parts in code, runs one agent per part,
+checks each result with a pass that tries to refute it, then merges and checks
+the merged answer the same way. A goal that does not split runs as one agent.
+Sub-agents share the run budget on every axis, and one sub-agent cannot
+overwrite a file another changed in the same split.
 
 The budget is enforced in code. A run that hits it returns what it has plus a
 note on what is left undone. Runs are held in memory, so a backend restart drops

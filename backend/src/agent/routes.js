@@ -22,6 +22,7 @@ import { ACCESS_LEVELS, lowerLevel, normalizeLevel } from './permissions.js';
 import { createRunStore } from './runStore.js';
 import { getFsRoot, safeResolvePath } from './sandbox.js';
 import { createSelfTools } from './selfTools.js';
+import { fanoutConcurrencyFor } from './subAgents.js';
 import { scrub } from './systemTools.js';
 import { createRunRules, createToolRegistry, pruneRunBackups } from './tools.js';
 
@@ -53,7 +54,7 @@ const ACCESS_LINES = {
   chat: 'Access: Chat only. You have no tools; answer from what you know.',
   read: 'Access: Read only. You may read files anywhere, inspect the system and run read-only commands.',
   ask: 'Access: Ask first. Reading and read-only commands run freely; anything that changes something needs the user\'s approval.',
-  bypass: 'Access: Bypass. Every tool runs without approval: file changes, any command, every connector tool.'
+  bypass: 'Access: Bypass permissions. Every tool runs without approval: file changes, any command, every connector tool.'
 };
 
 /** Runs that are still executing right now. */
@@ -239,7 +240,8 @@ export function createAgentRouter({
           maxToolCalls: p.maxToolCalls,
           maxSubAgents: p.maxSubAgents,
           plan: p.plan,
-          validate: p.validate
+          validate: p.validate,
+          ultra: Boolean(p.ultra)
         };
       })
     });
@@ -326,8 +328,7 @@ export function createAgentRouter({
     const live = liveRunCount(runs);
     if (live >= MAX_CONCURRENT_RUNS) {
       res.status(429).json({
-        error: `${live} agent run(s) are already in progress and the limit is ${MAX_CONCURRENT_RUNS}. `
-          + 'Stop one before starting another, or raise MIRABILIS_AGENT_MAX_CONCURRENT_RUNS.',
+        error: `${live} run(s) already in progress (limit ${MAX_CONCURRENT_RUNS}). Stop one first.`,
         liveRuns: live,
         limit: MAX_CONCURRENT_RUNS
       });
@@ -371,12 +372,14 @@ export function createAgentRouter({
     if (localOnly === true || isGoDark()) {
       const scope = classifyProviderScope(provider || config.aiProvider, providerBaseUrl);
       if (scope.offDevice) {
-        res.status(403).json({ error: `Go Dark is on - ${scope.reason} Pick a local model or turn Go Dark off.` });
+        res.status(403).json({ error: `Go Dark: ${scope.reason} Pick a local model.` });
         return;
       }
     }
 
     const profile = resolveRunProfile(effortId, overrides && typeof overrides === 'object' ? overrides : {});
+    // No tools, so nothing fans out; keeps limits and the Agents meter true.
+    if (level === 'chat' && !profile.ultra) profile.maxSubAgents = 0;
     const abort = new AbortController();
     const id = randomUUID();
 
@@ -510,7 +513,7 @@ export function createAgentRouter({
         ? await getEffectiveModel({ provider: activeProvider, model, config })
         : model;
       if (!effectiveModel) {
-        const error = 'No model is available for this provider. Install or select a model first.';
+        const error = 'No model available. Install or select one.';
         send('error', { error });
         record.status = 'failed';
         await runStore.upsert({ id, status: 'failed', stopReason: 'failed', error, finishedAt: new Date().toISOString() }).catch(() => {});
@@ -552,8 +555,9 @@ export function createAgentRouter({
       });
       await auditor.note('tools', { access: level, offered: registry.names() });
 
+      const hostContext = await systemContext({ level, sourceRoot, projectDir });
       const runSystemPrompt = [
-        await systemContext({ level, sourceRoot, projectDir }),
+        hostContext,
         typeof systemPrompt === 'string' ? systemPrompt.trim() : '',
         profile.styleHint || ''
       ].filter(Boolean).join('\n\n');
@@ -563,19 +567,35 @@ export function createAgentRouter({
         // Sub-agents need their own registry; without this factory the loop does
         // not register spawn_agents and maxSubAgents has no effect.
         makeRegistry: buildRegistry,
+        // Sub-agents get where they are and what they may do, not the chat.
+        subAgentPrompt: hostContext,
+        // Set where the provider is known; never from the request.
+        fanoutConcurrency: fanoutConcurrencyFor(activeProvider, providerBaseUrl),
         signal: abort.signal,
         onEvent: (/** @type {any} */ event) => {
           if (event?.budget && event.subAgent === undefined) record.budget = event.budget;
-          if (typeof event?.at === 'number' && event.subAgent === undefined) lastAt = event.at;
+          // Sub-agent events carry the run clock too, so every event moves it on.
+          if (typeof event?.at === 'number') lastAt = event.at;
           send('progress', event);
           // Mirror security-relevant events to disk. Fire and forget: the
           // auditor swallows its own failures.
           if (event?.type === 'tool-call') {
-            auditor.tool({ iteration: event.iteration, tool: event.tool, args: event.args, mutating: event.mutating });
+            auditor.tool({
+              iteration: event.iteration, tool: event.tool, args: event.args, mutating: event.mutating, subAgent: event.subAgent
+            });
           } else if (event?.type === 'tool-result') {
-            auditor.result({ iteration: event.iteration, tool: event.tool, ok: event.ok, observation: event.observation });
+            auditor.result({
+              iteration: event.iteration, tool: event.tool, ok: event.ok, observation: event.observation, subAgent: event.subAgent
+            });
+          } else if (event?.type === 'split') {
+            auditor.note('split', { count: event.count });
           } else if (event?.type === 'fanout-start') {
-            auditor.note('fanout', { count: event.count, concurrency: event.concurrency });
+            auditor.note('fanout', { count: event.count, concurrency: event.concurrency, deferred: event.deferred });
+          } else if (event?.type === 'fanout-end') {
+            auditor.note('fanout-end', {
+              count: event.count, spentTokens: event.spentTokens,
+              spentToolCalls: event.spentToolCalls, spentIterations: event.spentIterations
+            });
           }
         }
       });

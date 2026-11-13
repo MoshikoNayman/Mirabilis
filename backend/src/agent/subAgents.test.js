@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs/promises';
 import path from 'path';
@@ -8,9 +8,17 @@ import { runAgent } from './agentLoop.js';
 import { resolveEffort } from './effortProfiles.js';
 import { createToolRegistry, createRunRules } from './tools.js';
 import { createApprovalBroker } from './approvals.js';
+import { fanoutConcurrencyFor } from './subAgents.js';
+import { REMOTE_PROVIDERS } from '../providerScope.js';
+
+const sandboxes = [];
+after(async () => {
+  for (const dir of sandboxes) await fs.rm(dir, { recursive: true, force: true });
+});
 
 async function sandbox() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-fanout-'));
+  sandboxes.push(dir);
   await fs.writeFile(path.join(dir, 'a.txt'), 'alpha\n', 'utf8');
   return dir;
 }
@@ -308,4 +316,249 @@ test('spawn_agents is not offered in Chat only, at any effort', async () => {
   });
   assert.ok(!registry.has('spawn_agents'));
   assert.deepEqual(registry.names(), []);
+});
+
+// what each agent is given, and what the parent is charged
+
+const finish = (summary) => ({ text: JSON.stringify({ action: 'finish', summary }), tokens: 5 });
+const spawn = (tasks) => ({ text: JSON.stringify({ action: 'tool', tool: 'spawn_agents', args: { tasks } }), tokens: 5 });
+
+test('sub-agents get the run host context and their place in the split', async () => {
+  const dir = await sandbox();
+  const tasks = ['inspect the alpha module', 'inspect the beta module'];
+  const model = fanoutModel(tasks);
+  const systems = [];
+  const callModel = async (req) => {
+    const system = req.messages.find((m) => m.role === 'system')?.content || '';
+    const isAgent = tasks.some((t) => req.messages.some((m) => m.content.includes(`Goal:\n${t}`)));
+    if (isAgent && req.purpose === 'decide') systems.push(system);
+    return model.fn(req);
+  };
+  await runAgent({
+    goal: 'audit three things', profile: resolveEffort('hour'), subAgentPrompt: 'HOST: test box',
+    registry: createToolRegistry({ fsRoot: dir }), makeRegistry: () => createToolRegistry({ fsRoot: dir }), callModel
+  });
+  assert.equal(systems.length, 2, 'each agent decided once');
+  for (const system of systems) {
+    assert.ok(system.includes('HOST: test box'), 'the host context reaches every agent');
+    assert.ok(system.includes('The larger goal: audit three things'));
+  }
+  assert.deepEqual(systems.map((s) => (s.match(/You are agent (\d) of 2/) || [])[1]).sort(), ['1', '2']);
+});
+
+test('sub-agent events carry the lead clock', async () => {
+  const dir = await sandbox();
+  const tasks = ['time the alpha step', 'time the beta step', 'time the gamma step'];
+  const model = fanoutModel(tasks);
+  let t = 1_000_000;
+  const events = [];
+  await runAgent({
+    goal: 'time three steps', profile: resolveEffort('hour'),
+    registry: createToolRegistry({ fsRoot: dir }), makeRegistry: () => createToolRegistry({ fsRoot: dir }),
+    callModel: async (req) => { t += 1_000; return model.fn(req); },
+    now: () => t,
+    onEvent: (e) => events.push(e)
+  });
+  for (let i = 1; i < events.length; i += 1) {
+    assert.ok(events[i].at >= events[i - 1].at, `${events[i].type} at ${events[i].at} came after ${events[i - 1].at}`);
+  }
+  const start = events.find((e) => e.type === 'fanout-start');
+  const end = events.find((e) => e.type === 'fanout-end');
+  const fromAgents = events.filter((e) => Number.isInteger(e.subAgent));
+  assert.ok(start.at > 0 && fromAgents.length > 0);
+  for (const e of fromAgents) {
+    assert.ok(e.at >= start.at && e.at <= end.at, `${e.type} from A${e.subAgent + 1} at ${e.at} is outside the fan-out`);
+  }
+});
+
+test('a fan-out never starts more agents than the budget can fund', async () => {
+  const dir = await sandbox();
+  const tasks = ['fund the alpha task', 'fund the beta task', 'fund the gamma task'];
+  const fanoutOf = (out) => JSON.parse(out.history.find((h) => h.tool === 'spawn_agents').observation);
+
+  // Five steps left: 70% of them cannot give two agents three steps each.
+  const starved = await run(dir, fanoutModel(tasks), resolveEffort('hour', { maxIterations: 6 }));
+  const refused = fanoutOf(starved);
+  assert.equal(refused.spawned, 0);
+  assert.match(refused.error, /Not enough budget/);
+  assert.equal(starved.budget.subAgents, 0, 'a refused fan-out claims no agents');
+
+  const tight = await run(dir, fanoutModel(tasks), resolveEffort('hour', { maxIterations: 10 }));
+  const partial = fanoutOf(tight);
+  assert.equal(partial.spawned, 2);
+  assert.equal(partial.deferred.length, 1);
+});
+
+test('the wall clock is split by wave, not by agent', async () => {
+  const dir = await sandbox();
+  const tasks = ['wave task one', 'wave task two', 'wave task three', 'wave task four'];
+  const fanoutStart = async (fanoutConcurrency) => {
+    const events = [];
+    await runAgent({
+      goal: 'audit four things', profile: resolveEffort('session'), fanoutConcurrency,
+      registry: createToolRegistry({ fsRoot: dir }), makeRegistry: () => createToolRegistry({ fsRoot: dir }),
+      callModel: fanoutModel(tasks).fn, now: () => 1_000_000, onEvent: (e) => events.push(e)
+    });
+    return events.find((e) => e.type === 'fanout-start');
+  };
+  const fiveHours = 5 * 60 * 60_000;
+  // All four at once: each gets the whole share of the time left.
+  const parallel = await fanoutStart(8);
+  assert.equal(parallel.concurrency, 8);
+  assert.equal(parallel.childProfile.maxWallMs, Math.floor(0.7 * fiveHours));
+  // Two at a time: two waves, half the share each.
+  const local = await fanoutStart(undefined);
+  assert.equal(local.concurrency, 2);
+  assert.equal(local.childProfile.maxWallMs, Math.floor((0.7 * fiveHours) / 2));
+});
+
+test('fanoutConcurrencyFor follows the engine', () => {
+  const saved = process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY;
+  try {
+    delete process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY;
+    for (const id of REMOTE_PROVIDERS) assert.equal(fanoutConcurrencyFor(id), 8, id);
+    assert.equal(fanoutConcurrencyFor('vllm'), 8);
+    for (const id of ['ollama', 'koboldcpp', 'llamacpp', '', 'nope']) assert.equal(fanoutConcurrencyFor(id), 2, id);
+    assert.equal(fanoutConcurrencyFor('openai-compatible', 'http://127.0.0.1:1234/v1'), 2, 'a Custom endpoint on this machine');
+    assert.equal(fanoutConcurrencyFor('openai-compatible', 'https://api.example.com/v1'), 8, 'a remote Custom endpoint');
+
+    process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY = '1';
+    for (const id of [...REMOTE_PROVIDERS, 'vllm', 'ollama', 'llamacpp', 'openai-compatible']) {
+      assert.equal(fanoutConcurrencyFor(id, 'https://api.example.com/v1'), 1, id);
+    }
+    process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY = '4';
+    assert.equal(fanoutConcurrencyFor('ollama'), 4);
+  } finally {
+    if (saved === undefined) delete process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY;
+    else process.env.MIRABILIS_AGENT_FANOUT_CONCURRENCY = saved;
+  }
+});
+
+test('fanout-start and fanout-end carry the lead budget, and child spend is charged on every axis', async () => {
+  const dir = await sandbox();
+  const tasks = ['charge the alpha part', 'charge the beta part'];
+  // Each agent takes one tool step before it finishes, so steps and tool calls both move.
+  const callModel = async ({ messages, purpose }) => {
+    const prompt = messages.map((m) => m.content).join('\n');
+    if (purpose === 'validate') return { text: '{"pass":true}', tokens: 5 };
+    if (purpose === 'plan') return { text: 'p', tokens: 5 };
+    const sub = tasks.find((t) => prompt.includes(`Goal:\n${t}`));
+    if (sub) {
+      if (prompt.includes('observed:')) return finish(`did: ${sub}`);
+      return { text: '{"action":"tool","tool":"list_dir","args":{"path":"."}}', tokens: 5 };
+    }
+    return prompt.includes('did: ') ? finish('merged') : spawn(tasks);
+  };
+  const events = [];
+  const out = await runAgent({
+    goal: 'charge two parts', profile: resolveEffort('hour'),
+    registry: createToolRegistry({ fsRoot: dir }), makeRegistry: () => createToolRegistry({ fsRoot: dir }),
+    callModel, onEvent: (e) => events.push(e)
+  });
+  assert.equal(out.ok, true);
+  const start = events.find((e) => e.type === 'fanout-start');
+  const end = events.find((e) => e.type === 'fanout-end');
+  for (const e of [start, end]) {
+    assert.equal(e.subAgent, undefined, `${e.type} is the lead's event`);
+    assert.ok(e.budget && typeof e.budget.iterations === 'number', `${e.type} carries the lead budget`);
+  }
+  assert.deepEqual(start.agents.map((a) => a.subAgent), [0, 1]);
+  assert.equal(end.spentIterations, 4, 'two steps per agent');
+  assert.equal(end.spentToolCalls, 2);
+  assert.equal(end.budget.iterations, start.budget.iterations + end.spentIterations);
+  assert.equal(end.budget.toolCalls, start.budget.toolCalls + end.spentToolCalls);
+});
+
+test('agent numbers run on across fan-outs', async () => {
+  const dir = await sandbox();
+  const first = ['number the alpha task', 'number the beta task'];
+  const second = ['number the gamma task', 'number the delta task'];
+  let fanouts = 0;
+  const callModel = async ({ messages, purpose }) => {
+    const prompt = messages.map((m) => m.content).join('\n');
+    if (purpose === 'validate') return { text: '{"pass":true}', tokens: 5 };
+    if (purpose === 'plan') return { text: 'p', tokens: 5 };
+    const sub = [...first, ...second].find((t) => prompt.includes(`Goal:\n${t}`));
+    if (sub) return finish(`did: ${sub}`);
+    if (fanouts < 2) {
+      fanouts += 1;
+      return spawn(fanouts === 1 ? first : second);
+    }
+    return finish('merged');
+  };
+  const events = [];
+  await runAgent({
+    goal: 'number four tasks', profile: resolveEffort('session'),
+    registry: createToolRegistry({ fsRoot: dir }), makeRegistry: () => createToolRegistry({ fsRoot: dir }),
+    callModel, onEvent: (e) => events.push(e)
+  });
+  const starts = events.filter((e) => e.type === 'fanout-start');
+  assert.equal(starts.length, 2);
+  assert.deepEqual(starts[1].agents.map((a) => a.subAgent), [2, 3]);
+  const later = events.filter((e) => Number.isInteger(e.subAgent) && second.includes(e.subGoal));
+  assert.ok(later.length > 0);
+  assert.deepEqual([...new Set(later.map((e) => e.subAgent))].sort(), [2, 3]);
+});
+
+test('the fan-out result stays valid JSON with eight long answers and eight deferred long goals', async () => {
+  const dir = await sandbox();
+  // Quotes, backslashes, newlines and ESC (colored command output) all grow when escaped.
+  const escaped = '"\\\n\u001b[31m{"id":1}';
+  const tasks = Array.from({ length: 16 }, (_, i) => `long task ${i} ${escaped.repeat(200)}`);
+  let fanned = false;
+  const callModel = async ({ messages, purpose }) => {
+    const prompt = messages.map((m) => m.content).join('\n');
+    if (purpose === 'validate') return { text: '{"pass":true}', tokens: 5 };
+    if (purpose === 'plan') return { text: 'p', tokens: 5 };
+    if (tasks.some((t) => prompt.includes(`Goal:\n${t}`))) return finish(`ANSWER ${escaped.repeat(400)}`);
+    if (!fanned) { fanned = true; return spawn(tasks.map((goal) => ({ goal }))); }
+    return finish('merged');
+  };
+  const out = await runAgent({
+    goal: 'do sixteen long tasks', profile: resolveEffort('ultra', { ultra: false }),
+    registry: createToolRegistry({ fsRoot: dir }), makeRegistry: () => createToolRegistry({ fsRoot: dir }), callModel
+  });
+  const step = out.history.find((h) => h.tool === 'spawn_agents');
+  assert.ok(step.observation.length <= 16_000, `an observation of ${step.observation.length} chars`);
+  const observed = JSON.parse(step.observation);
+  assert.equal(observed.spawned, 8);
+  assert.equal(observed.deferred.length, 8);
+  for (const goal of observed.deferred) assert.ok(goal.length <= 200, `a deferred goal of ${goal.length} chars`);
+  for (const r of observed.results) {
+    assert.ok(r.answer.length <= 1000, `an answer of ${r.answer.length} chars`);
+    assert.match(r.answer, /^ANSWER /, 'every answer keeps its start');
+  }
+});
+
+test('only a fan-out that ran agents stays in the prompt past the window', async () => {
+  const dir = await sandbox();
+  const tasks = ['pin the alpha part', 'pin the beta part'];
+  const leadPrompts = [];
+  const callModel = async ({ messages, purpose }) => {
+    const prompt = messages.map((m) => m.content).join('\n');
+    if (purpose === 'validate') return { text: '{"pass":true}', tokens: 5 };
+    if (purpose === 'plan') return { text: 'p', tokens: 5 };
+    const sub = tasks.find((t) => prompt.includes(`Goal:\n${t}`));
+    if (sub) return finish(`did: ${sub}`);
+    leadPrompts.push(prompt);
+    const step = leadPrompts.length;
+    if (step === 1) return spawn(tasks);
+    // Refused every time: one task is not a fan-out.
+    if (step <= 40) {
+      return {
+        text: JSON.stringify({ thought: `[try ${step}]`, action: 'tool', tool: 'spawn_agents', args: { tasks: [{ goal: 'one task' }] } }),
+        tokens: 5
+      };
+    }
+    return finish('merged');
+  };
+  const out = await runAgent({
+    goal: 'pin two parts', profile: resolveEffort('hour'),
+    registry: createToolRegistry({ fsRoot: dir }), makeRegistry: () => createToolRegistry({ fsRoot: dir }), callModel
+  });
+  assert.equal(out.ok, true);
+  const last = leadPrompts.at(-1);
+  assert.ok(last.includes('did: pin the alpha part') && last.includes('did: pin the beta part'), 'the agent results stay');
+  assert.ok(!last.includes('[try 2]'), 'a refused call goes with the window');
+  assert.ok(last.includes('[try 40]'));
 });

@@ -150,6 +150,21 @@ export function createBudget(profile, { signal, now = () => Date.now() } = {}) {
       return outputTokens;
     },
 
+    /**
+     * Add spend that sub-agents already made. Never throws: like tokens, it already happened.
+     * @param {{outputTokens?: number, toolCalls?: number, iterations?: number}} [spend]
+     */
+    chargeChildSpend({ outputTokens: childTokens, toolCalls: childCalls, iterations: childSteps } = {}) {
+      const whole = (/** @type {unknown} */ n) => {
+        const v = Math.floor(Number(n));
+        return Number.isFinite(v) && v > 0 ? v : 0;
+      };
+      outputTokens += whole(childTokens);
+      toolCalls += whole(childCalls);
+      iterations += whole(childSteps);
+      return snapshot();
+    },
+
     /** Claim a repair attempt after a failed validation. */
     chargeRepair() {
       if (repairs >= profile.maxRepairAttempts) return false;

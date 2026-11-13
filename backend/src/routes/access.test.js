@@ -50,7 +50,7 @@ test('GET returns the level, the four levels, rules, read-only programs and wher
   assert.equal(body.level, 'chat');
   assert.deepEqual(body.levels.map((l) => l.id), ['chat', 'read', 'ask', 'bypass']);
   for (const l of body.levels) {
-    assert.ok(l.label && l.summary, `${l.id} needs a label and a summary`);
+    assert.ok(l.label, `${l.id} needs a label`);
   }
   assert.deepEqual(body.allowCommands, []);
   for (const prog of ['ps', 'df', 'git', 'lsof']) assert.ok(body.readOnlyPrograms.includes(prog), prog);

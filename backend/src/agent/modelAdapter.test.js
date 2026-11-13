@@ -47,7 +47,61 @@ test('older Claude and other providers keep the low step temperature', async () 
     assert.equal(calls[0].temperature, 0.2, `${request.model} step`);
     assert.equal(calls[1].temperature, 0, `${request.model} validate`);
     assert.equal(calls[0].maxTokens, 1500);
+    // A thinking model otherwise spends the step's token cap on thoughts and answers nothing.
+    assert.equal(calls[0].think, false, `${request.model} step thinks`);
   }
+});
+
+test('a rate-limited call is retried once, then the error stands', async () => {
+  const RATE_LIMIT = 'Provider API error: 429 - Rate limit or quota exceeded for this API key.';
+  /** An adapter whose provider plays `steps` in turn, repeating the last; counts the calls. */
+  const playing = (steps) => {
+    let calls = 0;
+    const callModel = createModelAdapter({
+      config: {},
+      request: { provider: 'openai', model: 'gpt-6-luna' },
+      retryDelayMs: () => 0,
+      streamWithProvider: async (args) => {
+        const step = steps[Math.min(calls, steps.length - 1)];
+        calls += 1;
+        await step(args);
+      }
+    });
+    return { callModel, calls: () => calls };
+  };
+  const fail = (message, code) => async () => { throw Object.assign(new Error(message), code ? { code } : {}); };
+  const answer = async (args) => { args.onToken('done'); };
+  const ask = (adapter, extra = {}) => adapter.callModel({ messages: [{ role: 'user', content: 'x' }], purpose: 'decide', ...extra });
+
+  const once = playing([fail(RATE_LIMIT), answer]);
+  assert.equal((await ask(once)).text, 'done');
+  assert.equal(once.calls(), 2);
+
+  const twice = playing([fail(RATE_LIMIT)]);
+  await assert.rejects(() => ask(twice), /429/);
+  assert.equal(twice.calls(), 2, 'one retry, not a loop');
+
+  // Output already reached the run, so a second attempt would repeat it.
+  const midStream = playing([async (args) => { args.onToken('half'); throw new Error(RATE_LIMIT); }]);
+  await assert.rejects(() => ask(midStream), /429/);
+  assert.equal(midStream.calls(), 1);
+
+  const dark = playing([fail(RATE_LIMIT, 'GO_DARK'), answer]);
+  await assert.rejects(() => ask(dark), /429/);
+  assert.equal(dark.calls(), 1, 'a Go Dark block is final');
+
+  const busy = playing([fail('Ollama API error: 503 - server busy'), answer]);
+  assert.equal((await ask(busy)).text, 'done');
+  assert.equal(busy.calls(), 2);
+
+  // Too little of the deadline left for a second attempt to finish.
+  const late = playing([fail(RATE_LIMIT), answer]);
+  await assert.rejects(() => ask(late, { timeoutMs: 10_000 }), /429/);
+  assert.equal(late.calls(), 1);
+
+  const other = playing([fail('Provider API error: 400 - bad request'), answer]);
+  await assert.rejects(() => ask(other), /400/);
+  assert.equal(other.calls(), 1, 'only a rate limit or a busy engine is retried');
 });
 
 test('a caller temperature stands unless the model rejects it', async () => {

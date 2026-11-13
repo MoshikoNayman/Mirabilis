@@ -677,3 +677,79 @@ test('extra tools cannot replace a built-in', async () => {
   const res = await r.dispatch('read_file', { path: 'a.txt' });
   assert.match(res.result.text, /hello/);
 });
+
+// one file, one agent
+
+test('one file, one agent', async () => {
+  const dir = await sandboxDir();
+  const runRules = createRunRules();
+  const first = createToolRegistry({ level: 'bypass', workDir: dir, gate: { runRules } });
+  const second = createToolRegistry({ level: 'bypass', workDir: dir, gate: { runRules } });
+  const file = path.join(dir, 'x.txt');
+
+  assert.equal((await first.dispatch('write_file', { path: 'x.txt', content: 'agent 0' }, { subAgent: 0 })).ok, true);
+  const refused = await second.dispatch('write_file', { path: 'x.txt', content: 'agent 1' }, { subAgent: 1 });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /Agent 1 is changing/);
+  assert.equal(await fs.readFile(file, 'utf8'), 'agent 0', 'the second writer changed nothing');
+
+  assert.equal((await first.dispatch('write_file', { path: 'x.txt', content: 'agent 0 again' }, { subAgent: 0 })).ok, true);
+  assert.equal((await second.dispatch('write_file', { path: 'x.txt', content: 'the lead' })).ok, true, 'the lead is never blocked');
+  runRules.writeClaims.clear();
+  assert.equal((await second.dispatch('write_file', { path: 'x.txt', content: 'agent 1' }, { subAgent: 1 })).ok, true,
+    'a new fan-out starts with no claims');
+  assert.equal(await fs.readFile(file, 'utf8'), 'agent 1');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('one file, one agent, however the path is spelled', async () => {
+  const dir = await sandboxDir();
+  const runRules = createRunRules();
+  // macOS and Windows disks ignore case, so the claim does too, on any host.
+  const make = () => createToolRegistry({ level: 'bypass', workDir: dir, gate: { runRules }, platform: 'darwin' });
+  const write = (file, subAgent) => make().dispatch('write_file', { path: file, content: `agent ${subAgent}` }, { subAgent });
+
+  assert.equal((await write('Notes.md', 0)).ok, true);
+  const otherCase = await write('notes.md', 1);
+  assert.equal(otherCase.ok, false);
+  assert.match(otherCase.error, /Agent 1 is changing/);
+
+  // A symlinked folder is the folder it points to. 'junction' lets Windows make it unprivileged.
+  await fs.mkdir(path.join(dir, 'real'));
+  await fs.symlink(path.join(dir, 'real'), path.join(dir, 'link'), 'junction');
+  assert.equal((await write('real/x.txt', 0)).ok, true);
+  const viaLink = await write('link/x.txt', 1);
+  assert.equal(viaLink.ok, false);
+  assert.match(viaLink.error, /Agent 1 is changing/);
+  assert.equal(await fs.readFile(path.join(dir, 'real', 'x.txt'), 'utf8'), 'agent 0');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('a write refused by a claim is never put to the user', async () => {
+  const dir = await sandboxDir();
+  const { broker, requests } = answeringBroker('allow');
+  const runRules = createRunRules();
+  const make = () => createToolRegistry({ level: 'ask', workDir: dir, gate: { broker, runRules } });
+
+  assert.equal((await make().dispatch('write_file', { path: 'y.txt', content: '0' }, { subAgent: 0 })).ok, true);
+  assert.equal(requests.length, 1);
+  const refused = await make().dispatch('write_file', { path: 'y.txt', content: '1' }, { subAgent: 1 });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /Agent 1 is changing/);
+  assert.equal(requests.length, 1, 'the user is not asked about a write that cannot happen');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('a failed write leaves no claim', async () => {
+  const dir = await sandboxDir();
+  const runRules = createRunRules();
+  const r = createToolRegistry({ level: 'bypass', workDir: dir, gate: { runRules } });
+
+  const miss = await r.dispatch('edit_file', { path: 'a.txt', old: 'absent text', new: 'x' }, { subAgent: 0 });
+  assert.equal(miss.ok, false);
+  assert.match(miss.error, /matches 0 places/);
+  const next = await r.dispatch('write_file', { path: 'a.txt', content: 'agent 1 wrote this' }, { subAgent: 1 });
+  assert.equal(next.ok, true, next.error);
+  assert.equal(await fs.readFile(path.join(dir, 'a.txt'), 'utf8'), 'agent 1 wrote this');
+  await fs.rm(dir, { recursive: true, force: true });
+});

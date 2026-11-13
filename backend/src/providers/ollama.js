@@ -161,7 +161,7 @@ export function clearFittedOptions() {
   _fittedOptions.clear();
 }
 
-export async function streamOllamaChat({ baseUrl, model, messages, signal, onToken, onStats, onNotice, temperature, maxTokens, keepAlive, options: extraOptions }) {
+export async function streamOllamaChat({ baseUrl, model, messages, signal, onToken, onStats, onNotice, temperature, maxTokens, keepAlive, think, options: extraOptions }) {
   const base = baseUrl || OLLAMA_BASE_URL;
   // Keep the model resident instead of Ollama's default 5-minute idle unload, so a
   // reply after a pause does not pay a full cold reload. Default 30m; -1 = never unload.
@@ -195,6 +195,8 @@ export async function streamOllamaChat({ baseUrl, model, messages, signal, onTok
         : { role: m.role, content: m.content })),
       stream: true,
       keep_alive,
+      // Only when asked: false keeps a thinking model from spending num_predict on thoughts.
+      ...(typeof think === 'boolean' ? { think } : {}),
       ...(Object.keys(opts).length ? { options: opts } : {}),
     };
     const res = await fetch(`${base}/api/chat`, {

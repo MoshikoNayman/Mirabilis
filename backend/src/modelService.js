@@ -485,7 +485,7 @@ function installedFields(m, facts) {
   };
 }
 
-export async function streamWithProvider({ provider, model, messages, config, signal, onToken, onStats, onNotice, overrideBaseUrl, overrideApiKey, temperature, maxTokens, ollamaOptions, openaiParams, keepAlive }) {
+export async function streamWithProvider({ provider, model, messages, config, signal, onToken, onStats, onNotice, overrideBaseUrl, overrideApiKey, temperature, maxTokens, ollamaOptions, openaiParams, keepAlive, think }) {
   // SSRF guard: this call echoes the provider body back, so cloud-metadata hosts
   // are refused here too. Loopback and LAN stay allowed for local models.
   if (overrideBaseUrl) assertSafeProviderUrl(overrideBaseUrl);
@@ -584,6 +584,7 @@ export async function streamWithProvider({ provider, model, messages, config, si
     temperature,
     maxTokens,
     keepAlive,
+    think,
     options: ollamaOptions,
   });
 }

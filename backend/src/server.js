@@ -585,7 +585,7 @@ async function transcribeDictationAudio({ sourcePath }) {
       });
     }
 
-    throw new Error('No speech-to-text engine is available. Open Voice Settings and install local speech-to-text, or set an OpenAI key.');
+    throw new Error('No speech-to-text engine. Install one in Voice Settings.');
   } finally {
     if (madeWav) unlink(wavPath).catch(() => {});
     unlink(`${stem}.txt`).catch(() => {});
@@ -597,7 +597,7 @@ async function transcribeDictationAudio({ sourcePath }) {
 const PIPER_VOICE_CATALOG = [
   {
     id: 'en_US-lessac-medium',
-    label: 'Lessac (US, neutral - recommended)',
+    label: 'Lessac (US, neutral)',
     lang: 'en_US',
     sizeMb: 64,
     onnxUrl: 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx',
@@ -621,7 +621,7 @@ const PIPER_VOICE_CATALOG = [
   },
   {
     id: 'en_US-jenny-diphone',
-    label: 'Jenny (US, female - lightweight ~6MB)',
+    label: 'Jenny (US, female)',
     lang: 'en_US',
     sizeMb: 6,
     onnxUrl: 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/jenny/diphone/en_US-jenny-diphone.onnx',
@@ -726,7 +726,7 @@ async function installVoiceTools() {
   if (platform === 'darwin') {
     const hasBrew = await commandExists('brew');
     if (!hasBrew) {
-      throw new Error('Homebrew is required for one-click setup on macOS. Install brew first, then click Setup again.');
+      throw new Error('Homebrew not found. Install it, then try again.');
     }
     const hasFfmpeg = await commandExists('ffmpeg');
     if (!hasFfmpeg) {
@@ -750,7 +750,7 @@ async function installVoiceTools() {
   if (platform === 'linux') {
     const hasApt = await commandExists('apt-get');
     if (!hasApt) {
-      throw new Error('One-click setup currently supports apt-based Linux only.');
+      throw new Error('Setup supports apt-based Linux only.');
     }
     await execAsync('sudo -n apt-get update && sudo -n apt-get install -y ffmpeg espeak-ng piper', {
       timeout: 1000 * 60 * 20,
@@ -762,7 +762,7 @@ async function installVoiceTools() {
     return;
   }
 
-  throw new Error('One-click voice tool setup is currently supported on macOS and apt-based Linux.');
+  throw new Error('Setup supports macOS and apt-based Linux only.');
 }
 
 app.get('/health', async (_req, res) => {
@@ -968,7 +968,7 @@ app.get('/api/providers/health', async (req, res) => {
         : 'Check your Anthropic API key and internet connectivity.')
       : provider === 'gpuaas'
       ? 'Set your GPUaaS OpenAI-compatible endpoint URL and API key.'
-      : 'Start your OpenAI-compatible server (LM Studio/llama.cpp/Oobabooga) or update Base URL.'
+      : 'Start the server or update Base URL.'
   });
 });
 
@@ -1186,16 +1186,16 @@ app.post('/api/voice/stt-setup', async (req, res) => {
     if (!bin) {
       if (process.platform === 'darwin') {
         if (!(await commandExists('brew'))) {
-          throw new Error('Homebrew is required to install local speech-to-text on macOS. Install brew, then try again.');
+          throw new Error('Homebrew not found. Install it, then try again.');
         }
         await execAsync('brew install whisper-cpp', { timeout: 1000 * 60 * 20, maxBuffer: 1024 * 1024 * 8 });
       } else if (process.platform === 'linux') {
         if (!(await commandExists('apt-get'))) {
-          throw new Error('One-click STT setup currently supports Homebrew (macOS) or apt-based Linux.');
+          throw new Error('Setup supports apt-based Linux only.');
         }
         await execAsync('sudo -n apt-get update && sudo -n apt-get install -y whisper-cpp', { timeout: 1000 * 60 * 20, maxBuffer: 1024 * 1024 * 8 });
       } else {
-        throw new Error('One-click STT setup is supported on macOS and apt-based Linux.');
+        throw new Error('Setup supports macOS and apt-based Linux only.');
       }
       bin = await resolveWhisperCppBinary();
     }
@@ -1231,7 +1231,7 @@ app.post('/api/voice/tts', async (req, res) => {
 
   const hasPiper = await commandExists('piper');
   if (!hasPiper) {
-    return res.status(503).json({ error: 'Piper is not installed. Open Voice Settings and click Install Piper.' });
+    return res.status(503).json({ error: 'Piper not installed. Install it in Voice Settings.' });
   }
 
   const installed = getInstalledPiperModelIds();
@@ -1356,7 +1356,7 @@ app.post('/api/providers/switch-model', async (req, res) => {
 
   const modelPath = await findLocalModelPath(modelId, modelPathHint);
   if (!modelPath || !existsSync(modelPath)) {
-    return res.status(400).json({ error: 'Model file not found locally. Place GGUF files under mirabilis/models/ or select a loaded endpoint model.' });
+    return res.status(400).json({ error: 'Model file not found. Add GGUF files to mirabilis/models/.' });
   }
 
   const threads = detectThreadCount();
@@ -1505,7 +1505,7 @@ app.post('/api/remote/connect', guardRemote, async (req, res) => {
     }
     // LAN devices stay reachable under Go Dark; public hosts do not.
     if (!egressAllowed(`ssh://${host.trim()}`)) {
-      return res.status(403).json({ error: `Go Dark is on: ${host.trim()} is not on this machine or the local network.` });
+      return res.status(403).json({ error: `Go Dark: ${host.trim()} is outside the local network.` });
     }
     if (!user || typeof user !== 'string') {
       return res.status(400).json({ error: 'user is required' });
@@ -1823,7 +1823,7 @@ app.post('/api/web-search', async (req, res) => {
   // Go Dark blocks search: the query is the user's raw message text. Enforced
   // here because the client check covers only remote model providers.
   if (localOnly === true || isGoDark()) {
-    res.status(403).json({ error: 'Go Dark is on: web search is disabled because it would send your query to a third-party service.' });
+    res.status(403).json({ error: 'Go Dark: web search is off.' });
     return;
   }
   if (!query || typeof query !== 'string' || !query.trim()) {
@@ -1876,7 +1876,7 @@ app.post('/api/web-search', async (req, res) => {
       res.json({
         sources: [],
         needsKey: true,
-        error: 'Web search needs a Tavily API key (set TAVILY_API_KEY). News questions work without one.'
+        error: 'Web search needs TAVILY_API_KEY.'
       });
       return;
     }
@@ -2163,7 +2163,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     const scope = classifyProviderScope(activeProvider, providerBaseUrl);
     if (scope.offDevice) {
       res.status(403).json({
-        error: `Go Dark is on - ${scope.reason} Pick a local model (Ollama or KoboldCpp), point the endpoint at localhost, or turn Go Dark off.`
+        error: `Go Dark: ${scope.reason} Pick a local model.`
       });
       return;
     }
@@ -2344,7 +2344,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   let visionNotice = null;
   if (outgoingHasImages && !(await providerSupportsVision(effectiveProvider, effectiveModel, ollamaBaseUrl))) {
     for (const m of outgoingMessages) { if (m.images) delete m.images; }
-    visionNotice = 'This model cannot see images. Pick a vision model (for example gemma3, gemma4:e4b, or llava) to analyze pictures.';
+    visionNotice = 'This model cannot see images. Pick a vision model.';
   }
 
   const promptTokenEstimate = outgoingMessages.reduce((total, message) => total + estimateTokens(message.content), 0);
@@ -2404,10 +2404,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       return;
     }
     if (!assistantText.trim() && !tunedNotice) {
-      throw new Error(
-        'The model returned no output. The engine may have run out of memory or stopped early. ' +
-        'Check the engine is still running, then try a shorter prompt or a smaller model.'
-      );
+      throw new Error('Model returned no output. Try a shorter prompt or a smaller model.');
     }
 
     const perfReceipt = buildPerformanceReceipt({

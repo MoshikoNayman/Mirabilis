@@ -5,6 +5,7 @@
 
 import { memo, useEffect, useRef, useState } from 'react';
 import { accessMeta } from '../../lib/access';
+import { AGENT_STATE_TEXT, STOP_LABEL, agentTag } from '../../lib/agentRunPolicy';
 import { EFFORT_LABELS } from '../../lib/effort';
 
 const fmtMs = (ms) => {
@@ -43,24 +44,12 @@ function Meter({ label, used, total, invert }) {
 }
 
 const PHASE_LABEL = {
-  plan: 'Planning', validate: 'Validating', 'wrap-up': 'Wrapping up'
+  plan: 'Planning', split: 'Splitting', validate: 'Validating', 'wrap-up': 'Wrapping up'
 };
 
-// Stop reasons from backend/src/agent/budget.js and runStore.js.
-const STOP_LABEL = {
-  completed: 'Completed',
-  cancelled: 'Cancelled',
-  failed: 'Failed',
-  'wall-clock-exhausted': 'Time limit',
-  'iterations-exhausted': 'Step limit',
-  'tool-calls-exhausted': 'Tool limit',
-  'token-budget-exhausted': 'Token limit',
-  'backend-restarted': 'Backend restarted'
-};
 // The strip headline already says Done, Stopped or Failed for these.
 const HEADLINE_STOPS = new Set(['completed', 'cancelled', 'failed']);
 
-// Matches EFFORT_LABELS in ChatApp.jsx.
 function AgentRunPanelInner({ run, onStop, onDismiss }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -80,10 +69,14 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
 
   if (!run) return null;
 
-  const { status, effort, goal, budget, events = [], answer, stopReason, error } = run;
+  const { status, effort, goal, budget, events = [], answer, stopReason, error, fanout } = run;
+  const agents = Array.isArray(run.agents) ? run.agents : [];
   const live = status === 'running' || status === 'stopping';
   const limits = budget?.limits;
   const lastEvent = events.length ? events[events.length - 1].text : '';
+  // Events carry the lead's clock, so time keeps moving during a fan-out, which sends no lead budget.
+  const lastAt = events.length ? events[events.length - 1].at || 0 : 0;
+  const elapsed = live ? Math.max(budget?.elapsedMs || 0, lastAt) : (budget?.elapsedMs || 0);
   // A stopping run's approvals are being cancelled, so only a running one waits.
   const pending = status === 'running' && Array.isArray(run.approvals) ? run.approvals : [];
   const waiting = pending.length > 0;
@@ -96,23 +89,31 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
   // Short form, e.g. "8m left | 3/12 | 7/60"; the popover carries the labels.
   const summary = [
     live
-      ? (limits ? `${fmtShort(limits.maxWallMs - (budget.elapsedMs || 0))} left` : '')
+      ? (limits ? `${fmtShort(limits.maxWallMs - elapsed)} left` : '')
       : (HEADLINE_STOPS.has(stopReason) ? '' : stopLabel),
     limits ? `${budget.iterations}/${limits.maxIterations}` : '',
     limits ? `${budget.toolCalls}/${limits.maxToolCalls}` : ''
   ].filter(Boolean).join(' | ');
 
+  const phaseLabel = run.phase === 'agents' && fanout
+    ? `Agents ${fanout.done}/${fanout.total}`
+    : (PHASE_LABEL[run.phase] || 'Working');
   const headline = waiting
     ? 'Needs approval'
     : live
-      ? (PHASE_LABEL[run.phase] || 'Working')
+      ? phaseLabel
       : status === 'completed' ? 'Done' : failed ? 'Failed' : 'Stopped';
 
+  const agentsNote = limits?.maxSubAgents > 1 ? `, ${limits.maxSubAgents} agents` : '';
   const details = [
-    effort ? `Effort: ${EFFORT_LABELS[effort] || effort}` : '',
+    effort ? `Effort: ${EFFORT_LABELS[effort] || effort}${agentsNote}` : '',
     access ? `Access: ${access.label}` : '',
     stopLabel
   ].filter(Boolean).join(' | ');
+
+  const asker = waiting && Number.isInteger(pending[0].subAgent)
+    ? `Agent ${pending[0].subAgent + 1} needs approval`
+    : 'Needs approval';
 
   return (
     <div ref={wrapRef} className="relative mx-1 flex min-w-0 flex-1 items-center justify-center sm:mx-2">
@@ -193,20 +194,34 @@ function AgentRunPanelInner({ run, onStop, onDismiss }) {
 
           {waiting && (
             <p className="mb-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-800 dark:text-amber-200">
-              {pending[0].title ? `Needs approval: ${pending[0].title}` : 'Needs approval'}
+              {pending[0].title ? `${asker}: ${pending[0].title}` : asker}
               {pending.length > 1 ? ` | ${pending.length - 1} more` : ''}
             </p>
           )}
 
           {limits && (
             <div className="mb-2 space-y-1">
-              <Meter label="Time" used={budget.elapsedMs} total={limits.maxWallMs} invert />
+              <Meter label="Time" used={elapsed} total={limits.maxWallMs} invert />
               <Meter label="Steps" used={budget.iterations} total={limits.maxIterations} />
               <Meter label="Tools" used={budget.toolCalls} total={limits.maxToolCalls} />
               {limits.maxSubAgents > 0 && (
                 <Meter label="Agents" used={budget.subAgents} total={limits.maxSubAgents} />
               )}
             </div>
+          )}
+
+          {agents.length > 0 && (
+            <ul aria-label="Agents" className="mb-2 max-h-28 space-y-0.5 overflow-y-auto scroll-thin text-[10px]">
+              {agents.map((a) => (
+                <li key={a.subAgent} className="flex items-center gap-2">
+                  <span className="w-6 shrink-0 font-mono text-[color:var(--text-muted)]">{agentTag(a.subAgent)}</span>
+                  <span className="min-w-0 flex-1 truncate text-[color:var(--text-main)]" title={a.goal}>{a.goal}</span>
+                  <span className={`shrink-0 font-mono ${AGENT_STATE_TEXT[a.state] || 'text-[color:var(--text-muted)]'}`}>
+                    {a.state}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
 
           {events.length > 0 && (

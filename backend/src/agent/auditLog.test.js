@@ -38,6 +38,21 @@ test('a run records what it was permitted to do and everything it did', async ()
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test('tool entries record which agent acted', async () => {
+  // Parallel agents each count their own steps; without the index two step 1s look alike.
+  const dir = await tmp();
+  const a = createRunAuditor({ dir, runId: 'run-agents' });
+  await a.tool({ iteration: 1, tool: 'list_dir', args: { path: '.' }, mutating: false, subAgent: 1 });
+  await a.result({ iteration: 1, tool: 'list_dir', ok: true, observation: '[]', subAgent: 1 });
+  await a.tool({ iteration: 1, tool: 'read_file', args: { path: 'a' } });
+  await a.result({ iteration: 1, tool: 'read_file', ok: true, observation: 'x' });
+  const entries = await readRunAudit(dir, 'run-agents');
+  assert.deepEqual(entries.map((e) => [e.kind, e.subAgent]), [
+    ['tool-call', 1], ['tool-result', 1], ['tool-call', null], ['tool-result', null]
+  ]);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test('it is append-only, so a crash mid-run leaves the earlier lines readable', async () => {
   const dir = await tmp();
   const a = createRunAuditor({ dir, runId: 'run-2' });

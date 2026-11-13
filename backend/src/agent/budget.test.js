@@ -86,6 +86,23 @@ test('repairs and sub-agents are capped, and grants are partial rather than over
   assert.equal(b.chargeSubAgents(1), 0);
 });
 
+test('child spend is added on every axis and never throws', () => {
+  // The children already spent it, so the charge-back must land even past a ceiling.
+  const b = createBudget(resolveEffort('high', { maxToolCalls: 2 }));
+  b.chargeToolCall();
+  b.chargeToolCall();
+  assert.doesNotThrow(() => b.chargeChildSpend({ toolCalls: 5, iterations: 4, outputTokens: 100 }));
+  const counts = () => {
+    const s = b.snapshot();
+    return { toolCalls: s.toolCalls, iterations: s.iterations, outputTokens: s.outputTokens };
+  };
+  assert.deepEqual(counts(), { toolCalls: 7, iterations: 4, outputTokens: 100 });
+  assert.equal(b.checkStop(), STOP_REASONS.TOOL_CALLS);
+
+  b.chargeChildSpend({ toolCalls: -3, iterations: NaN });
+  assert.deepEqual(counts(), { toolCalls: 7, iterations: 4, outputTokens: 100 }, 'nonsense spend changes nothing');
+});
+
 test('the first terminal reason wins and is reported in the snapshot', () => {
   const b = createBudget(resolveEffort('high'));
   b.finish(STOP_REASONS.COMPLETED);
@@ -121,6 +138,22 @@ test('agentic can be switched off by a caller but never on', () => {
     'a non-agentic tier must not be upgraded into one by a request argument');
 });
 
+test('count overrides are whole numbers and only lower', () => {
+  assert.equal(resolveEffort('ultra', { maxSubAgents: 2.7 }).maxSubAgents, 2);
+  assert.equal(resolveEffort('ultra', { maxSubAgents: 0.5 }).maxSubAgents, 0,
+    'half an agent is none, not a grant that runs nothing and defers every task');
+  assert.equal(resolveEffort('hour', { maxSubAgents: 99 }).maxSubAgents, 3);
+  assert.equal(resolveEffort('ultra', { maxSubAgents: -1 }).maxSubAgents, 8);
+  assert.equal(resolveEffort('ultra', /** @type {any} */ ({ maxSubAgents: '3' })).maxSubAgents, 3);
+  assert.equal(resolveEffort('high', { maxIterations: 3.9 }).maxIterations, 3);
+});
+
+test('Ultra can be switched off by a caller but never on', () => {
+  assert.notEqual(resolveEffort('hour', { ultra: true }).ultra, true,
+    'a request argument must not turn another tier into Ultra');
+  assert.equal(resolveEffort('ultra', { ultra: false }).ultra, false);
+});
+
 test('garbage input falls back to the default profile', () => {
   for (const bad of [undefined, null, '', 'not-a-tier', 42]) {
     assert.equal(resolveEffort(/** @type {any} */ (bad)).id, 'balanced');
@@ -135,6 +168,15 @@ test('every listed tier exists and budgets increase monotonically across them', 
     assert.ok(p.maxWallMs > prevWall, `${id} should allow more wall clock than the tier below it`);
     prevWall = p.maxWallMs;
   }
+});
+
+test('Ultra is an agentic tier between 1 hour and 5 hours with up to 8 agents', () => {
+  const p = EFFORT_PROFILES.ultra;
+  for (const key of ['agentic', 'plan', 'validate', 'ultra']) assert.equal(p[key], true, key);
+  assert.equal(p.maxSubAgents, 8);
+  assert.equal(p.maxWallMs, 2 * 60 * 60_000);
+  assert.equal(EFFORT_ORDER.indexOf('ultra'), EFFORT_ORDER.indexOf('hour') + 1);
+  assert.equal(EFFORT_ORDER.indexOf('ultra'), EFFORT_ORDER.indexOf('session') - 1);
 });
 
 test('only the agentic tiers may use tools or sub-agents', () => {

@@ -72,7 +72,7 @@ export function deriveInferenceDefaults({ profileRaw = {}, availableGb = null, m
       resolvedCtx: ctx,
       tight,
       backend: profileRaw.backend || null,
-      note: `num_ctx ${ctx}${profileRaw.backend && profileRaw.backend !== 'CPU' ? `, offload on ${profileRaw.backend}` : ', CPU'} - sized to ${budgetGb.toFixed(0)} GB budget`
+      note: `num_ctx ${ctx}${profileRaw.backend && profileRaw.backend !== 'CPU' ? `, offload on ${profileRaw.backend}` : ', CPU'}, ${budgetGb.toFixed(0)} GB budget`
     }
   };
 }

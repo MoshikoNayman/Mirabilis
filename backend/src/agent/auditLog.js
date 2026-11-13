@@ -97,20 +97,23 @@ export function createRunAuditor({ dir, runId, nowIso = () => new Date().toISOSt
       });
     },
 
-    /** One tool invocation, with the arguments it was actually called with. */
-    tool({ iteration, tool, args, mutating }) {
+    /** One tool invocation, with the arguments it was actually called with, and which agent made it. */
+    tool({ iteration, tool, args, mutating, subAgent }) {
       return write({
         kind: 'tool-call',
         iteration,
+        // Agents number their own steps, so the index tells two step 1s apart. null is the lead.
+        subAgent: Number.isInteger(subAgent) ? subAgent : null,
         tool,
         mutating: Boolean(mutating),
         args: clip(args, MAX_ARG_CHARS)
       });
     },
 
-    result({ iteration, tool, ok, observation }) {
+    result({ iteration, tool, ok, observation, subAgent }) {
       return write({
-        kind: 'tool-result', iteration, tool, ok: Boolean(ok),
+        kind: 'tool-result', iteration, subAgent: Number.isInteger(subAgent) ? subAgent : null,
+        tool, ok: Boolean(ok),
         result: clip(observation, MAX_RESULT_CHARS)
       });
     },

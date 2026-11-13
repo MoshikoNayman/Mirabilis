@@ -4,7 +4,8 @@ import {
   approvalNarration, approvalReplyOutcome, runRefusal, describeRunError,
   IMAGE_PROMPT_PREFIX, isExplicitImagePrompt, toImagePrompt, accessChangeNotice,
   isTextAttachment, clipMiddle, userTextOf, contextMessages, conversationContext, buildRunContext,
-  CONTEXT_MAX_MESSAGES
+  CONTEXT_MAX_MESSAGES, STOP_LABEL, AGENT_STATES, AGENT_STATE_TEXT, agentTag, reduceAgents, applyRunEvent,
+  runEventLine, settleRun
 } from './agentRunPolicy.js';
 
 describe('chooseSendRoute', () => {
@@ -77,7 +78,7 @@ describe('accessChangeNotice', () => {
   });
 
   it('says a higher level waits for the next message', () => {
-    expect(accessChangeNotice('read', 'bypass')).toBe('Bypass applies from next message');
+    expect(accessChangeNotice('read', 'bypass')).toBe('Bypass permissions applies from next message');
   });
 
   it('treats a return to the run level as applying at once', () => {
@@ -98,8 +99,14 @@ describe('toApproval', () => {
     expect(toApproval(event)).toEqual({
       approvalId: 'a1', kind: 'command', title: 'Run a command', detail: 'brew install wget',
       reason: 'Not read-only.', reasonCode: 'not-read-only', alwaysLabel: 'Always allow `brew install`',
-      network: true, tool: 'run_command', cwd: '/Users/me/project'
+      network: true, tool: 'run_command', cwd: '/Users/me/project', subAgent: null
     });
+  });
+
+  it('keeps the index of a sub-agent that asks', () => {
+    expect(toApproval({ ...event, subAgent: 1 }).subAgent).toBe(1);
+    expect(toApproval({ ...event, subAgent: 0 }).subAgent).toBe(0);
+    for (const bad of ['1', 1.5, -1, null]) expect(toApproval({ ...event, subAgent: bad }).subAgent).toBeNull();
   });
 
   it('needs an id', () => {
@@ -112,7 +119,7 @@ describe('toApproval', () => {
   it('fills safe defaults for missing or odd fields', () => {
     expect(toApproval({ approvalId: 'b', alwaysLabel: '', network: 'yes', title: 7, cwd: 3 })).toEqual({
       approvalId: 'b', kind: 'other', title: '', detail: '', reason: '', reasonCode: '',
-      alwaysLabel: null, network: false, tool: '', cwd: ''
+      alwaysLabel: null, network: false, tool: '', cwd: '', subAgent: null
     });
   });
 });
@@ -232,6 +239,241 @@ describe('describeRunError', () => {
     expect(describeRunError(502, '')).toContain('502');
     expect(describeRunError(502, '   ')).toContain('502');
     expect(describeRunError(400, 'x'.repeat(500))).toContain('400');
+  });
+});
+
+describe('agentTag', () => {
+  it('names a sub-agent by its index plus one, and the lead not at all', () => {
+    expect(agentTag(0)).toBe('A1');
+    expect(agentTag(7)).toBe('A8');
+    for (const lead of [undefined, null, '1', 1.5, -1]) expect(agentTag(lead)).toBe('');
+  });
+});
+
+describe('runEventLine', () => {
+  const sub = (event) => ({ ...event, subAgent: 1, subGoal: 'count the files' });
+  const toolCall = { type: 'tool-call', tool: 'read_file', args: { path: 'a' } };
+  const toolDone = { type: 'tool-result', tool: 'read_file', ok: true, observation: '{}' };
+
+  it('writes the lead lines as before', () => {
+    expect(runEventLine({ type: 'phase', phase: 'plan' })).toBe('phase: plan');
+    expect(runEventLine(toolCall)).toBe('read_file({"path":"a"})');
+    expect(runEventLine(toolDone)).toBe('  read_file done');
+    expect(runEventLine({ ...toolDone, ok: false, observation: 'ERROR: no such file' })).toBe('  read_file failed: no such file');
+    expect(runEventLine({ type: 'finish-proposed' })).toBe('proposed a result');
+    expect(runEventLine({ type: 'plan', plan: 'x'.repeat(200) })).toBe(`plan: ${'x'.repeat(120)}`);
+    expect(runEventLine({ type: 'invalid-action', error: 'bad JSON' })).toBe('  retrying: bad JSON');
+    expect(runEventLine({ type: 'validation', passed: true })).toBe('validation passed');
+    expect(runEventLine({ type: 'validation', passed: false, reason: 'no evidence' })).toBe('validation failed: no evidence');
+    expect(runEventLine({ type: 'repair', reason: 'read the log' })).toBe('repairing: read the log');
+  });
+
+  it('tags a sub-agent line after its indent', () => {
+    expect(runEventLine(sub(toolCall))).toBe('A2 read_file({"path":"a"})');
+    expect(runEventLine(sub(toolDone))).toBe('  A2 read_file done');
+    expect(runEventLine(sub({ type: 'validation', passed: true }))).toBe('A2 validation passed');
+  });
+
+  it('leaves out what the strip and the agent rows already show', () => {
+    expect(runEventLine(sub({ type: 'phase', phase: 'validate' }))).toBeNull();
+    expect(runEventLine(sub({ type: 'plan', plan: 'x' }))).toBeNull();
+    expect(runEventLine({ type: 'tool-call', tool: 'spawn_agents', args: { tasks: [] } })).toBeNull();
+    expect(runEventLine({ type: 'tool-result', tool: 'spawn_agents', ok: true, observation: '{}' })).toBeNull();
+    for (const type of ['run-start', 'run-end', 'run-error', 'iteration', 'model-resolved']) {
+      expect(runEventLine({ type }), type).toBeNull();
+    }
+    expect(runEventLine(sub({ type: 'run-start' }))).toBeNull();
+    expect(runEventLine(sub({ type: 'iteration', iteration: 2 }))).toBeNull();
+    expect(runEventLine(sub({ type: 'run-end', stopReason: 'completed', validated: false }))).toBeNull();
+    expect(runEventLine(null)).toBeNull();
+  });
+
+  it('reads a split and a fan-out', () => {
+    expect(runEventLine({ type: 'split', count: 3 })).toBe('split: 3 parts');
+    expect(runEventLine({ type: 'split', count: 1 })).toBe('split: solo');
+    expect(runEventLine({ type: 'split', count: 0 })).toBe('split: solo');
+    expect(runEventLine({ type: 'fanout-start', count: 3, concurrency: 2 })).toBe('3 agents, 2 at a time');
+    expect(runEventLine({ type: 'fanout-start', count: 3, concurrency: 8, deferred: 1 })).toBe('3 agents, 3 at a time, 1 deferred');
+    expect(runEventLine({ type: 'fanout-start', count: 1 })).toBe('1 agent');
+    expect(runEventLine({ type: 'fanout-end', count: 3, spentToolCalls: 14 })).toBe('agents done (14 tool calls)');
+  });
+
+  it('says how a sub-agent ended when it did not complete', () => {
+    expect(runEventLine(sub({ type: 'run-end', stopReason: 'wall-clock-exhausted' }))).toBe('A2 stopped: Time limit');
+    expect(runEventLine(sub({ type: 'run-error', error: `engine down ${'x'.repeat(100)}` })))
+      .toBe(`A2 failed: engine down ${'x'.repeat(68)}`);
+  });
+
+  it('says why a fan-out started no agent', () => {
+    const refusal = (error) => JSON.stringify({ spawned: 0, error });
+    // The tool refuses as a result; an Ultra fan-out with no budget reports ok false.
+    expect(runEventLine({ type: 'tool-result', tool: 'spawn_agents', ok: true, observation: refusal('No sub-agent capacity remains.') }))
+      .toBe('  spawn_agents failed: No sub-agent capacity remains.');
+    expect(runEventLine({ type: 'tool-result', tool: 'spawn_agents', ok: false, observation: refusal(`Not enough budget ${'x'.repeat(100)}`) }))
+      .toBe(`  spawn_agents failed: Not enough budget ${'x'.repeat(72)}`);
+    expect(runEventLine(sub({ type: 'tool-result', tool: 'spawn_agents', ok: false, observation: 'ERROR: Unknown tool "spawn_agents".' })))
+      .toBe('  A2 spawn_agents failed: Unknown tool "spawn_agents".');
+    // A fan-out that ran reads as its fanout lines only.
+    expect(runEventLine({ type: 'tool-result', tool: 'spawn_agents', ok: true, observation: '{"spawned":2,"deferred":[]}' })).toBeNull();
+  });
+
+  it('keeps every line and stop label plain ASCII', () => {
+    const feed = [
+      { type: 'phase', phase: 'split' }, { type: 'split', count: 2 }, { type: 'split', count: 0 },
+      { type: 'plan', plan: '1. a\n2. b' }, toolCall, toolDone, { ...toolDone, ok: false, observation: 'ERROR: x' },
+      { type: 'invalid-action', error: 'x' }, { type: 'finish-proposed' }, { type: 'validation', passed: false, reason: 'x' },
+      { type: 'repair', reason: 'x' }, { type: 'fanout-start', count: 2, concurrency: 2, deferred: 1 },
+      { type: 'fanout-end', spentToolCalls: 3 }, sub(toolCall), sub(toolDone),
+      sub({ type: 'run-end', stopReason: 'cancelled' }), sub({ type: 'run-error', error: 'x' })
+    ];
+    for (const event of feed) {
+      const line = runEventLine(event);
+      expect(typeof line, event.type).toBe('string');
+      expect(/^[\x00-\x7f]*$/.test(line), line).toBe(true);
+    }
+    for (const label of Object.values(STOP_LABEL)) expect(/^[\x20-\x7e]+$/.test(label), label).toBe(true);
+  });
+});
+
+describe('applyRunEvent and reduceAgents', () => {
+  const agents = [
+    { subAgent: 0, goal: 'list the project folder' },
+    { subAgent: 1, goal: 'count the files' },
+    { subAgent: 2, goal: 'read the backend log' }
+  ];
+  const start = () => ({ status: 'running', phase: 'split', budget: null, agents: [], fanout: null, events: [] });
+  const fanned = () => applyRunEvent(start(), { type: 'fanout-start', count: 3, concurrency: 2, agents, budget: { iterations: 1 } });
+  const rows = () => reduceAgents([], { type: 'fanout-start', agents });
+
+  it('moves the phase for the lead only', () => {
+    const run = start();
+    expect(applyRunEvent(run, { type: 'phase', phase: 'validate', subAgent: 0 })).toBe(run);
+    expect(applyRunEvent(run, { type: 'iteration', iteration: 1, subAgent: 0 })).toBe(run);
+    expect(applyRunEvent(run, { type: 'phase', phase: 'plan' }).phase).toBe('plan');
+    expect(applyRunEvent(run, { type: 'iteration', iteration: 1 }).phase).toBe('act');
+  });
+
+  it('takes the budget from the lead only', () => {
+    const run = start();
+    expect(applyRunEvent(run, { type: 'iteration', iteration: 2, budget: { iterations: 2 } }).budget).toEqual({ iterations: 2 });
+    expect(applyRunEvent(run, { type: 'iteration', iteration: 9, subAgent: 1, budget: { iterations: 9 } })).toBe(run);
+  });
+
+  it('lists the agents of a fan-out and counts them as they finish', () => {
+    let run = fanned();
+    expect(run.phase).toBe('agents');
+    expect(run.fanout).toEqual({ total: 3, done: 0 });
+    expect(run.budget).toEqual({ iterations: 1 });
+    expect(run.agents.map((a) => [a.subAgent, a.goal, a.state])).toEqual([
+      [0, 'list the project folder', 'queued'], [1, 'count the files', 'queued'], [2, 'read the backend log', 'queued']
+    ]);
+    run = applyRunEvent(run, { type: 'run-start', subAgent: 1 });
+    expect(run.agents[1].state).toBe('working');
+    run = applyRunEvent(run, { type: 'run-end', subAgent: 1, stopReason: 'completed', validated: true });
+    expect(run.agents[1].state).toBe('passed');
+    expect(run.fanout).toEqual({ total: 3, done: 1 });
+    run = applyRunEvent(run, { type: 'run-end', subAgent: 0, stopReason: 'completed', validated: false });
+    expect(run.agents[0].state).toBe('unverified');
+    run = applyRunEvent(run, { type: 'run-error', subAgent: 2, error: 'engine down' });
+    expect(run.agents[2].state).toBe('failed');
+    expect(run.fanout).toEqual({ total: 3, done: 3 });
+    run = applyRunEvent(run, { type: 'fanout-end', count: 3, spentToolCalls: 14, budget: { iterations: 20 } });
+    expect(run.phase).toBe('act');
+    expect(run.fanout).toBeNull();
+    expect(run.budget).toEqual({ iterations: 20 });
+    expect(run.agents.map((a) => a.state)).toEqual(['unverified', 'passed', 'failed']);
+  });
+
+  it('names how an agent ended', () => {
+    const ended = (stopReason) => reduceAgents(rows(), { type: 'run-end', subAgent: 0, stopReason })[0].state;
+    expect(ended('failed')).toBe('failed');
+    expect(ended('cancelled')).toBe('stopped');
+    expect(ended('iterations-exhausted')).toBe('stopped');
+  });
+
+  it('shows an agent waiting on an approval until it is answered', () => {
+    let list = reduceAgents(rows(), { type: 'run-start', subAgent: 2 });
+    list = reduceAgents(list, { type: 'approval-required', subAgent: 2 });
+    expect(list[2].state).toBe('waiting');
+    list = reduceAgents(list, { type: 'approval-resolved', subAgent: 2 });
+    expect(list[2].state).toBe('working');
+    // Only a waiting row goes back to working.
+    expect(reduceAgents(list, { type: 'approval-resolved', subAgent: 0 })).toBe(list);
+    const done = reduceAgents(list, { type: 'run-end', subAgent: 2, stopReason: 'completed', validated: true });
+    expect(reduceAgents(done, { type: 'approval-resolved', subAgent: 2 })).toBe(done);
+  });
+
+  it('returns the same rows when nothing changes', () => {
+    const list = rows();
+    expect(reduceAgents(list, { type: 'tool-call', subAgent: 0, tool: 'list_dir' })).toBe(list);
+    expect(reduceAgents(list, { type: 'run-start', subAgent: 9 })).toBe(list);
+    expect(reduceAgents(list, { type: 'run-start' })).toBe(list);
+    expect(reduceAgents(list, { type: 'fanout-start', agents })).toBe(list);
+    expect(reduceAgents(undefined, null)).toEqual([]);
+  });
+
+  it('keeps numbering across fan-outs and at most 16 rows', () => {
+    const wave = (from, n) => ({
+      type: 'fanout-start',
+      agents: Array.from({ length: n }, (_, i) => ({ subAgent: from + i, goal: `part ${from + i}` }))
+    });
+    const list = reduceAgents(reduceAgents([], wave(0, 10)), wave(10, 10));
+    expect(list).toHaveLength(16);
+    expect(list[0].subAgent).toBe(4);
+    expect(list.at(-1).subAgent).toBe(19);
+    expect(list.every((r) => AGENT_STATES.includes(r.state))).toBe(true);
+  });
+
+  it('colors a warning state with a pair for each theme', () => {
+    for (const [state, classes] of Object.entries(AGENT_STATE_TEXT)) {
+      expect(AGENT_STATES).toContain(state);
+      expect(classes, state).toMatch(/(^|\s)text-[a-z]+-\d+(\s|$)/);
+      expect(classes, state).toMatch(/(^|\s)dark:text-[a-z]+-\d+(\s|$)/);
+    }
+    expect(Object.keys(AGENT_STATE_TEXT).sort()).toEqual(['failed', 'unverified']);
+  });
+});
+
+describe('settleRun', () => {
+  const agents = [
+    { subAgent: 0, goal: 'a', state: 'passed' },
+    { subAgent: 1, goal: 'b', state: 'working' },
+    { subAgent: 2, goal: 'c', state: 'waiting' },
+    { subAgent: 3, goal: 'd', state: 'queued' },
+    { subAgent: 4, goal: 'e', state: 'unverified' }
+  ];
+  const midFanout = () => ({
+    status: 'stopping', phase: 'agents', fanout: { total: 4, done: 1 }, agents,
+    budget: { elapsedMs: 1_000, iterations: 3 }, events: [{ text: 'A1 read_file done', at: 1_200_000 }]
+  });
+
+  it('ends the rows a stop left open and keeps the ones that ended', () => {
+    const run = settleRun(midFanout(), { status: 'stopped', stopReason: 'cancelled' });
+    expect(run.status).toBe('stopped');
+    expect(run.stopReason).toBe('cancelled');
+    expect(run.agents.map((a) => a.state)).toEqual(['passed', 'stopped', 'stopped', 'stopped', 'unverified']);
+    expect(run.fanout).toBeNull();
+  });
+
+  it('fails the open rows with a failed run', () => {
+    const run = settleRun(midFanout(), { status: 'failed', error: 'network error' });
+    expect(run.error).toBe('network error');
+    expect(run.agents.map((a) => a.state)).toEqual(['passed', 'failed', 'failed', 'failed', 'unverified']);
+  });
+
+  it('keeps the time the panel last showed', () => {
+    // Live, the clock follows the newest event; a fan-out sends no lead budget.
+    expect(settleRun(midFanout(), { status: 'stopped' }).budget).toEqual({ elapsedMs: 1_200_000, iterations: 3 });
+    const later = { ...midFanout(), budget: { elapsedMs: 2_000_000, iterations: 9 } };
+    expect(settleRun(later, { status: 'stopped' }).budget).toBe(later.budget);
+    expect(settleRun({ ...midFanout(), budget: null }, { status: 'stopped' }).budget).toBeNull();
+  });
+
+  it('leaves a run with nothing open as it was, apart from the end', () => {
+    const done = { status: 'running', agents: [agents[0]], fanout: null, budget: null, events: [] };
+    const run = settleRun(done, { status: 'stopped' });
+    expect(run.agents).toBe(done.agents);
+    expect(settleRun(null, { status: 'stopped' })).toBeNull();
   });
 });
 

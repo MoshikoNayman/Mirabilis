@@ -14,11 +14,11 @@ file says where to look.
   connectors.
 - A chat message streams back over Server-Sent Events and is saved to `chats.json` in the data folder.
 - An agent run is a job with a work budget. It plans, calls tools, checks its result and stops when
-  the budget says so. Access (Chat only, Read only, Ask first, Bypass) decides what tools may do.
+  the budget says so. Access (Chat only, Read only, Ask first, Bypass permissions) decides what tools may do.
 - Connectors are MCP servers Mirabilis uses as a client; the built-in This computer connector
   holds the system tools. Mirabilis is also an MCP server at `/mcp`.
 - Go Dark keeps the backend's own requests on this machine or the local network. Commands run in
-  Bypass and local connectors are not filtered (see Go Dark).
+  Bypass permissions and local connectors are not filtered (see Go Dark).
 
 ## Processes and ports
 
@@ -95,13 +95,14 @@ streams back as SSE `progress` events, then `result`.
   raise it. Chat only with a single-shot effort is refused with `useChat: true`.
 - Budget (`backend/src/agent/effortProfiles.js`, enforced in `backend/src/agent/budget.js`):
   Instant, Fast, Balanced and Thorough are single-shot; with tools on they run the small `assist`
-  profile (10 minutes, 16 steps, 40 tool calls). High effort (30 minutes), 1 hour and 5 hours plan,
-  validate and repair; the last two may fan out to sub-agents (`backend/src/agent/subAgents.js`).
+  profile (10 minutes, 16 steps, 40 tool calls). High effort (30 minutes), 1 hour, Ultra (2 hours)
+  and 5 hours plan, validate and repair; all but High may fan out to sub-agents, up to the Agents
+  count (`backend/src/agent/subAgents.js`). Ultra splits the goal in code and checks every part.
 - Loop (`backend/src/agent/agentLoop.js`): plan, then repeat: the model replies with one JSON
   action (`backend/src/agent/protocol.js`, built for small local models), the registry runs the
-  tool, and the result (first 4000 characters) goes back into the next prompt. A finish is checked
-  by a validation pass; a failed check triggers a repair. When the budget runs out, a wrap-up
-  reports what was established.
+  tool, and the result (first 4000 characters, 16000 for a fan-out) goes back into the next
+  prompt. A finish is checked by a validation pass; a failed check triggers a repair. When the
+  budget runs out, a wrap-up reports what was established.
 - Tools (`backend/src/agent/tools.js`): `list_dir`, `read_file`, `search_files`, `write_file`,
   `edit_file`, `run_command`, plus the self tools (`backend/src/agent/selfTools.js`:
   `mirabilis_status`, `mirabilis_logs`, `mirabilis_architecture`) and connector tools. The system
@@ -126,14 +127,14 @@ One setting, saved by the backend in `access.json` in the data folder and served
 | Chat only (default) | No tools at all. |
 | Read only | Read files anywhere, inspect the system, run read-only commands, use read-only connector tools. Never changes anything and never asks. |
 | Ask first | Everything Read only does, freely. Anything that changes something, or is not known to be read-only, pauses and asks. |
-| Bypass | Everything, with no approvals, no command blocklist and no folder jail. |
+| Bypass permissions | Everything, with no approvals, no command blocklist and no folder jail. |
 
 - Read-only means proven read-only: `backend/src/agent/commandPolicy.js` splits a command on
   pipes and `&&`, `||`, `;`, refuses redirection and subshells, and checks every program and its
   arguments against a list (`ps`, `df`, `git status`, `brew services list`, and so on).
 - "Always allow" in Ask first saves a rule such as `git status` to `allowCommands`. Rules apply in
   Ask first only; Read only stays strictly read-only.
-- In Bypass the only things still applied are the operator jail `MIRABILIS_MCP_FS_ROOT` when set,
+- In Bypass permissions the only things still applied are the operator jail `MIRABILIS_MCP_FS_ROOT` when set,
   the work budget, the audit log, and connector tools set to Off (not offered at all).
 - The blocklist in `backend/src/agent/sandbox.js` (recursive `rm`, disk wipes, power off) applies in
   Read only and Ask first.
@@ -147,7 +148,7 @@ One setting, saved by the backend in `access.json` in the data folder and served
   and their own network use is up to them. This computer reads `go-dark.json` at each call:
   `ping_host`, `dns_lookup` and `check_port` refuse targets outside this machine and the LAN.
 - With Go Dark on, a command that uses the network (`ping`, `curl`, `git fetch`) is denied in
-  Read only and asked about in Ask first, with no "always" offered. In Bypass commands are not
+  Read only and asked about in Ask first, with no "always" offered. In Bypass permissions commands are not
   filtered.
 - The desktop updater makes no request until the UI reports Go Dark is off.
 

@@ -11,17 +11,6 @@ describe('ACCESS_LEVELS', () => {
     expect(ACCESS_LEVELS.map((l) => l.id)).toEqual(['chat', 'read', 'ask', 'bypass']);
   });
 
-  it('keeps each menu hint to a few words', () => {
-    const byId = Object.fromEntries(ACCESS_LEVELS.map((l) => [l.id, l.hint]));
-    expect(byId).toEqual({
-      chat: 'No computer access',
-      read: 'Reads, never changes',
-      ask: 'Asks before changes',
-      bypass: 'Runs anything, never asks'
-    });
-    for (const hint of Object.values(byId)) expect(hint.split(' ').length).toBeLessThanOrEqual(4);
-  });
-
   it('gives every level a label, a short chip label and a known tone', () => {
     const ids = new Set();
     for (const level of ACCESS_LEVELS) {
@@ -55,7 +44,7 @@ describe('ACCESS_LEVELS', () => {
 
   it('keeps UI text plain ASCII', () => {
     for (const level of ACCESS_LEVELS) {
-      for (const text of [level.label, level.short, level.hint]) {
+      for (const text of [level.label, level.short]) {
         expect(/^[\x20-\x7e]*$/.test(text)).toBe(true);
       }
     }
@@ -82,7 +71,7 @@ describe('ACCESS_LEVELS', () => {
 describe('accessMeta', () => {
   it('returns the matching level', () => {
     for (const level of ACCESS_LEVELS) expect(accessMeta(level.id)).toBe(level);
-    expect(accessMeta('bypass').label).toBe('Bypass');
+    expect(accessMeta('bypass').label).toBe('Bypass permissions');
     expect(accessMeta('ask').short).toBe('Ask');
   });
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAgentAction, protocolInstructions } from './protocol.js';
+import { parseAgentAction, parseSplit, protocolInstructions } from './protocol.js';
 
 test('a clean tool action parses', () => {
   const a = parseAgentAction('{"thought":"look first","action":"tool","tool":"read_file","args":{"path":"a.txt"}}');
@@ -103,6 +103,35 @@ test('a malformed args value degrades to an empty object rather than crashing', 
   const a = parseAgentAction('{"action":"tool","tool":"t","args":"not-an-object"}');
   assert.equal(a.kind, 'tool');
   assert.deepEqual(a.args, {});
+});
+
+// splitting a goal into parts
+
+test('parseSplit reads the forms small models write', () => {
+  const forms = [
+    '{"parts":["a","b"]}',
+    'Here is the split:\n```json\n{"parts": ["a", "b"]}\n```\n',
+    '{"tasks":[{"goal":"a"},{"goal":"b"}]}',
+    '["a","b"]',
+    '[{"goal":"a"},{"goal":"b"}]',
+    '{\u201Cparts\u201D: [\u201Ca\u201D, \u201Cb\u201D,]}'
+  ];
+  for (const text of forms) assert.deepEqual(parseSplit(text), ['a', 'b'], text);
+});
+
+test('parseSplit drops empties and duplicates and returns nothing for prose', () => {
+  assert.deepEqual(parseSplit('{"parts":["a"," ","a","b"]}'), ['a', 'b']);
+  for (const text of ['cannot split this', '{"parts":[]}', '{"parts":"a, b"}']) {
+    assert.deepEqual(parseSplit(text), [], text);
+  }
+});
+
+test('parseSplit caps, clips and folds', () => {
+  const twenty = JSON.stringify({ parts: Array.from({ length: 20 }, (_, i) => `part ${i}`) });
+  assert.equal(parseSplit(twenty).length, 16);
+  assert.equal(parseSplit(JSON.stringify({ parts: ['x'.repeat(5000)] }))[0].length, 2000);
+  // Surplus parts are kept as extra lines, round-robin, rather than dropped.
+  assert.deepEqual(parseSplit('{"parts":["a","b","c","d"]}', 2), ['a\nAlso: c', 'b\nAlso: d']);
 });
 
 test('the instructions state the contract and list only the given tools', () => {

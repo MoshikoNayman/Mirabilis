@@ -80,25 +80,25 @@ export async function detectCapability() {
   if (isAppleSilicon()) {
     return {
       canRunLocal: false, appleSilicon: true, hasNvidia: false, installed: false,
-      reason: 'vLLM is CUDA-only and cannot run locally on Apple Silicon. Use llama.cpp or MLX locally here, or connect to a remote vLLM server below.'
+      reason: 'Not supported on Apple Silicon. Use a remote server below.'
     };
   }
   if (os.platform() === 'win32') {
     const hasNvidia = await has('nvidia-smi');
     return {
       canRunLocal: false, appleSilicon: false, hasNvidia, installed: false,
-      reason: 'Local vLLM runs on Linux with CUDA. On Windows, run it under WSL2, or connect to a remote vLLM server below.'
+      reason: 'Linux only. Use WSL2 or a remote server below.'
     };
   }
   const hasNvidia = await has('nvidia-smi');
   const { installed, launcher, python } = await detectLauncher();
   if (!hasNvidia) {
     return { canRunLocal: false, hasNvidia: false, installed, launcher, python,
-      reason: 'No NVIDIA GPU detected (nvidia-smi missing). Local vLLM needs a CUDA GPU; connect to a remote vLLM server below instead.' };
+      reason: 'No NVIDIA GPU found. Use a remote server below.' };
   }
   if (!installed) {
     return { canRunLocal: false, hasNvidia: true, installed: false, launcher: null, python: null,
-      reason: 'NVIDIA GPU found, but vLLM is not installed. Install it with:  pip install vllm' };
+      reason: 'vLLM not installed. Run: pip install vllm' };
   }
   return { canRunLocal: true, hasNvidia: true, installed: true, launcher, python, reason: null };
 }

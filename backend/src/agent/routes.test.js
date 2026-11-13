@@ -551,6 +551,79 @@ test('stopping a run cancels the approval it is waiting on', async () => {
   await setAccess({ level: 'chat' });
 });
 
+// effort tiers and the agent count
+
+/** Finish every step and pass every check; an Ultra split comes back with no parts. */
+function soloScript({ user }) {
+  if (user.includes('Split the goal into at most')) return '{"parts":[]}';
+  if (user.includes('Does the result actually achieve the goal')) return '{"pass":true}';
+  return '{"action":"finish","summary":"ok"}';
+}
+
+/** The limits a run was accepted with; the run must also complete. */
+async function limitsOf(effort, overrides) {
+  const { frames } = await runStream({ goal: 'agent count probe', effort, provider: 'ollama', ...(overrides ? { overrides } : {}) });
+  const accepted = frames.find((f) => f.event === 'run-accepted');
+  assert.ok(accepted, `${effort} was not accepted`);
+  assert.equal(resultOf(frames)?.ok, true, `${effort} did not complete`);
+  return accepted.data.limits;
+}
+
+test('the agent count rides on overrides and is clamped to the tier', async () => {
+  await setAccess({ level: 'read' });
+  script = soloScript;
+  const ultra = await limitsOf('ultra', { maxSubAgents: 3 });
+  assert.equal(ultra.maxSubAgents, 3);
+  assert.equal(ultra.ultra, true);
+  assert.equal((await limitsOf('hour', { maxSubAgents: 99 })).maxSubAgents, 3, 'a request can only lower the cap');
+  assert.equal((await limitsOf('ultra', { maxSubAgents: 0 })).maxSubAgents, 0);
+  script = null;
+  await setAccess({ level: 'chat' });
+});
+
+test('Chat only runs 1 hour as one agent and keeps Ultra agents', async () => {
+  await setAccess({ level: 'chat' });
+  script = soloScript;
+  assert.equal((await limitsOf('hour')).maxSubAgents, 0, 'no tools, so nothing fans out');
+  assert.equal((await limitsOf('ultra')).maxSubAgents, 8, 'Ultra agents reason without tools');
+  script = null;
+});
+
+test('GET /api/agent/effort-profiles lists Ultra between 1 hour and 5 hours', async () => {
+  const res = await fetch(`${baseUrl}/api/agent/effort-profiles`, { headers: authJson() });
+  assert.equal(res.status, 200);
+  const { order, profiles } = await res.json();
+  assert.equal(order.indexOf('ultra'), order.indexOf('hour') + 1);
+  assert.equal(order.indexOf('ultra'), order.indexOf('session') - 1);
+  const ultra = profiles.find((p) => p.id === 'ultra');
+  assert.equal(ultra.ultra, true);
+  assert.equal(ultra.maxSubAgents, 8);
+  assert.ok(profiles.filter((p) => p.id !== 'ultra').every((p) => p.ultra === false));
+});
+
+test('an Ultra run names each agent in the audit log', async () => {
+  await setAccess({ level: 'read' });
+  const listed = steps([{ tool: 'list_dir', args: { path: '.' } }], 'listed');
+  script = (prompt) => {
+    if (prompt.user.includes('Split the goal into at most')) return '{"parts":["list the project folder","count the files"]}';
+    if (prompt.user.includes('Does the result actually achieve the goal')) return '{"pass":true}';
+    if (prompt.system.includes('You are agent')) return listed(prompt);
+    return '{"action":"finish","summary":"merged"}';
+  };
+  const { frames, runId } = await runStream({ goal: 'survey the project', effort: 'ultra', provider: 'ollama', fsRoot: projDir });
+  assert.equal(resultOf(frames).answer, 'merged');
+
+  const res = await fetch(`${baseUrl}/api/agent/runs/${runId}/audit`, { headers: authJson() });
+  assert.equal(res.status, 200);
+  const { entries } = await res.json();
+  const calls = entries.filter((e) => e.kind === 'tool-call');
+  assert.deepEqual(calls.filter((e) => e.tool === 'list_dir').map((e) => e.subAgent).sort(), [0, 1], 'each agent is named');
+  assert.equal(calls.find((e) => e.tool === 'spawn_agents')?.subAgent, null, 'the lead fanned out');
+  for (const kind of ['split', 'fanout', 'fanout-end']) assert.ok(entries.some((e) => e.kind === kind), `a ${kind} note`);
+  script = null;
+  await setAccess({ level: 'chat' });
+});
+
 test('concurrent runs are capped on the server, not just in the UI', async () => {
   // Any token holder can call this endpoint, so the UI guard is not enough.
   replyIndex = 0; script = null;

@@ -243,7 +243,7 @@ function buildActionQueue(signals) {
         due_date: normalizedDueDate,
         priority,
         status: 'open',
-        rationale: `${type} extracted from recent interaction`,
+        rationale: null,
         source_signal_id: signal.id || null,
         source_signal_type: type,
         confidence,

@@ -35,14 +35,14 @@ commands. The token is generated on first start and saved to
 path. Set `MIRABILIS_MCP_TOKEN` to choose it yourself.
 
 Send it as `Authorization: Bearer <token>` (or `x-mirabilis-mcp-token`).
-Settings, Connectors, "Use Mirabilis from other apps" shows the endpoint, the
+Settings, Connectors, "Mirabilis MCP server" shows the endpoint, the
 token and a config snippet to copy.
 Requests without it get `401`. The backend also binds to loopback and rejects
 foreign `Host` headers by default.
 
 ### On and off
 
-The switch on "Use Mirabilis from other apps" turns the server off; it is on by
+The switch on "Mirabilis MCP server" turns the server off; it is on by
 default. While it is off, `POST /mcp` answers `503` with
 `Mirabilis MCP server is off`, before the token is checked, and the startup
 log adds `(off)` to the endpoint line. The setting is saved in
@@ -162,7 +162,7 @@ read-only (`readOnlyHint`) starts at Allow, every other tool at Ask.
 | Chat only | not offered | not offered | not offered |
 | Read only | runs if the tool is read-only, else not offered | same | not offered |
 | Ask first | runs | asks you first | not offered |
-| Bypass | runs | runs | not offered |
+| Bypass permissions | runs | runs | not offered |
 
 Agents see a tool as `<connector>__<tool>`. "Always allow" on an approval sets
 that tool to Allow. Calling a tool yourself from the connector's detail view

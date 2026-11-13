@@ -34,7 +34,7 @@ export function createAccessRouter({ store, guard, sourceRoot, dataDir, platform
     const s = store.get();
     return {
       level: s.level,
-      levels: ACCESS_LEVELS.map((id) => ({ id, label: ACCESS_META[id].label, summary: ACCESS_META[id].summary })),
+      levels: ACCESS_LEVELS.map((id) => ({ id, label: ACCESS_META[id].label })),
       allowCommands: s.allowCommands,
       readOnlyPrograms: platform === 'win32' ? WINDOWS_READ_ONLY_PROGRAMS : READ_ONLY_PROGRAMS,
       goDark: Boolean(goDark()),

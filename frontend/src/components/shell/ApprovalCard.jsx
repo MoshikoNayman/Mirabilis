@@ -53,7 +53,8 @@ function Detail({ detail, kind }) {
 /**
  * @param {object} props
  * @param {{ approvalId: string, kind?: string, title?: string, detail?: string, reason?: string,
- *   reasonCode?: string, alwaysLabel?: string|null, network?: boolean, tool?: string, cwd?: string }} props.approval
+ *   reasonCode?: string, alwaysLabel?: string|null, network?: boolean, tool?: string, cwd?: string,
+ *   subAgent?: number|null }} props.approval  subAgent: index of the sub-agent that asks
  * @param {(decision: 'allow'|'always'|'deny', note?: string) => void} props.onDecide
  *   note is set only for a deny with text in the note field
  * @param {boolean} [props.busy] true while the decision is being sent
@@ -82,8 +83,11 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
 
   if (!approval) return null;
 
-  const { title, detail, reason, reasonCode, alwaysLabel, network, kind, cwd } = approval;
+  const { title, detail, reason, reasonCode, alwaysLabel, network, kind, cwd, subAgent } = approval;
   const shownReason = reason && !TITLE_ONLY_REASONS.has(reasonCode) ? reason : '';
+  // Parallel agents share one queue of cards, so each names the agent that asks.
+  const agentName = Number.isInteger(subAgent) ? `Agent ${subAgent + 1}` : '';
+  const asks = agentName ? `${agentName} needs approval` : 'Needs approval';
 
   function decide(decision) {
     if (busy) return;
@@ -107,7 +111,7 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
     >
       {/* The run pauses with nothing taking focus, so say so; the card remounts per approval. */}
       <p role="alert" className="sr-only">
-        {`${title ? `Needs approval: ${title}.` : 'Needs approval.'}${shownReason ? ` ${shownReason}` : ''}`}
+        {`${title ? `${asks}: ${title}.` : `${asks}.`}${shownReason ? ` ${shownReason}` : ''}`}
       </p>
       <div className="flex items-start gap-2">
         <ShieldIcon size={15} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-300" />
@@ -116,9 +120,7 @@ export default function ApprovalCard({ approval, onDecide, busy = false }) {
             <h3 id={`${uid}-title`} className="min-w-0 text-[length:var(--text-sm)] font-semibold text-[color:var(--text-main)]">
               {title || 'Approve this action?'}
             </h3>
-            <span className="text-[length:var(--text-2xs)] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300">
-              Needs approval
-            </span>
+            {agentName ? <Badge>{agentName}</Badge> : null}
             {network ? (
               <Badge tone="warn" className="ml-auto">
                 <GlobeIcon size={11} />

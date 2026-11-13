@@ -1469,7 +1469,7 @@ function IntelLedgerApp({ userId, openSessionId = null, onSessionOpened }) {
                   onChange={(e) => setAllowClearAll(e.target.checked)}
                   className="h-3.5 w-3.5 rounded border-black/20 text-accent focus:ring-accent/30 dark:border-white/20"
                 />
-                I understand this deletes all sessions
+                Confirm
               </label>
               <button
                 type="button"

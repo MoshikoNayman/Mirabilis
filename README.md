@@ -1,6 +1,6 @@
 # Mirabilis AI
 
-Version 26.4R1-S3. Author: Moshiko Nayman.
+Version 26.4R1-S4. Author: Moshiko Nayman.
 
 Mirabilis is a local-first AI chat app. It runs a model on your own machine
 through Ollama or another local engine, or talks to a cloud provider with your
@@ -113,7 +113,7 @@ the data folder and survives a restart.
 Access decides what the assistant may do on this computer. Set it from the
 Access chip in the composer or in Settings: Chat only (the default, no tools),
 Read only (reads files, inspects the system and runs read-only commands, never
-changes anything), Ask first (asks before every change) or Bypass (runs
+changes anything), Ask first (asks before every change) or Bypass permissions (runs
 everything without asking). With tools on, Mirabilis can troubleshoot this
 computer and explain how it is built from its own source. Every action goes to
 the run log in the data folder, and every file change keeps a copy of the old
@@ -131,7 +131,7 @@ and its tools leave agent runs.
 - Streaming chat with local history, instruction profiles, branches and snapshots
 - Attachments, image input for vision models, LaTeX math
 - Answer styles (Instant to Deep) and autonomous runs (High effort, 1 hour,
-  5 hours) with a hard budget
+  5 hours, Ultra) with a hard budget and up to 8 parallel agents
 - Config Vault: cited local retrieval over a folder you choose
 - Recall over past chats and IntelLedger signals, on-device embeddings
 - Inference controls for Ollama models and per-reply tokens/sec

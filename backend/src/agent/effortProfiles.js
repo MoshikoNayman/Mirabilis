@@ -1,5 +1,5 @@
 // @ts-check
-// Effort profiles: hard work budgets plus run shape (plan, validate, sub-agents).
+// Effort profiles: hard work budgets plus run shape (plan, validate, sub-agents, Ultra).
 // budget.js enforces the numbers in code; the model is never trusted to stop itself.
 
 /**
@@ -15,7 +15,8 @@
  * @property {boolean} plan             Produce an explicit plan before acting.
  * @property {boolean} validate         Run a validation pass against the goal.
  * @property {number} maxRepairAttempts Re-attempts after a failed validation.
- * @property {number} maxSubAgents      Parallel sub-agents allowed (0 = none).
+ * @property {number} maxSubAgents      Sub-agents allowed over the whole run (0 = none).
+ * @property {boolean} [ultra]          Code splits the goal across sub-agents; checks try to refute.
  * @property {string} [styleHint]       Appended to the system prompt.
  */
 
@@ -82,6 +83,13 @@ export const EFFORT_PROFILES = {
     maxWallMs: 5 * HOUR, maxIterations: 400, maxToolCalls: 2_500, maxOutputTokens: 1_500_000,
     plan: true, validate: true, maxRepairAttempts: 8, maxSubAgents: 6
   },
+  ultra: {
+    id: 'ultra', label: 'Ultra',
+    description: 'Splits the goal across parallel agents, checks each result, merges.',
+    agentic: true,
+    maxWallMs: 2 * HOUR, maxIterations: 160, maxToolCalls: 1_000, maxOutputTokens: 600_000,
+    plan: true, validate: true, maxRepairAttempts: 4, maxSubAgents: 8, ultra: true
+  },
 
   // A single-shot effort with Access above Chat only: a short tool loop, no plan or
   // validation. Not in EFFORT_ORDER; the route picks it and copies the effort's styleHint.
@@ -96,8 +104,8 @@ export const EFFORT_PROFILES = {
 
 export const DEFAULT_EFFORT_ID = 'balanced';
 
-/** Ordered for display: cheapest first, then the agentic tiers. */
-export const EFFORT_ORDER = ['instant', 'fast', 'balanced', 'thorough', 'high', 'hour', 'session'];
+/** By wall clock, cheapest first; budget.test.js holds it to that. The composer lists Ultra last. */
+export const EFFORT_ORDER = ['instant', 'fast', 'balanced', 'thorough', 'high', 'hour', 'ultra', 'session'];
 
 /**
  * The profile for a run: an agentic effort keeps its own; a single-shot effort with
@@ -132,13 +140,14 @@ export function resolveEffort(id, overrides = {}) {
     if (raw == null) return;
     const n = Number(raw);
     if (!Number.isFinite(n) || n < 0) return;
-    out[key] = Math.min(n, base[key]);
+    // Whole numbers only: half a sub-agent registers the tool and then runs none.
+    out[key] = Math.min(Math.floor(n), base[key]);
   };
   for (const key of ['maxWallMs', 'maxIterations', 'maxToolCalls', 'maxOutputTokens', 'maxRepairAttempts', 'maxSubAgents']) {
     clampNumber(key);
   }
   // Booleans may only be turned off, for the same reason.
-  for (const key of ['plan', 'validate', 'agentic']) {
+  for (const key of ['plan', 'validate', 'agentic', 'ultra']) {
     if (overrides[key] === false) out[key] = false;
   }
   return out;

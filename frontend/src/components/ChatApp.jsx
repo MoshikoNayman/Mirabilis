@@ -12,7 +12,8 @@ import { FlowerMark } from './ui/StatusOrb';
 import {
   Badge, Button, SegmentedControl, Spinner, Switch,
   IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon, CheckIcon,
-  GearIcon, ShieldIcon, PlugIcon, MicIcon, TerminalIcon, FlaskIcon, AlertIcon, CubeIcon, ChevronRightIcon
+  GearIcon, ShieldIcon, PlugIcon, MicIcon, TerminalIcon, FlaskIcon, AlertIcon, CubeIcon, ChevronRightIcon,
+  PlusIcon, MinusIcon
 } from './ui/primitives';
 import TabSwitch from './shell/TabSwitch';
 import CommitmentRadar from './shell/CommitmentRadar';
@@ -31,12 +32,16 @@ import {
   chooseSendRoute, toApproval, addApproval, removeApproval, approvalEventType,
   approvalNarration, approvalReplyOutcome, runRefusal, describeRunError,
   isExplicitImagePrompt, toImagePrompt, accessChangeNotice,
-  contextMessages, conversationContext, buildRunContext, isTextAttachment
+  contextMessages, conversationContext, buildRunContext, isTextAttachment,
+  agentTag, reduceAgents, applyRunEvent, runEventLine, settleRun
 } from '../lib/agentRunPolicy';
 import { ACCESS_LEVELS, ACCESS_TONE_COLOR, accessMeta, lowerAccess, fetchAccess, saveAccess, describeApiError } from '../lib/access';
 import { hasUsableKey, providerNeedsKey, missingKeyMessage } from '../lib/providerKeys';
 import { needsServerModelSwitch } from '../lib/providerCapabilities';
-import { EFFORT_LABELS } from '../lib/effort';
+import {
+  EFFORT_OPTIONS, AGENTIC_EFFORTS, normalizeEffort, parseSavedAgents, agentMax, agentCount, agentOverrides,
+  effortChipText
+} from '../lib/effort';
 import { isLocalImageSrc, remoteImageLink } from '../lib/markdownMedia';
 import {
   pickAutoModel, pickUncensoredModel, modelFit, fitDetail, itemSize, FIT_LABELS, rowIdForName, isInstalledName,
@@ -55,23 +60,11 @@ const BROWSER_VOICE_HINTS = {
   male: ['male', 'daniel', 'alex', 'fred', 'thomas', 'oliver', 'george', 'david', 'mark', 'rishi', 'aaron', 'arthur', 'gordon', 'lee']
 };
 
-// The first five are prompt hints on a single request. The `agentic` ones run
-// the backend loop with a hard budget via /api/agent/runs.
-const EFFORT_OPTIONS = [
-  { value: 'instant',  label: 'Instant',     hint: 'one line' },
-  { value: 'fast',     label: 'Fast',        hint: 'concise' },
-  { value: 'balanced', label: 'Balanced',    hint: 'default' },
-  { value: 'thorough', label: 'Thorough',    hint: 'complete' },
-  { value: 'deep',     label: 'Deep',        hint: 'reason first' },
-  { value: 'high',     label: 'High',        hint: 'plan, act, validate', agentic: true },
-  { value: 'hour',     label: '1 hour',      hint: 'keeps working', agentic: true },
-  { value: 'session',  label: '5 hours',     hint: 'long session', agentic: true }
-];
+// Effort menu agent stepper. Plain buttons: IconButton always sets a title tooltip.
+const AGENT_STEP_CLASS = 'au-focus inline-flex h-5 w-5 items-center justify-center rounded-[var(--r-xs)] text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 dark:hover:bg-[var(--material-thin)]';
 
-const AGENTIC_EFFORTS = new Set(EFFORT_OPTIONS.filter((o) => o.agentic).map((o) => o.value));
-
-/** The composer Access menu's width (w-80). */
-const ACCESS_MENU_WIDTH = 320;
+/** The composer Access menu's width (w-56). */
+const ACCESS_MENU_WIDTH = 224;
 
 /** First line of the message, code removed, short enough to be a search query. */
 function searchQueryFrom(text) {
@@ -1418,18 +1411,12 @@ function VoiceSettings({
               size="sm"
               value={engine}
               onChange={onEngineChange}
-              options={[{ value: 'browser', label: 'Browser' }, { value: 'piper', label: 'Piper neural' }]}
+              options={[{ value: 'browser', label: 'Browser' }, { value: 'piper', label: 'Piper' }]}
             />
           </SettingsRow>
           {engine === 'browser' ? (
             <>
-              <SettingsRow
-                label="Voice"
-                htmlFor={`${uid}-voice`}
-                description={voiceTools?.platform === 'darwin'
-                  ? 'More voices: System Settings > Accessibility > Spoken Content'
-                  : undefined}
-              >
+              <SettingsRow label="Voice" htmlFor={`${uid}-voice`}>
                 <select
                   id={`${uid}-voice`}
                   value={voiceUri}
@@ -1802,6 +1789,11 @@ export default function ChatApp() {
   const [isLlamacppBusy, setIsLlamacppBusy] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isEffortMenuOpen, setIsEffortMenuOpen] = useState(false);
+  // Capped at the room above the chip, like the Access menu.
+  const [effortMenuMaxHeight, setEffortMenuMaxHeight] = useState(undefined);
+  // The chip's text while its menu is open: a new agent count waits for the close, so the
+  // chip keeps its width and the menu does not move under the pointer.
+  const [effortChipHeld, setEffortChipHeld] = useState('');
   const [isAccessMenuOpen, setIsAccessMenuOpen] = useState(false);
   // Where the Access menu sits so it stays inside the window: a left shift and a height cap.
   const [accessMenuPlace, setAccessMenuPlace] = useState({ left: 0, maxHeight: undefined });
@@ -1831,7 +1823,9 @@ export default function ChatApp() {
   const [canvasText, setCanvasText] = useState('');
   const [guidedLearningEnabled, setGuidedLearningEnabled] = useState(false);
   const [deepThinkingEnabled, setDeepThinkingEnabled] = useState(false);
-  const [effortLevel, setEffortLevel] = useState(() => safeStorageGet('mirabilis-effort-level', 'balanced'));
+  const [effortLevel, setEffortLevel] = useState(() => normalizeEffort(safeStorageGet('mirabilis-effort-level', 'balanced')));
+  // Agents chosen in the Effort menu, one value for every tier; null until the user picks one.
+  const [agentsPref, setAgentsPref] = useState(() => parseSavedAgents(safeStorageGet('mirabilis-agents', '')));
   const [trainingMode, setTrainingMode] = useState('off');
   const [usePersonalMemory, setUsePersonalMemory] = useState(true);
   const [openClawMode, setOpenClawMode] = useState(() => {
@@ -2331,7 +2325,7 @@ export default function ChatApp() {
         })
       );
       safeStorageSet('mirabilis-provider-configs', JSON.stringify(cleaned));
-      appStore.toast(`${withKeys.length} API key(s) moved to the app`, { kind: 'info' });
+      appStore.toast(`${withKeys.length} API key(s) migrated`, { kind: 'info' });
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3387,6 +3381,10 @@ export default function ChatApp() {
     safeStorageSet('mirabilis-effort-level', effortLevel);
   }, [effortLevel]);
 
+  useEffect(() => {
+    if (agentsPref !== null) safeStorageSet('mirabilis-agents', String(agentsPref));
+  }, [agentsPref]);
+
   // Access replaced the per-run tool policy; drop its stored value. The backend
   // owns Access, so the chip loads the level from there.
   useEffect(() => {
@@ -3921,9 +3919,6 @@ export default function ChatApp() {
     setChatSearch('');
     await refreshChats();
     await loadChat(payload.chat.id);
-    if (ephemeral) {
-      appStore.toast('Off the Record: never saved to disk', { kind: 'info', ttl: 4200 });
-    }
   }
 
   async function toggleUncensoredMode() {
@@ -4106,7 +4101,7 @@ export default function ChatApp() {
       setStatusText('Select a snapshot first');
       return;
     }
-    const confirmed = window.confirm('Restore this snapshot? It replaces the current chat.');
+    const confirmed = window.confirm('Replace the current chat with this snapshot?');
     if (!confirmed) return;
     try {
       await api(`/api/chats/${activeChatId}/snapshots/${selectedSnapshotId}/restore`, {
@@ -4639,10 +4634,18 @@ export default function ChatApp() {
       if (panel instanceof HTMLElement) {
         requestAnimationFrame(() => {
           // A menu with a current choice opens on it.
-          const current = panel.querySelector('[aria-checked="true"]');
+          const current = panel.querySelector('[aria-checked="true"], [aria-current="true"]');
           const focusable = getFocusableElements(panel);
           if (current instanceof HTMLElement) {
-            current.focus();
+            // Scroll only the menu's own list: a plain focus() also scrolls the composer row sideways.
+            current.focus({ preventScroll: true });
+            const list = current.closest('.au-scroll');
+            if (list instanceof HTMLElement) {
+              const box = list.getBoundingClientRect();
+              const item = current.getBoundingClientRect();
+              if (item.top < box.top) list.scrollTop -= box.top - item.top;
+              else if (item.bottom > box.bottom) list.scrollTop += item.bottom - box.bottom;
+            }
           } else if (focusable.length > 0) {
             focusable[0].focus();
           } else {
@@ -5021,7 +5024,7 @@ export default function ChatApp() {
         content: [
           'Image service is not running.',
           '',
-          'Start the app with `node run.js` (without `--no-image`). The first run downloads about 6 GB.',
+          'Run `node run.js` without `--no-image`. First run downloads about 6 GB.',
           '',
           'Or start it manually:',
           '',
@@ -5394,10 +5397,13 @@ export default function ChatApp() {
     // A request can lower the stored level but never raise it, so a stale copy is safe.
     const access = appStore.getAccess();
 
+    // Ultra with more than one agent starts by splitting the goal.
+    const splits = effortLevel === 'ultra' && agentCount(effortLevel, agentsPref, access) > 1;
+    const overrides = agentOverrides(effortLevel, agentsPref, access);
     const started = {
       id: null, goal, effort: effortLevel, access,
-      status: 'running', phase: AGENTIC_EFFORTS.has(effortLevel) ? 'plan' : 'act',
-      events: [], budget: null, answer: '', stopReason: null, error: '', approvals: []
+      status: 'running', phase: splits ? 'split' : AGENTIC_EFFORTS.has(effortLevel) ? 'plan' : 'act',
+      events: [], budget: null, answer: '', stopReason: null, error: '', approvals: [], agents: [], fanout: null
     };
     setAgentRun(started);
     agentRunRef.current = started;
@@ -5463,6 +5469,8 @@ export default function ChatApp() {
           goal,
           chatId: targetChatId || undefined,
           effort: effortLevel,
+          // The Agents count; the backend clamps it to the tier and can only lower it.
+          ...(overrides ? { overrides } : {}),
           access,
           provider,
           model: forced?.id || model || undefined,
@@ -5522,7 +5530,7 @@ export default function ChatApp() {
           }
           if (currentEvent === 'error') {
             settled = true;
-            setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: payload.error } : prev));
+            setAgentRun((prev) => (prev ? settleRun(prev, { status: 'failed', error: payload.error }) : prev));
             settleReply({ content: `Error: ${payload.error || 'Run failed'}`, failed: true });
             continue;
           }
@@ -5560,9 +5568,14 @@ export default function ChatApp() {
           if (approvalType === 'approval-required') {
             const approval = toApproval(payload);
             if (approval) {
-              setAgentRun((prev) => (prev ? { ...prev, approvals: addApproval(prev.approvals, approval) } : prev));
+              setAgentRun((prev) => (prev ? {
+                ...prev,
+                approvals: addApproval(prev.approvals, approval),
+                agents: reduceAgents(prev.agents, { type: 'approval-required', subAgent: approval.subAgent })
+              } : prev));
               const what = approval.title || approval.tool || 'an action';
-              pushEvent(`waiting for approval: ${what}`, payload.at);
+              const tag = agentTag(approval.subAgent);
+              pushEvent(`${tag ? `${tag} ` : ''}waiting for approval: ${what}`, payload.at);
               // The card is out of sight behind Settings or on the Ledger tab.
               if (settingsOpenRef.current || mainRef.current?.offsetParent === null) {
                 appStore.toast(`Needs approval: ${what}`, { kind: 'warn', ttl: 8000 });
@@ -5572,55 +5585,43 @@ export default function ChatApp() {
           }
           if (approvalType === 'approval-resolved') {
             if (typeof payload.approvalId === 'string') {
-              setAgentRun((prev) => (prev ? { ...prev, approvals: removeApproval(prev.approvals, payload.approvalId) } : prev));
+              setAgentRun((prev) => {
+                if (!prev) return prev;
+                // The resolve does not say which agent asked; the pending approval does.
+                const asked = (prev.approvals || []).find((a) => a.approvalId === payload.approvalId);
+                return {
+                  ...prev,
+                  approvals: removeApproval(prev.approvals, payload.approvalId),
+                  agents: reduceAgents(prev.agents, { type: 'approval-resolved', subAgent: asked?.subAgent })
+                };
+              });
             }
             pushEvent(approvalNarration(payload.decision), payload.at);
             continue;
           }
           if (currentEvent !== 'progress') continue;
 
-          // Meters show only the parent's budget; sub-agent events carry their own smaller one.
-          if (payload.budget && payload.subAgent === undefined) {
-            setAgentRun((prev) => (prev ? { ...prev, budget: payload.budget } : prev));
-          }
-          const at = payload.at;
-          switch (payload.type) {
-            case 'phase':
-              setAgentRun((prev) => (prev ? { ...prev, phase: payload.phase } : prev));
-              pushEvent(`phase: ${payload.phase}`, at);
-              break;
-            case 'plan': pushEvent(`plan: ${String(payload.plan).slice(0, 120)}`, at); break;
-            case 'iteration': setAgentRun((prev) => (prev ? { ...prev, phase: 'act' } : prev)); break;
-            case 'tool-call': pushEvent(`${payload.tool}(${JSON.stringify(payload.args).slice(0, 60)})`, at); break;
-            case 'tool-result':
-              pushEvent(payload.ok
-                ? `  ${payload.tool} done`
-                : `  ${payload.tool} failed: ${String(payload.observation).replace(/^ERROR:\s*/, '').slice(0, 90)}`, at);
-              break;
-            case 'invalid-action': pushEvent(`  retrying: ${payload.error}`, at); break;
-            case 'finish-proposed': pushEvent('proposed a result', at); break;
-            case 'validation': pushEvent(`validation ${payload.passed ? 'passed' : 'failed'}${payload.reason ? `: ${String(payload.reason).slice(0, 70)}` : ''}`, at); break;
-            case 'repair': pushEvent(`repairing: ${String(payload.reason).slice(0, 80)}`, at); break;
-            case 'fanout-start': pushEvent(`spawned ${payload.count} sub-agent(s)`, at); break;
-            case 'fanout-end': pushEvent(`sub-agents done (${payload.spentToolCalls} tool calls)`, at); break;
-            default: break;
-          }
+          // Meters and the headline follow the lead; sub-agent events move only their rows.
+          setAgentRun((prev) => (prev ? applyRunEvent(prev, payload) : prev));
+          const line = runEventLine(payload);
+          if (line) pushEvent(line, payload.at);
         }
         if (done) break;
       }
       if (!settled) {
         // The stream closed with neither a result nor an error.
         const lost = 'Run ended without a result';
-        setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: prev.error || lost } : prev));
+        setAgentRun((prev) => (prev ? settleRun(prev, { status: 'failed', error: prev.error || lost }) : prev));
         settleReply({ content: `Error: ${lost}`, failed: true });
       }
     } catch (err) {
+      // No result arrives after these, so settleRun closes the agent rows the feed left open.
       if (err?.name !== 'AbortError') {
-        setAgentRun((prev) => (prev ? { ...prev, status: 'failed', error: err.message } : prev));
+        setAgentRun((prev) => (prev ? settleRun(prev, { status: 'failed', error: err.message }) : prev));
         if (accepted) settleReply({ content: `Error: ${err.message}`, failed: true });
         else appStore.toast(err.message, { kind: 'error', ttl: 5200 });
       } else {
-        setAgentRun((prev) => (prev ? { ...prev, status: 'stopped', stopReason: 'cancelled' } : prev));
+        setAgentRun((prev) => (prev ? settleRun(prev, { status: 'stopped', stopReason: 'cancelled' }) : prev));
         // Stopped before an answer: keep the goal, drop the empty bubble.
         setMessages((prev) => prev.filter((m) => m.id !== replyId || m.content));
       }
@@ -5661,7 +5662,12 @@ export default function ChatApp() {
         const body = await res.text().catch(() => '');
         throw new Error(plainError(body, `Server error ${res.status}`));
       }
-      setAgentRun((prev) => (prev ? { ...prev, approvals: removeApproval(prev.approvals, approval.approvalId) } : prev));
+      // This reply can beat the stream's approval-resolved, which then cannot tell which agent asked.
+      setAgentRun((prev) => (prev ? {
+        ...prev,
+        approvals: removeApproval(prev.approvals, approval.approvalId),
+        agents: reduceAgents(prev.agents, { type: 'approval-resolved', subAgent: approval.subAgent })
+      } : prev));
     } catch (err) {
       const reason = err?.name === 'AbortError' ? 'timed out' : String(err?.message || 'request failed').trim().replace(/\.+$/, '');
       appStore.toast(`Answer not sent: ${reason}. Try again.`, { kind: 'error', ttl: 5200 });
@@ -5689,7 +5695,7 @@ export default function ChatApp() {
       const saved = await saveAccess({ level });
       appStore.setAccess(saved.level);
       if (saved.level === 'bypass') {
-        appStore.toast('Bypass on: runs anything, never asks', { kind: 'warn', ttl: 5200 });
+        appStore.toast('Bypass permissions on', { kind: 'warn', ttl: 5200 });
       }
       if (agentAbortRef.current) {
         // The backend lowers a live run at once and never raises it past its start level.
@@ -5728,6 +5734,20 @@ export default function ChatApp() {
     if (open && !accessSaving) {
       fetchAccess().then((a) => appStore.setAccess(a.level)).catch(() => {});
     }
+  }
+
+  // The Effort menu opens upward too: same height cap, so the Agents row stays reachable.
+  function openEffortMenu() {
+    const open = !isEffortMenuOpen;
+    closeAllDropdowns();
+    if (open) {
+      const trigger = document.querySelector('[data-menu-trigger="effort"]');
+      if (trigger instanceof HTMLElement) {
+        setEffortMenuMaxHeight(Math.max(160, Math.floor(trigger.getBoundingClientRect().top - 64)));
+      }
+      setEffortChipHeld(effortChipText(effortLevel, agentsPref, accessMeta(accessLevel).id));
+    }
+    setIsEffortMenuOpen(open);
   }
 
   // Up and Down move between the levels; Home and End jump to the ends.
@@ -6152,6 +6172,32 @@ export default function ChatApp() {
 
   const currentAccess = accessMeta(accessLevel);
   const bypassOn = currentAccess.id === 'bypass';
+
+  // Effort menu Agents row; agentsMax 0 hides it.
+  const agentsMax = agentMax(effortLevel, currentAccess.id);
+  const agentsShown = agentCount(effortLevel, agentsPref, currentAccess.id);
+  const effortChip = isEffortMenuOpen && effortChipHeld
+    ? effortChipHeld
+    : effortChipText(effortLevel, agentsPref, currentAccess.id);
+  // A press at a bound changes and saves nothing.
+  function setAgentsTo(n) {
+    if (agentsMax === 0) return;
+    const next = Math.min(agentsMax, Math.max(1, n));
+    if (next === agentsShown) return;
+    setAgentsPref(next);
+  }
+  const stepAgents = (d) => setAgentsTo(agentsShown + d);
+  // Arrows step, Home and End jump to the bounds; other keys keep their default.
+  function onAgentsKeyDown(e) {
+    const to = {
+      ArrowUp: agentsShown + 1, ArrowRight: agentsShown + 1,
+      ArrowDown: agentsShown - 1, ArrowLeft: agentsShown - 1,
+      Home: 1, End: agentsMax
+    }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    setAgentsTo(to);
+  }
   const shortcutLabel = settingsShortcutLabel();
   // Only a live run can take an answer; a stopping run's approvals are being cancelled.
   const pendingApprovals = agentRun?.status === 'running' && Array.isArray(agentRun.approvals) ? agentRun.approvals : [];
@@ -6820,7 +6866,7 @@ export default function ChatApp() {
                   <FlowerMark size={120} />
                 </span>
                 <h2 className="text-[length:var(--text-xl)] font-[650] tracking-tight text-[color:var(--text-main)]">
-                  {activeChatId ? 'New chat' : 'Welcome to Mirabilis AI'}
+                  {activeChatId ? 'New chat' : 'Mirabilis AI'}
                 </h2>
 
                 {/* No engine reachable: what to install and run. */}
@@ -6918,7 +6964,7 @@ export default function ChatApp() {
                   value={memoryInput}
                   onChange={(e) => setMemoryInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addMemoryItem(); } }}
-                  placeholder="I prefer concise answers"
+                  placeholder="New memory"
                   aria-label="New memory"
                   className="flex-1 rounded-xl border border-[var(--hairline)] bg-[var(--material-thin)] px-3 py-1.5 text-xs outline-none focus:border-accent"
                 />
@@ -7166,11 +7212,6 @@ export default function ChatApp() {
                     <p className="mb-1 text-xs font-semibold text-[color:var(--text-main)]">
                       {PROVIDER_OPTIONS.find((o) => o.id === provider)?.label}
                     </p>
-                    {provider === 'koboldcpp' && (
-                      <p className="mb-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                        Requires KoboldCpp running on this computer
-                      </p>
-                    )}
                     {provider === 'llamacpp' && (
                       <div className="mb-2 rounded-lg border border-[var(--hairline)] p-2">
                         <div className="mb-1 flex items-center justify-between">
@@ -7218,20 +7259,10 @@ export default function ChatApp() {
                         )}
                       </div>
                     )}
-                    {provider === 'openai-compatible' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Any OpenAI-compatible endpoint
-                      </p>
-                    )}
-                    {provider === 'gpuaas' && (
-                      <p className="mb-2 rounded-lg bg-blue-50 px-2 py-1.5 text-[11px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        Any OpenAI-compatible endpoint
-                      </p>
-                    )}
                     {provider === 'vllm' && (
                       <div className="mb-2 rounded-lg border border-[var(--hairline)] p-2">
                         <div className="mb-1 flex items-center justify-between">
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Local vLLM (NVIDIA GPU)</span>
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Local engine</span>
                           <span className={`text-[10px] font-medium ${vllmStatus?.running ? 'text-emerald-600 dark:text-emerald-300' : vllmStatus?.canRunLocal ? 'text-amber-600 dark:text-amber-300' : 'text-[color:var(--text-muted)]'}`}>
                             {vllmStatus?.running ? 'Running' : vllmStatus?.canRunLocal ? 'Not running' : 'Unavailable'}
                           </span>
@@ -7573,7 +7604,6 @@ export default function ChatApp() {
                     {/* These runtimes load one GGUF at launch and cannot pull on demand. */}
                     {(provider === 'koboldcpp' || provider === 'openai-compatible') && (
                       <div className="mt-1 border-t border-black/10 px-2 py-2">
-                        <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-muted)]">Loading a model</div>
                         <p className="text-[10px] leading-relaxed text-[color:var(--text-muted)]">
                           Add a <code className="rounded bg-black/5 px-1 dark:bg-white/10">.gguf</code> to <code className="rounded bg-black/5 px-1 dark:bg-white/10">mirabilis/models</code>
                         </p>
@@ -7694,80 +7724,103 @@ export default function ChatApp() {
                 </div>
                 )}
                 </div>
-                {/* Effort dropdown: 5 levels, compact */}
+                {/* Effort: answer styles, autonomous tiers, agent count */}
                 <div data-menu-container="true" className="relative">
                   <button
                     type="button"
                     data-menu-trigger="effort"
                     aria-haspopup="true"
                     aria-expanded={isEffortMenuOpen}
-                    onClick={() => { const open = !isEffortMenuOpen; closeAllDropdowns(); setIsEffortMenuOpen(open); }}
-                    className="inline-flex h-7 items-center gap-1 rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
+                    onClick={openEffortMenu}
+                    className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
                   >
-                    Effort: {EFFORT_LABELS[effortLevel] || EFFORT_LABELS.balanced}
+                    {/* A narrow screen hides the prefix, as the Access chip does; it stays in the name. */}
+                    <span><span className="sr-only sm:not-sr-only">Effort: </span>{effortChip}</span>
                     <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
                       <path d="M5.25 7.5L10 12.25 14.75 7.5" />
                     </svg>
                   </button>
                   {isEffortMenuOpen && (
-                    <div data-menu-panel="effort" role="group" aria-label="Effort" tabIndex={-1} className="absolute bottom-9 left-0 z-20 min-w-44 rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur">
-                      <div className="px-2 pb-1 pt-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
-                        Answer style
-                      </div>
-                      {EFFORT_OPTIONS.filter((o) => !o.agentic).map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => { setEffortLevel(opt.value); setIsEffortMenuOpen(false); }}
-                          className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
-                            effortLevel === opt.value
-                              ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                              : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                          }`}
-                        >
-                          <span>{opt.label}</span>
-                          <span className="text-[10px] opacity-60">{opt.hint}</span>
-                        </button>
-                      ))}
-
-                      {/* Separate group: these make Send start a budgeted job, not a turn. */}
-                      <div className="mt-1 border-t border-[var(--hairline)] px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
-                        Autonomous work
-                      </div>
-                      {/* These run for up to hours; under Chat only they would do so with no tools. */}
-                      {currentAccess.id === 'chat' && (
-                        <p className="max-w-[13rem] px-2 pb-1.5 text-[10px] leading-snug text-[color:var(--text-muted)]">
-                          Chat only: no tools.{' '}
+                    <div
+                      data-menu-panel="effort"
+                      role="group"
+                      aria-label="Effort"
+                      tabIndex={-1}
+                      style={{ maxHeight: effortMenuMaxHeight }}
+                      className="absolute bottom-9 left-0 z-20 flex min-w-44 flex-col rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur"
+                    >
+                      {/* The levels scroll on a short window; the Agents row below stays put. The
+                          padding is on the list, inside its clip, so focus rings show whole. */}
+                      <div className="au-scroll min-h-0 flex-1 overflow-y-auto p-1">
+                        <div className="px-2 pb-1 pt-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
+                          Answer style
+                        </div>
+                        {EFFORT_OPTIONS.filter((o) => !o.agentic).map((opt) => (
                           <button
+                            key={opt.value}
                             type="button"
-                            onClick={() => {
-                              // The menu unmounts; Settings returns focus to the chip.
-                              const chip = document.querySelector('[data-menu-trigger="effort"]');
-                              if (chip instanceof HTMLElement) chip.focus();
-                              setIsEffortMenuOpen(false);
-                              appStore.openSettings('access');
-                            }}
-                            className="au-focus rounded-[var(--r-xs)] font-medium text-[color:var(--accent)] underline underline-offset-2"
+                            aria-current={effortLevel === opt.value ? 'true' : undefined}
+                            onClick={() => { setEffortLevel(opt.value); setIsEffortMenuOpen(false); }}
+                            className={`au-focus flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                              effortLevel === opt.value
+                                ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                                : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                            }`}
                           >
-                            Change Access
+                            <span>{opt.label}</span>
                           </button>
-                        </p>
+                        ))}
+
+                        {/* Separate group: these make Send start a budgeted job, not a turn. */}
+                        <div className="mt-1 border-t border-[var(--hairline)] px-2 pb-1 pt-1.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-muted)]">
+                          Autonomous work
+                        </div>
+                        {EFFORT_OPTIONS.filter((o) => o.agentic).map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            aria-current={effortLevel === opt.value ? 'true' : undefined}
+                            onClick={() => { setEffortLevel(opt.value); setIsEffortMenuOpen(false); }}
+                            className={`au-focus flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
+                              effortLevel === opt.value
+                                ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
+                                : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
+                            }`}
+                          >
+                            <span>{opt.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                      {/* Sub-agents for the next run. A press keeps the menu open; aria-disabled keeps focus at a bound. */}
+                      {agentsMax > 0 && (
+                        <div className="mx-1 mb-1 flex shrink-0 items-center justify-between gap-3 border-t border-[var(--hairline)] px-2 pb-0.5 pt-1.5 text-xs text-[color:var(--text-main)]">
+                          <span id="effort-agents-label">Agents</span>
+                          <div role="group" aria-labelledby="effort-agents-label" onKeyDown={onAgentsKeyDown} className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              aria-label="Fewer agents"
+                              aria-disabled={agentsShown <= 1 ? true : undefined}
+                              onClick={() => stepAgents(-1)}
+                              className={AGENT_STEP_CLASS}
+                            >
+                              <MinusIcon size={12} />
+                            </button>
+                            <output aria-live="polite" className="w-5 text-center font-mono text-[11px] tabular-nums">
+                              {agentsShown}
+                              <span className="sr-only">{agentsShown === 1 ? ' agent' : ' agents'}</span>
+                            </output>
+                            <button
+                              type="button"
+                              aria-label="More agents"
+                              aria-disabled={agentsShown >= agentsMax ? true : undefined}
+                              onClick={() => stepAgents(1)}
+                              className={AGENT_STEP_CLASS}
+                            >
+                              <PlusIcon size={12} />
+                            </button>
+                          </div>
+                        </div>
                       )}
-                      {EFFORT_OPTIONS.filter((o) => o.agentic).map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          onClick={() => { setEffortLevel(opt.value); setIsEffortMenuOpen(false); }}
-                          className={`flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
-                            effortLevel === opt.value
-                              ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
-                              : 'text-[color:var(--text-main)] hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
-                          }`}
-                        >
-                          <span>{opt.label}</span>
-                          <span className="text-[10px] opacity-60">{opt.hint}</span>
-                        </button>
-                      ))}
                     </div>
                   )}
                 </div>
@@ -7807,7 +7860,7 @@ export default function ChatApp() {
                       tabIndex={-1}
                       onKeyDown={onAccessMenuKeyDown}
                       style={accessMenuPlace}
-                      className="au-scroll absolute bottom-9 z-20 w-80 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur"
+                      className="au-scroll absolute bottom-9 z-20 w-56 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-[var(--hairline)] bg-[var(--material-thick)] p-1 shadow-[0_18px_40px_-20px_rgba(15,23,42,0.45)] backdrop-blur"
                     >
                       {ACCESS_LEVELS.map((level) => {
                         const checked = level.id === currentAccess.id;
@@ -7819,26 +7872,19 @@ export default function ChatApp() {
                             role="menuitemradio"
                             aria-checked={checked}
                             onClick={() => chooseAccess(level.id)}
-                            className={`au-focus flex w-full items-start gap-2.5 rounded-lg px-2 py-2 text-left transition ${
+                            className={`au-focus flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition ${
                               checked ? 'bg-black/[0.05] dark:bg-white/[0.07]' : 'hover:bg-black/5 dark:hover:bg-[var(--material-thin)]'
                             }`}
                           >
                             <span
                               aria-hidden="true"
-                              className="mt-[5px] h-2 w-2 shrink-0 rounded-full"
+                              className="h-2 w-2 shrink-0 rounded-full"
                               style={{ background: ACCESS_TONE_COLOR[level.tone] }}
                             />
-                            <span className="min-w-0 flex-1">
-                              <span className="flex items-center justify-between gap-2">
-                                <span className={`text-xs font-semibold ${danger ? 'text-rose-600 dark:text-rose-300' : 'text-[color:var(--text-main)]'}`}>
-                                  {level.label}
-                                </span>
-                                {checked ? <CheckIcon size={13} className="shrink-0 text-[color:var(--text-main)]" /> : null}
-                              </span>
-                              <span className="mt-0.5 block text-[11px] leading-snug text-[color:var(--text-muted)]">
-                                {level.hint}
-                              </span>
+                            <span className={`min-w-0 flex-1 text-xs font-semibold ${danger ? 'text-rose-600 dark:text-rose-300' : 'text-[color:var(--text-main)]'}`}>
+                              {level.label}
                             </span>
+                            {checked ? <CheckIcon size={13} className="shrink-0 text-[color:var(--text-main)]" /> : null}
                           </button>
                         );
                       })}

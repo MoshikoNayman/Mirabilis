@@ -30,8 +30,7 @@ export function describeEngineError(error, ctx = {}) {
     return `Could not reach ${provider}${where}. ${hint}`;
   }
   if (TIMEOUT_RE.test(raw)) {
-    return `${provider}${where} did not respond in time. It may be loading a model, or the model may be too large for this machine. `
-      + 'Try again, or pick a smaller model.';
+    return `${provider}${where} did not respond in time. Try again or pick a smaller model.`;
   }
   // Anything else is already a real message from the engine: pass it through.
   return raw;

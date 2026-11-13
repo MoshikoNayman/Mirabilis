@@ -112,7 +112,6 @@ function statusLine(c) {
     if (!server) return since ? `Running since ${since}` : '';
     return since ? `${server}, running since ${since}` : server;
   }
-  if (state === 'starting') return 'First start can take a minute';
   return '';
 }
 
@@ -215,7 +214,6 @@ function TryTool({ id, connector, tool }) {
   const ready = connector.enabled && connector.status.state === 'ready';
   const canRun = ready && tool.permission !== 'off';
   // Why the button is disabled is already on the pill and the Allow / Ask / Off control.
-  const note = canRun && tool.permission === 'ask' ? 'Your click counts as approval' : '';
 
   async function run() {
     if (running || !canRun) return;
@@ -260,7 +258,6 @@ function TryTool({ id, connector, tool }) {
           {running ? <Spinner size={12} /> : <PlayIcon size={12} />}
           {running ? 'Running...' : 'Run tool'}
         </Button>
-        {note ? <span className={muted2xs}>{note}</span> : null}
       </div>
       {error ? <p role="alert" className={`mt-2 ${errorText}`}>{error}</p> : null}
       {result ? (
@@ -472,7 +469,6 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
             {c.hasSecrets || secretKeys.length ? (
               <SettingsRow
                 label="Secrets"
-                description="Values hidden"
                 detail={secretKeys.length ? (
                   <code className="block break-all font-mono text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">
                     {secretKeys.join(', ')}
@@ -514,7 +510,7 @@ function ConnectorDetail({ connector: c, busy, onBack, onToggle, onRestart, onRe
             className="mt-3 flex flex-wrap items-center gap-2 rounded-[var(--r-md)] border border-rose-400/40 bg-rose-500/10 px-3 py-2"
           >
             <p className="min-w-0 flex-1 text-[length:var(--text-xs)] text-rose-700 dark:text-rose-200">
-              Remove {c.name} and delete its settings?
+              Remove {c.name}?
             </p>
             <Button
               size="sm"
@@ -748,7 +744,6 @@ function PresetRow({ preset, added, expanded, onExpand, onCollapse, onCreate }) 
             Runs <code className="break-all font-mono text-[color:var(--text-main)]">{presetCommandPreview(preset, values)}</code>
           </div>
           {error ? <p role="alert" className={errorText}>{error}</p> : null}
-          {creating ? <p className={mutedXs}>First start can take a minute</p> : null}
           <div className="flex items-center gap-2">
             <Button type="submit" size="sm" variant="primary" aria-disabled={creating || undefined}>
               {creating ? <Spinner size={12} /> : null}
@@ -757,12 +752,9 @@ function PresetRow({ preset, added, expanded, onExpand, onCollapse, onCreate }) 
             <Button size="sm" variant="ghost" onClick={onCollapse} disabled={creating}>Cancel</Button>
           </div>
         </form>
-      ) : (
-        <>
-          {error ? <p role="alert" className={`mt-2 pl-11 ${errorText}`}>{error}</p> : null}
-          {creating ? <p className={`mt-2 pl-11 ${mutedXs}`}>First start can take a minute</p> : null}
-        </>
-      )}
+      ) : error ? (
+        <p role="alert" className={`mt-2 pl-11 ${errorText}`}>{error}</p>
+      ) : null}
     </div>
   );
 }
@@ -896,7 +888,7 @@ function CustomForm({ goDark, onCreate }) {
               Go Dark blocks servers outside your network.
             </SettingsNotice>
           ) : null}
-          <Field id={id('token')} label="Bearer token" optional hint="Hidden after saving">
+          <Field id={id('token')} label="Bearer token" optional>
             <input
               id={id('token')}
               type="password"
@@ -936,7 +928,7 @@ function CustomForm({ goDark, onCreate }) {
               spellCheck={false}
             />
           </Field>
-          <Field id={id('env')} label="Environment" optional hint="One KEY=value per line, hidden after saving">
+          <Field id={id('env')} label="Environment" optional hint="One KEY=value per line">
             <textarea
               id={id('env')}
               rows={2}
@@ -965,7 +957,6 @@ function CustomForm({ goDark, onCreate }) {
       )}
 
       {error ? <p role="alert" className={errorText}>{error}</p> : null}
-      {creating ? <p className={mutedXs}>First start can take a minute</p> : null}
       <div>
         <Button type="submit" size="sm" variant="primary" aria-disabled={creating || undefined}>
           {creating ? <Spinner size={12} /> : <PlusIcon size={13} />}
@@ -1061,7 +1052,7 @@ function UseFromOtherApps() {
 
   return (
     <SettingsGroup
-      title="Use Mirabilis from other apps"
+      title="Mirabilis MCP server"
       action={server.known ? (
         <Switch
           checked={server.enabled}
@@ -1108,7 +1099,7 @@ function UseFromOtherApps() {
           <pre tabIndex={0} className={`${monoBlockClass} mt-2 whitespace-pre-wrap break-words`} style={monoBg} aria-label="Setup snippet">
             {clientSnippet(client, url, shownToken)}
           </pre>
-          <p className={`mt-1 ${muted2xs}`}>{hint}</p>
+          {hint ? <p className={`mt-1 ${muted2xs}`}>{hint}</p> : null}
         </>
       ) : (
         <p className={mutedXs}>Off</p>

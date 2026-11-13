@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 
-import { listOllamaModels, getOllamaModelInfo } from './ollama.js';
+import { listOllamaModels, getOllamaModelInfo, streamOllamaChat } from './ollama.js';
 
 /** One-off upstream on 127.0.0.1:0. Returns { baseUrl, close }. */
 async function upstream(handler) {
@@ -111,5 +111,29 @@ test('a failed show answers with nulls and no capabilities', async () => {
   try {
     const info = await getOllamaModelInfo(up.baseUrl, 'broken:1b', { digest: 'ccc' });
     assert.deepEqual(info, { contextWindow: null, paramCount: null, capabilities: [], vision: false });
+  } finally { await up.close(); }
+});
+
+test('streamOllamaChat sends think only when asked', async () => {
+  const bodies = [];
+  const up = await upstream((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      bodies.push(JSON.parse(raw));
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+      res.end(`${JSON.stringify({ message: { content: 'ok' }, done: false })}\n${JSON.stringify({ done: true, eval_count: 1 })}\n`);
+    });
+  });
+  try {
+    const run = async (extra) => {
+      let text = '';
+      await streamOllamaChat({ baseUrl: up.baseUrl, model: 'qwen3:8b', messages: [{ role: 'user', content: 'x' }], onToken: (t) => { text += t; }, ...extra });
+      return text;
+    };
+    assert.equal(await run({ think: false }), 'ok');
+    assert.equal(await run({}), 'ok');
+    assert.equal(bodies[0].think, false, 'an agent step asks a thinking model not to think');
+    assert.equal('think' in bodies[1], false, 'chat leaves the model default alone');
   } finally { await up.close(); }
 });

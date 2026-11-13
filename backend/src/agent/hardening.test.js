@@ -158,6 +158,39 @@ test('each model call is bounded by the remaining wall clock', async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
+test('every Ultra model call carries a finite deadline', async () => {
+  // The split, every agent's steps and checks, and the merge all run on the one budget.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-ultra-clock-'));
+  const parts = ['look at the first half', 'look at the second half'];
+  const seen = [];
+  const model = {
+    fn: async ({ messages, purpose, timeoutMs }) => {
+      const prompt = messages.map((m) => m.content).join('\n');
+      const part = parts.find((p) => prompt.includes(`Goal:\n${p}`));
+      seen.push({ purpose, timeoutMs, agent: Boolean(part) });
+      if (purpose === 'split') return { text: JSON.stringify({ parts }), tokens: 5 };
+      if (purpose === 'validate') return { text: '{"pass":true}', tokens: 5 };
+      return { text: JSON.stringify({ action: 'finish', summary: part ? `saw ${part}` : 'merged' }), tokens: 5 };
+    }
+  };
+  const out = await runAgent({
+    goal: 'look at everything',
+    profile: resolveEffort('ultra'),
+    registry: createToolRegistry({ fsRoot: dir }),
+    makeRegistry: () => createToolRegistry({ fsRoot: dir }),
+    callModel: model.fn
+  });
+  assert.equal(out.ok, true);
+  for (const [purpose, agent] of [['split', false], ['decide', true], ['validate', true], ['decide', false], ['validate', false]]) {
+    assert.ok(seen.some((c) => c.purpose === purpose && c.agent === agent), `${agent ? 'agent' : 'lead'} ${purpose} should run`);
+  }
+  for (const call of seen) {
+    assert.ok(Number.isFinite(call.timeoutMs) && call.timeoutMs > 0,
+      `${call.purpose} must carry a deadline, got ${call.timeoutMs}`);
+  }
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
 test('the salvage wrap-up gets a small fixed deadline, not the spent budget', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-wrap-'));
   const seen = [];
