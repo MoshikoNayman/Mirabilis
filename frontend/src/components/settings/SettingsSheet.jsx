@@ -1,5 +1,5 @@
 // Settings dialog: section nav on the left (a scroll strip on narrow windows) and
-// the active section on the right. Portaled to body so it shows from any tab.
+// the active section on the right. Portaled to body.
 'use client';
 
 import { createElement, isValidElement, useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -183,7 +183,7 @@ export default function SettingsSheet({ open, section, onSection, onClose, secti
   // Panels opened from here (the Workspace picker, for one) sit above the sheet
   // and get Esc first.
   const overlayOpen = useAppStore((s) =>
-    s.workspaceOpen || s.homelabOpen || s.buddyOpen || s.wywaOpen || s.recallOpen
+    s.workspaceOpen || s.homelabOpen || s.buddyOpen || s.recallOpen
     || s.voiceChatOpen || s.commandOpen || s.searchOpen);
   const overlayRef = useRef(overlayOpen);
   useEffect(() => { overlayRef.current = overlayOpen; }, [overlayOpen]);

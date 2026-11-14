@@ -11,7 +11,6 @@ const CRITICAL_FILES = ['chats.json'];
 
 /** Everything else it writes, worth reporting but not fatal. */
 const OTHER_FILES = [
-  'intelledger.json',
   'personal-memory.json',
   'config-vault.json',
   'homelab-hosts.json',

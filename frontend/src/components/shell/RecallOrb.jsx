@@ -1,9 +1,9 @@
-// Searches past chats and IntelLedger signals, ranked by local Ollama embeddings.
-// Clicking a result opens its chat or ledger session.
+// Searches past chats, ranked by local Ollama embeddings. Clicking a result opens
+// its chat.
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Modal, Badge, Kbd, Spinner, RecallIcon } from '../ui/primitives';
+import { Modal, Kbd, Spinner, RecallIcon } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
 import { postJSON } from '../../lib/api';
 
@@ -12,7 +12,7 @@ function scorePct(score) {
   return `${pct}%`;
 }
 
-export default function RecallOrb({ open, onTab }) {
+export default function RecallOrb({ open }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [model, setModel] = useState('');
@@ -60,17 +60,8 @@ export default function RecallOrb({ open, onTab }) {
   function openResult(r) {
     if (r.source === 'chat' && r.chatId) {
       appStore.closeRecall();
-      onTab?.('chat');
       try {
         window.dispatchEvent(new CustomEvent('mirabilis:open-chat', { detail: { id: r.chatId } }));
-      } catch {
-        /* ignore */
-      }
-    } else if (r.source === 'ledger' && r.sessionId) {
-      appStore.closeRecall();
-      onTab?.('intel');
-      try {
-        window.dispatchEvent(new CustomEvent('mirabilis:open-session', { detail: { id: r.sessionId } }));
       } catch {
         /* ignore */
       }
@@ -112,7 +103,7 @@ export default function RecallOrb({ open, onTab }) {
 
             {!loading && !error && results.map((r, i) => (
               <button
-                key={`${r.source}-${r.chatId || r.sessionId || 'x'}-${i}`}
+                key={`${r.source}-${r.chatId || 'x'}-${i}`}
                 type="button"
                 onClick={() => openResult(r)}
                 className="au-focus flex w-full items-start gap-3 rounded-[var(--r-md)] px-3 py-2 text-left transition hover:bg-[color:var(--hairline)]"
@@ -120,7 +111,6 @@ export default function RecallOrb({ open, onTab }) {
                 <span className="flex min-w-0 flex-1 flex-col gap-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)]">{r.title}</span>
-                    <Badge tone={r.source === 'ledger' ? 'warn' : 'neutral'}>{r.source === 'ledger' ? 'Ledger' : 'Chat'}</Badge>
                     <span className="ml-auto shrink-0 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{scorePct(r.score)}</span>
                   </span>
                   <span className="line-clamp-2 text-[length:var(--text-2xs)] text-[color:var(--text-muted)]">{r.snippet}</span>

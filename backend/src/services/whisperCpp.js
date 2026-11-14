@@ -1,6 +1,5 @@
 // @ts-check
-// On-device speech-to-text via whisper.cpp, shared by chat dictation and
-// IntelLedger media ingest.
+// On-device speech-to-text via whisper.cpp, for chat dictation and voice chat.
 
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -80,13 +79,4 @@ export async function transcribeWithWhisperCpp({ wavPath, binary, model, outStem
   ], { timeoutMs });
   const txt = await readFile(`${outStem}.txt`, 'utf8').catch(() => '');
   return cleanTranscript(txt);
-}
-
-/** Is a complete whisper.cpp setup (binary AND model) available right now? */
-export async function whisperCppAvailable() {
-  const binary = await resolveWhisperCppBinary();
-  if (!binary) return null;
-  const model = resolveWhisperCppModel();
-  if (!model) return null;
-  return { binary, model };
 }

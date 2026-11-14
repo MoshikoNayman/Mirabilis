@@ -1,5 +1,5 @@
-// Local semantic recall over past chats and IntelLedger signals, embedded with a local
-// Ollama model and ranked by cosine similarity. Also flags reversed past decisions.
+// Local semantic recall over past chats, embedded with a local Ollama model and
+// ranked by cosine similarity.
 
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -14,16 +14,6 @@ const EMBED_CONCURRENCY = 4;
 // Covers a cold load of the embedding model on a slow disk.
 const EMBED_TIMEOUT_MS = 90000;
 
-// Contradiction detection: a small local chat model judges each candidate pair.
-// The caps bound the number of LLM calls per scan.
-const DEFAULT_JUDGE_MODEL = 'qwen2.5:0.5b';
-const CONTRA_SIM_THRESHOLD = 0.55; // minimum cosine similarity to bother judging
-const CONTRA_NEAR_DUPLICATE = 0.985; // above this it is almost certainly the same sentence
-const CONTRA_TOP_K = 3; // at most this many past candidates per statement
-const CONTRA_MAX_JUDGE_CALLS = 6; // hard cap on LLM judge calls per request
-// The judge is user-selectable; a larger one cold-loading on CPU needs the headroom.
-const CHAT_TIMEOUT_MS = 120000;
-
 function sha1(text) {
   return createHash('sha1').update(text).digest('hex');
 }
@@ -37,37 +27,6 @@ function chunkText(text, size = CHUNK_CHARS) {
     chunks.push(clean.slice(i, i + size));
   }
   return chunks;
-}
-
-// Words that never count as a shared topic between two statements.
-const CONTRA_STOPWORDS = new Set([
-  'about', 'after', 'again', 'against', 'their', 'there', 'these', 'those', 'which',
-  'while', 'would', 'could', 'should', 'shall', 'going', 'gonna', 'still', 'instead',
-  'because', 'before', 'being', 'other', 'another', 'thing', 'things', 'stuff',
-  'with', 'from', 'into', 'that', 'this', 'they', 'them', 'then', 'than', 'have',
-  'will', 'want', 'need', 'used', 'using', 'make', 'made', 'take', 'plan', 'plans',
-  'decided', 'decide', 'agreed', 'agree', 'chose', 'choose', 'now', 'our', 'your'
-]);
-
-// Substantive tokens (length >= 4, not a stopword) that describe what a statement
-// is about. Two statements can only reverse the same decision if they share one.
-function contentTokens(text) {
-  return new Set(
-    String(text || '')
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter((token) => token.length >= 4 && !CONTRA_STOPWORDS.has(token))
-  );
-}
-
-function sharesContentToken(a, b) {
-  const setA = contentTokens(a);
-  if (setA.size === 0) return false;
-  for (const token of contentTokens(b)) {
-    if (setA.has(token)) return true;
-  }
-  return false;
 }
 
 function cosine(a, b) {
@@ -113,12 +72,11 @@ async function mapLimit(items, limit, mapper) {
   return results;
 }
 
-export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath } = {}) {
+export function createRecall({ config = {}, chatStorePath } = {}) {
   const ollamaBaseUrl = String(config.ollamaBaseUrl || DEFAULT_OLLAMA_BASE_URL).replace(/\/+$/, '');
 
   // Cached across queries for the life of the process.
   let chosenModel = null;
-  let chosenJudgeModel = null;
   const embedCache = new Map(); // sha1(text) -> number[]
   const EMBED_CACHE_MAX = 2000; // LRU bound
 
@@ -227,7 +185,6 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
             text: `${title}\n${chunk}`,
             source: 'chat',
             chatId: chat?.id || '',
-            sessionId: '',
             title,
             snippet: chunk
           });
@@ -236,29 +193,6 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
         if (docs.length >= MAX_DOCS) break;
       }
       if (docs.length >= MAX_DOCS) break;
-    }
-
-    if (docs.length < MAX_DOCS) {
-      const ledgerStore = await readJsonSafe(intelLedgerStorePath, { signals: [] });
-      const signals = Array.isArray(ledgerStore?.signals) ? ledgerStore.signals : [];
-      for (const signal of signals) {
-        const value = String(signal?.value || signal?.quote || '').trim();
-        if (!value) continue;
-        const title = String(signal?.signal_type || 'signal');
-        const chunks = chunkText(value);
-        for (const chunk of chunks) {
-          docs.push({
-            text: `${title}\n${chunk}`,
-            source: 'ledger',
-            chatId: '',
-            sessionId: signal?.session_id || '',
-            title,
-            snippet: chunk
-          });
-          if (docs.length >= MAX_DOCS) break;
-        }
-        if (docs.length >= MAX_DOCS) break;
-      }
     }
 
     return docs;
@@ -314,8 +248,7 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
         source: entry.doc.source,
         title: entry.doc.title,
         snippet: entry.doc.snippet,
-        chatId: entry.doc.chatId,
-        sessionId: entry.doc.sessionId
+        chatId: entry.doc.chatId
       }));
 
     if (ranked.length === 0 && embedFailures > 0) {
@@ -325,179 +258,8 @@ export function createRecall({ config = {}, chatStorePath, intelLedgerStorePath 
     return { ok: true, model: chosenModel, results: ranked };
   }
 
-  // Judge model precedence: request, config/env, small default, then any non-embedding model.
-  // A larger judge separates reaffirmations from reversals better, at higher latency.
-  async function ensureJudgeModel(preferred) {
-    const wanted = String(
-      preferred || config.contradictionModel || process.env.MIRABILIS_CONTRADICTION_MODEL || ''
-    ).trim();
-    if (wanted) return wanted;
-    if (chosenJudgeModel) return chosenJudgeModel;
-    const tags = await listTagModels();
-    if (tags.includes(DEFAULT_JUDGE_MODEL)) {
-      chosenJudgeModel = DEFAULT_JUDGE_MODEL;
-      return chosenJudgeModel;
-    }
-    const chatModel = tags.find((name) => !/embed/i.test(String(name)));
-    chosenJudgeModel = chatModel || DEFAULT_JUDGE_MODEL;
-    return chosenJudgeModel;
-  }
-
-  // Lenient: take the first {...} block, else fall back to a keyword scan.
-  function parseJudgeVerdict(content) {
-    const raw = String(content || '');
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) {
-      try {
-        const obj = JSON.parse(match[0]);
-        return {
-          conflict: obj.conflict === true || String(obj.conflict).toLowerCase() === 'true',
-          why: String(obj.why || '').replace(/\s+/g, ' ').trim().slice(0, 200)
-        };
-      } catch {
-        /* fall through to keyword scan */
-      }
-    }
-    if (/\b(conflict"?\s*:\s*true|yes|contradict|superseded|changed)\b/i.test(raw)) {
-      return { conflict: true, why: '' };
-    }
-    return { conflict: false, why: '' };
-  }
-
-  async function judgeConflict(model, current, past) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
-    try {
-      const res = await fetch(`${ollamaBaseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          stream: false,
-          options: { temperature: 0 },
-          messages: [
-            {
-              role: 'system',
-              content: 'You detect when a person reversed a past decision. Reply with strict JSON only.'
-            },
-            {
-              role: 'user',
-              content: [
-                'Answer true only when the newer statement chooses a DIFFERENT option than the older one for the same subject.',
-                'Example: past "use PostgreSQL", now "use MongoDB instead" -> true. Past "use PostgreSQL", now "keep using PostgreSQL" -> false.',
-                `Past: "${past}"`,
-                `Now: "${current}"`,
-                'Strict JSON: {"conflict": true|false, "why": "<short>"}'
-              ].join('\n')
-            }
-          ]
-        }),
-        signal: controller.signal
-      });
-      if (!res.ok) return null;
-      const payload = await res.json();
-      const content = payload?.message?.content ?? payload?.response ?? '';
-      return parseJudgeVerdict(content);
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  // Find current statements that reverse something in past chats or the ledger.
-  // Any failure yields no conflicts rather than an error.
-  async function findContradictions(statements, opts = {}) {
-    const stmts = (Array.isArray(statements) ? statements : [])
-      .map((item) => (typeof item === 'string' ? item : String(item?.value || item?.text || '')).replace(/\s+/g, ' ').trim())
-      .filter((item) => item.length >= 8);
-    const seenStmt = new Set();
-    const uniqueStmts = [];
-    for (const stmt of stmts) {
-      const key = stmt.toLowerCase();
-      if (seenStmt.has(key)) continue;
-      seenStmt.add(key);
-      uniqueStmts.push(stmt);
-    }
-    if (uniqueStmts.length === 0) return { ok: true, model: null, conflicts: [] };
-
-    try {
-      await ensureModel();
-    } catch (error) {
-      return { ok: false, reason: `embedding model unavailable: ${error.message}`, conflicts: [] };
-    }
-
-    let docs;
-    try {
-      docs = await buildCorpus();
-    } catch (error) {
-      return { ok: false, reason: `failed to read history: ${error.message}`, conflicts: [] };
-    }
-    if (docs.length === 0) return { ok: true, model: chosenModel, conflicts: [] };
-
-    // Embed the corpus once; the cache keeps this cheap on later requests.
-    const docVectors = await mapLimit(docs, EMBED_CONCURRENCY, async (doc) => {
-      try {
-        return await embedText(doc.text);
-      } catch {
-        return null;
-      }
-    });
-
-    const judgeModel = await ensureJudgeModel(opts.model);
-    const simThreshold = Number(opts.threshold) || CONTRA_SIM_THRESHOLD;
-    const topK = Math.max(1, Math.min(Number(opts.topK) || CONTRA_TOP_K, 5));
-    const maxJudgeCalls = Math.max(1, Math.min(Number(opts.maxJudgeCalls) || CONTRA_MAX_JUDGE_CALLS, 12));
-
-    const conflicts = [];
-    let judgeCalls = 0;
-
-    for (const statement of uniqueStmts) {
-      if (judgeCalls >= maxJudgeCalls) break;
-
-      let stmtVector;
-      try {
-        stmtVector = await embedText(statement);
-      } catch {
-        continue;
-      }
-
-      const ranked = docs
-        .map((doc, index) => ({ doc, score: docVectors[index] ? cosine(stmtVector, docVectors[index]) : 0 }))
-        // Near-identical text is the same sentence, not a conflict.
-        .filter((entry) => entry.score >= simThreshold && entry.score < CONTRA_NEAR_DUPLICATE)
-        // A shared subject word keeps unrelated topics away from the small judge.
-        .filter((entry) => sharesContentToken(statement, entry.doc.snippet))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, topK);
-
-      for (const entry of ranked) {
-        if (judgeCalls >= maxJudgeCalls) break;
-        judgeCalls += 1;
-        const verdict = await judgeConflict(judgeModel, statement, entry.doc.snippet);
-        if (verdict && verdict.conflict) {
-          conflicts.push({
-            current: statement,
-            past: {
-              title: entry.doc.title,
-              snippet: entry.doc.snippet,
-              source: entry.doc.source,
-              chatId: entry.doc.chatId,
-              sessionId: entry.doc.sessionId
-            },
-            why: verdict.why || 'This appears to reverse an earlier decision.',
-            score: Number(entry.score.toFixed(4))
-          });
-          break; // one conflict per statement
-        }
-      }
-    }
-
-    return { ok: true, model: judgeModel, embedModel: chosenModel, conflicts };
-  }
-
   // Exposed so the Config Vault shares this model pick and embed cache.
-  return { query, findContradictions, embedText, ensureModel, getEmbedModel: () => chosenModel };
+  return { query, embedText, ensureModel, getEmbedModel: () => chosenModel };
 }
 
 // Shared with the Config Vault.

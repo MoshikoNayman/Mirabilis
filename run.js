@@ -498,7 +498,7 @@ async function endpointLooksLikeMirabilisFrontend(url) {
     const res = await fetch(url, { signal: AbortSignal.timeout(2500) });
     if (!res.ok) return false;
     const html = (await res.text()).toLowerCase();
-    return html.includes('mirabilis') || html.includes('intelledger');
+    return html.includes('mirabilis');
   } catch {
     return false;
   }

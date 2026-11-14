@@ -52,14 +52,13 @@ Backend (`backend/src`, Node ESM):
   search and tags, `backend/src/modelUpdates.js` compares installed digests with the registry's, and
   `backend/src/modelInstallJobs.js` runs installs as jobs. Go Dark refuses an install and stops a running one.
 - Features beside chat: `backend/src/recall.js` (search past chats with local embeddings),
-  `backend/src/configVault.js` (cited answers over a folder of config files), IntelLedger
-  (`backend/src/routes/intelLedger.js`, `backend/src/storage/intelLedger.js`), Homelab Roster
+  `backend/src/configVault.js` (cited answers over a folder of config files), Homelab Roster
   (`backend/src/homelab.js`), watched workspace (`backend/src/workspace.js`), voice through
   whisper.cpp (`backend/src/services/whisperCpp.js`) and Piper, remote SSH control (in `server.js`).
 
 Frontend (`frontend/src`, Next.js with React, rendered in the browser only):
 - `frontend/src/app/page.js` loads `frontend/src/components/MirabilisAppLoader.jsx`, which loads
-  `frontend/src/components/MirabilisApp.jsx`: the shell with the Chat and IntelLedger tabs.
+  `frontend/src/components/MirabilisApp.jsx`: the shell around the chat view.
 - `frontend/src/components/ChatApp.jsx`: the chat view. Composer, provider and model menus,
   streaming, agent runs, approvals and the Settings sheet.
 - `frontend/src/components/settings/`: the Settings sheet and its Access and Connectors panes.
@@ -207,7 +206,7 @@ sets it to Electron's user data folder (on macOS `~/Library/Application Support/
 | `mcp-token` | The local session and MCP token. |
 | `ollama-library-cache.json`, `model-updates.json` | Model search cache, update checks, latest Ollama release. |
 | `personal-memory.json` | Personal memory items. |
-| `intelledger.json`, `config-vault.json`, `homelab-hosts.json` | Feature stores. |
+| `config-vault.json`, `homelab-hosts.json` | Feature stores. |
 | `agent-runs/` | Run logs (`<runId>.jsonl`), `runs.json`, and pre-write copies. |
 | `images/`, `uploads/` | Generated images and chat attachments. |
 | `fine-tuning-examples.jsonl` | Examples saved when Training is set to fine-tuning. |

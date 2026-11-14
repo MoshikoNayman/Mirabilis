@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import StatusOrb from '../ui/StatusOrb';
 import {
   IconButton, Panel, Kbd, MenuDotsIcon, SearchIcon, RecallIcon, ServerIcon,
-  CommandIcon, MoonIcon, IncognitoIcon, BellIcon, FolderIcon, GearIcon
+  CommandIcon, MoonIcon, IncognitoIcon, FolderIcon, GearIcon
 } from '../ui/primitives';
 import { appStore, useAppStore } from '../../store/useAppStore';
 import {
@@ -70,7 +70,6 @@ function ControlMenu({ onClose }) {
   return (
     <Panel ref={ref} material="chrome" className="au-pop absolute right-0 top-11 w-[252px] p-1.5" role="menu">
       <MenuRow icon={<SearchIcon size={15} />} label="Search" onClick={act(() => appStore.openSearch())} />
-      <MenuRow icon={<BellIcon size={15} />} label="While you were away" onClick={act(() => appStore.openWywa())} />
       <MenuRow icon={<RecallIcon size={15} />} label="Recall" onClick={act(() => appStore.openRecall())} />
       <MenuRow icon={<ServerIcon size={15} />} label="Homelab" onClick={act(() => appStore.openHomelab())} />
       <MenuRow icon={<FolderIcon size={15} />} label="Workspace" onClick={act(() => appStore.openWorkspace())} />
@@ -79,10 +78,7 @@ function ControlMenu({ onClose }) {
         icon={<IncognitoIcon size={15} />}
         label="Off the Record"
         onClick={act(() => {
-          try { window.dispatchEvent(new CustomEvent('mirabilis:set-tab', { detail: { tab: 'chat' } })); } catch { /* ignore */ }
-          setTimeout(() => {
-            try { window.dispatchEvent(new CustomEvent('mirabilis:new-ephemeral-chat')); } catch { /* ignore */ }
-          }, 60);
+          try { window.dispatchEvent(new CustomEvent('mirabilis:new-ephemeral-chat')); } catch { /* ignore */ }
         })}
       />
       <MenuRow

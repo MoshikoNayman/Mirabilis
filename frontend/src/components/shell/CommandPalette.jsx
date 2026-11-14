@@ -3,7 +3,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Kbd, PencilIcon, ChatIcon, FolderIcon, SearchIcon, UsersIcon, MoonIcon, BellIcon, GlobeIcon, PaletteIcon, TypeIcon } from '../ui/primitives';
+import { Modal, Kbd, PencilIcon, SearchIcon, UsersIcon, MoonIcon, BellIcon, GlobeIcon, PaletteIcon, TypeIcon } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
 import {
   SCHEMES, SCHEME_META, FONTS, FONT_META, setScheme, setFont, cycleMode
@@ -30,16 +30,14 @@ function fuzzy(query, text) {
   return i === q.length ? 1 : 0;
 }
 
-export default function CommandPalette({ open, onTab }) {
+export default function CommandPalette({ open }) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const listRef = useRef(null);
 
   const commands = useMemo(() => {
     const cmds = [
-      { id: 'new-chat', title: 'New chat', icon: <PencilIcon size={15} />, run: () => { onTab?.('chat'); emit('mirabilis:new-chat'); } },
-      { id: 'go-chat', title: 'Go to Chat', icon: <ChatIcon size={15} />, run: () => onTab?.('chat') },
-      { id: 'go-intel', title: 'Go to IntelLedger', icon: <FolderIcon size={15} />, run: () => onTab?.('intel') },
+      { id: 'new-chat', title: 'New chat', icon: <PencilIcon size={15} />, run: () => emit('mirabilis:new-chat') },
       { id: 'search', title: 'Search', icon: <SearchIcon size={15} />, run: () => appStore.openSearch() },
       { id: 'buddy', title: 'Open buddy list', icon: <UsersIcon size={15} />, run: () => appStore.setBuddyOpen(true) },
       { id: 'theme', title: 'Toggle appearance', icon: <MoonIcon size={15} />, run: () => cycleMode() },
@@ -57,7 +55,7 @@ export default function CommandPalette({ open, onTab }) {
     return cmds;
     // open is a dependency so the Mute label is current each time the palette opens.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onTab, open]);
+  }, [open]);
 
   const filtered = useMemo(() => {
     return commands

@@ -1,13 +1,12 @@
-// One search across chats, providers and IntelLedger (when reachable), grouped with
-// previews; Enter opens the first match.
+// One search across chats and providers, grouped with previews; Enter opens the
+// first match.
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Kbd, PresenceDot, Spinner, SearchIcon, ChatIcon, FolderIcon } from '../ui/primitives';
+import { Modal, Kbd, PresenceDot, Spinner, SearchIcon, ChatIcon } from '../ui/primitives';
 import { appStore } from '../../store/useAppStore';
-import { getJSON, API_BASE } from '../../lib/api';
+import { getJSON } from '../../lib/api';
 import { PROVIDERS } from '../../lib/presence';
-import { safeStorageGet } from '../../lib/storage';
 
 function useDebounced(value, ms) {
   const [v, setV] = useState(value);
@@ -27,11 +26,10 @@ function normalizeChats(payload) {
   }));
 }
 
-export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
+export default function OmniSearch({ open, presence, onPickProvider }) {
   const [query, setQuery] = useState('');
   const debounced = useDebounced(query, 180);
   const [chats, setChats] = useState([]);
-  const [ledger, setLedger] = useState([]);
   const [loading, setLoading] = useState(false);
   const loadedRef = useRef(false);
 
@@ -46,47 +44,8 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
   }, [open]);
 
   useEffect(() => {
-    if (!open) {
-      setQuery('');
-      setLedger([]);
-    }
+    if (!open) setQuery('');
   }, [open]);
-
-  // Semantic ranking lives in the backend; debounced and skipped for trivial queries.
-  useEffect(() => {
-    const term = debounced.trim();
-    if (!open || term.length < 2) {
-      setLedger([]);
-      return undefined;
-    }
-    const userId = safeStorageGet('mirabilis-user-id', '');
-    if (!userId) return undefined;
-    let alive = true;
-    const ctrl = new AbortController();
-    fetch(
-      `${API_BASE}/api/intelledger/sessions/search?userId=${encodeURIComponent(userId)}&query=${encodeURIComponent(term)}`,
-      { signal: ctrl.signal }
-    )
-      .then((r) => (r.ok ? r.json() : { sessions: [] }))
-      .then((p) => {
-        if (!alive) return;
-        const list = Array.isArray(p?.sessions) ? p.sessions : [];
-        setLedger(
-          list.slice(0, 6).map((s) => ({
-            id: s.id,
-            title: s.title || 'Untitled session',
-            preview: s.topic_preview || s.description || ''
-          }))
-        );
-      })
-      .catch(() => {
-        if (alive) setLedger([]);
-      });
-    return () => {
-      alive = false;
-      ctrl.abort();
-    };
-  }, [debounced, open]);
 
   const q = debounced.toLowerCase().trim();
 
@@ -104,7 +63,6 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
 
   function openChat(c) {
     appStore.closeSearch();
-    onTab?.('chat');
     try {
       window.dispatchEvent(new CustomEvent('mirabilis:open-chat', { detail: { id: c.id } }));
     } catch {
@@ -117,22 +75,11 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
     onPickProvider?.(p);
   }
 
-  function openSession(s) {
-    appStore.closeSearch();
-    onTab?.('intel');
-    try {
-      window.dispatchEvent(new CustomEvent('mirabilis:open-session', { detail: { id: s.id } }));
-    } catch {
-      /* ignore */
-    }
-  }
-
   // Flat list so arrow keys move one highlight across all groups, as in CommandPalette.
   const flat = useMemo(() => [
     ...chatResults.map((c) => ({ type: 'chat', item: c })),
-    ...ledger.map((s) => ({ type: 'session', item: s })),
     ...providerResults.map((p) => ({ type: 'provider', item: p })),
-  ], [chatResults, ledger, providerResults]);
+  ], [chatResults, providerResults]);
   const [active, setActive] = useState(0);
   const listRef = useRef(null);
   useEffect(() => { setActive(0); }, [flat]);
@@ -144,7 +91,6 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
     const f = flat[i];
     if (!f) return;
     if (f.type === 'chat') openChat(f.item);
-    else if (f.type === 'session') openSession(f.item);
     else openProvider(f.item);
   }
 
@@ -178,13 +124,6 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
               ))}
             </Section>
           )}
-          {ledger.length > 0 && (
-            <Section title="IntelLedger">
-              {ledger.map((s, i) => (
-                <Row key={s.id} icon={<FolderIcon size={15} />} title={s.title} sub={s.preview} active={active === chatResults.length + i} onClick={() => openSession(s)} />
-              ))}
-            </Section>
-          )}
           {providerResults.length > 0 && (
             <Section title="Providers">
               {providerResults.map((p, i) => (
@@ -193,13 +132,13 @@ export default function OmniSearch({ open, presence, onTab, onPickProvider }) {
                   leading={<PresenceDot presence={(presence?.[p.id] === 'unknown' ? 'offline' : presence?.[p.id]) || 'offline'} />}
                   title={p.label}
                   sub={p.scope === 'local' ? 'Local' : 'Cloud'}
-                  active={active === chatResults.length + ledger.length + i}
+                  active={active === chatResults.length + i}
                   onClick={() => openProvider(p)}
                 />
               ))}
             </Section>
           )}
-          {!loading && chatResults.length === 0 && ledger.length === 0 && providerResults.length === 0 && (
+          {!loading && chatResults.length === 0 && providerResults.length === 0 && (
             <div className="px-3 py-8 text-center text-[length:var(--text-sm)] text-[color:var(--text-muted)]">
               {q ? 'No matches' : 'No chats yet'}
             </div>

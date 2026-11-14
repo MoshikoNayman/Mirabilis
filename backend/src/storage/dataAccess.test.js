@@ -50,9 +50,9 @@ test('an unwritable chats.json is reported as blocking, with the fix', { skip: i
 });
 
 test('an unwritable optional file is reported but not blocking', { skip: isRoot ? 'root can write anything' : false }, async () => {
-  // The ledger is optional, so losing it must not block the app.
+  // Personal memory is optional, so losing it must not block the app.
   const dir = await tmp();
-  const file = path.join(dir, 'intelledger.json');
+  const file = path.join(dir, 'personal-memory.json');
   await fs.writeFile(file, '{}', 'utf8');
   await fs.chmod(file, 0o000);
 

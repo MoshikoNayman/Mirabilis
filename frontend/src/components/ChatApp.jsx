@@ -11,12 +11,10 @@ import { APP_FOOTER_TEXT, APP_VERSION } from '../constants/app';
 import { FlowerMark } from './ui/StatusOrb';
 import {
   Badge, Button, SegmentedControl, Spinner, Switch,
-  IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon, CheckIcon,
+  IncognitoIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon, CheckIcon,
   GearIcon, ShieldIcon, PlugIcon, MicIcon, TerminalIcon, FlaskIcon, AlertIcon, CubeIcon, ChevronRightIcon,
   PlusIcon, MinusIcon, GaugeIcon, GlobeIcon, UsersIcon
 } from './ui/primitives';
-import TabSwitch from './shell/TabSwitch';
-import CommitmentRadar from './shell/CommitmentRadar';
 import VoiceChat from './shell/VoiceChat';
 import AgentRunPanel from './shell/AgentRunPanel';
 import ApprovalCard from './shell/ApprovalCard';
@@ -25,7 +23,6 @@ import AccessPane from './settings/AccessPane';
 import ConnectorsPane from './settings/ConnectorsPane';
 import ModelsPane from './settings/ModelsPane';
 import { playSend, playReceive, playError } from '../lib/sounds';
-import { postJSON } from '../lib/api';
 import { getSessionToken } from '../lib/sessionToken';
 import { createSseParser } from '../lib/sseParser';
 import {
@@ -1676,18 +1673,6 @@ export default function ChatApp() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [isCommittingToLedger, setIsCommittingToLedger] = useState(false);
-  // Commitment Radar: read-only preview of commitments/asks/decisions in the
-  // current chat. Nothing is persisted until the user files them.
-  const [radarOpen, setRadarOpen] = useState(false);
-  const [radarLoading, setRadarLoading] = useState(false);
-  const [radarError, setRadarError] = useState('');
-  const [radarScanned, setRadarScanned] = useState(false);
-  const [radarSignals, setRadarSignals] = useState([]);
-  // "Your Past Self Disagrees": conflicts between this chat and the user's own
-  // past decisions, surfaced inside the same Commitment Radar modal.
-  const [radarConflicts, setRadarConflicts] = useState([]);
-  const [radarConflictsLoading, setRadarConflictsLoading] = useState(false);
   const [themeMode, setThemeMode] = useState(() => {
     if (typeof window !== 'undefined') return safeStorageGet('local-ai-theme-mode', 'auto');
     return 'auto';
@@ -2048,8 +2033,6 @@ export default function ChatApp() {
     return 20;
   });
   const promptAutosaveTimerRef = useRef(null);
-  // Hidden on the Ledger tab; approvals raised then also get a toast.
-  const mainRef = useRef(null);
   const composerInputRef = useRef(null);
 
   const promptProfiles = useMemo(
@@ -3531,17 +3514,11 @@ export default function ChatApp() {
     && !lastMessage.content
     && !lastMessage.imageGenerating;
 
-  // Settings opens on either tab, and these actions act on the chat view.
-  function showChatTab() {
-    try { window.dispatchEvent(new CustomEvent('mirabilis:set-tab', { detail: { tab: 'chat' } })); } catch { /* ignore */ }
-  }
-
   function handleCreateImageTool() {
     // An explicit prompt reaches the image service at any Access level.
     setInput((current) => toImagePrompt(current));
     setStatusText(imageServiceAvailable ? 'Image prompt ready' : 'Image service offline');
     // Started from Settings: hand the prompt to the message box.
-    showChatTab();
     appStore.closeSettings();
     requestAnimationFrame(() => {
       const el = composerInputRef.current;
@@ -4872,7 +4849,7 @@ export default function ChatApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsOpen, settingsSection]);
 
-  // Cmd+, (Ctrl+, elsewhere) opens Settings from either tab.
+  // Cmd+, (Ctrl+, elsewhere) opens Settings.
   useEffect(() => {
     function onKey(e) {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key !== ',') return;
@@ -5139,89 +5116,6 @@ export default function ChatApp() {
     setMessages(trimmed);
     setInput(lastUserMsg.content);
     setTimeout(() => sendMessageWithContent(lastUserMsg.content), 0);
-  }
-
-  // Shared by Chat -> Ledger and Commitment Radar so both see the same text.
-  function buildChatTranscript() {
-    return messages
-      .filter((m) => m.content && (m.role === 'user' || m.role === 'assistant'))
-      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
-      .join('\n\n');
-  }
-
-  // Read-only: /scan is preview-only and persists nothing.
-  async function runCommitmentRadar() {
-    if (radarLoading) return;
-    const transcript = buildChatTranscript();
-    setRadarOpen(true);
-    setRadarError('');
-    setRadarSignals([]);
-    setRadarConflicts([]);
-    setRadarConflictsLoading(false);
-    setRadarScanned(false);
-    if (!transcript.trim()) {
-      setRadarScanned(true);
-      return;
-    }
-    setRadarLoading(true);
-    // The contradiction pass uses embeddings and a local model, so it runs beside
-    // the faster heuristic scan. Best effort; writes nothing.
-    setRadarConflictsLoading(true);
-    postJSON('/api/recall/contradictions', { text: transcript }, { timeoutMs: 120000 })
-      .then((payload) => {
-        setRadarConflicts(Array.isArray(payload?.conflicts) ? payload.conflicts : []);
-      })
-      .catch(() => {
-        setRadarConflicts([]);
-      })
-      .finally(() => {
-        setRadarConflictsLoading(false);
-      });
-    try {
-      const payload = await api('/api/intelledger/scan', {
-        method: 'POST',
-        body: JSON.stringify({ text: transcript })
-      });
-      setRadarSignals(Array.isArray(payload?.signals) ? payload.signals : []);
-    } catch (err) {
-      setRadarError(plainError(err?.message, 'Scan failed'));
-    } finally {
-      setRadarScanned(true);
-      setRadarLoading(false);
-    }
-  }
-
-  async function commitChatToLedger() {
-    if (isCommittingToLedger) return;
-    const transcript = buildChatTranscript();
-    if (!transcript.trim()) {
-      setStatusText('Nothing to commit');
-      return;
-    }
-    const userId = safeStorageGet('mirabilis-user-id') || 'user-local';
-    const chatTitle = (chats.find((c) => c.id === activeChatId)?.title || '').trim() || 'Untitled chat';
-    setIsCommittingToLedger(true);
-    setStatusText('Committing to Ledger...');
-    try {
-      const created = await api('/api/intelledger/sessions', {
-        method: 'POST',
-        body: JSON.stringify({ userId, title: `Chat: ${chatTitle}` })
-      });
-      const sessionId = created?.session?.id;
-      if (!sessionId) throw new Error('could not create ledger session');
-      await api(`/api/intelledger/sessions/${sessionId}/ingest/text`, {
-        method: 'POST',
-        body: JSON.stringify({ content: transcript, sourceName: 'chat' })
-      });
-      setStatusText('Committed to Ledger');
-      appStore.toast('Committed to Ledger', { kind: 'success' });
-      playReceive();
-      window.dispatchEvent(new CustomEvent('mirabilis:open-session', { detail: { id: sessionId } }));
-    } catch (err) {
-      setStatusText(`Commit to Ledger failed: ${err.message}`);
-    } finally {
-      setIsCommittingToLedger(false);
-    }
   }
 
   async function sendMessage() {
@@ -5585,8 +5479,8 @@ export default function ChatApp() {
               const what = approval.title || approval.tool || 'an action';
               const tag = agentTag(approval.subAgent);
               pushEvent(`${tag ? `${tag} ` : ''}waiting for approval: ${what}`, payload.at);
-              // The card is out of sight behind Settings or on the Ledger tab.
-              if (settingsOpenRef.current || mainRef.current?.offsetParent === null) {
+              // The card is out of sight behind Settings.
+              if (settingsOpenRef.current) {
                 appStore.toast(`Needs approval: ${what}`, { kind: 'warn', ttl: 8000 });
               }
             }
@@ -6232,7 +6126,7 @@ export default function ChatApp() {
       const target = document.querySelector('[data-voice-orb]:not([disabled])')
         || document.querySelector('[aria-labelledby="voice-chat-title"] button:not([disabled])');
       if (target instanceof HTMLElement) target.focus();
-    } else if (!settingsOpenRef.current && mainRef.current?.offsetParent !== null) {
+    } else if (!settingsOpenRef.current) {
       composerInputRef.current?.focus();
     }
   }, [shownApprovalId]);
@@ -6409,7 +6303,6 @@ export default function ChatApp() {
           onPersonalMemoryChange={setUsePersonalMemory}
           memoryItems={trainingStats.memoryItems}
           onManageMemory={() => {
-            showChatTab();
             setIsTeachPanelOpen(true);
             loadMemoryItems();
             appStore.closeSettings();
@@ -6420,7 +6313,7 @@ export default function ChatApp() {
   ];
 
   return (
-    <main ref={mainRef} className="relative h-screen w-screen p-3 sm:p-6">
+    <main className="relative h-screen w-screen p-3 sm:p-6">
       <div className="mx-auto flex h-full max-w-7xl gap-3 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel)] p-3 shadow-[0_24px_90px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl sm:gap-5 sm:p-5">
         <aside className={`flex shrink-0 flex-col gap-3 rounded-[var(--r-lg)] border border-[var(--panel-border)] bg-[var(--material-thin)] p-2 sm:p-4 transition-all duration-200 ${sidebarOpen ? 'w-28 sm:w-72' : 'hidden'}`}>
           <div className="flex items-center justify-between">
@@ -6444,7 +6337,6 @@ export default function ChatApp() {
               </span>
               <h1 className="text-sm font-semibold tracking-tight sm:text-lg">Mirabilis AI</h1>
             </div>
-            <TabSwitch active="chat" />
           </div>
 
           {isSystemPromptVisible && (
@@ -6697,34 +6589,6 @@ export default function ChatApp() {
                   })}
                 </div>
 
-              </div>
-
-              {/* RIGHT zone: contextual actions */}
-              <div className="flex shrink-0 items-center gap-1.5">
-                {messages.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={runCommitmentRadar}
-                    disabled={radarLoading}
-                    className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-black/5 px-2 py-0.5 text-[11px] font-medium text-[color:var(--text-muted)] transition hover:bg-black/10 hover:text-[color:var(--text-main)] disabled:opacity-50 dark:bg-[var(--material-thin)] dark:hover:bg-[var(--material-thin)]"
-                  >
-                    <RadarIcon size={12} />
-                    {radarLoading ? 'Scanning...' : 'Radar'}
-                  </button>
-                )}
-                {messages.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={commitChatToLedger}
-                    disabled={isCommittingToLedger}
-                    className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent transition hover:bg-accent/20 disabled:opacity-50 dark:border-accent/30 dark:bg-accent/15 dark:hover:bg-accent/25"
-                  >
-                    <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M4 4h11l5 5v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M9 12h6M12 9v6"/>
-                    </svg>
-                    {isCommittingToLedger ? 'Committing...' : 'To Ledger'}
-                  </button>
-                )}
               </div>
             </div>
 
@@ -8169,21 +8033,6 @@ export default function ChatApp() {
         <span className="mx-1.5 opacity-40">|</span>
         <span className="opacity-55">{APP_VERSION}</span>
       </footer>
-      <CommitmentRadar
-        open={radarOpen}
-        onClose={() => setRadarOpen(false)}
-        loading={radarLoading}
-        error={radarError}
-        scanned={radarScanned}
-        signals={radarSignals}
-        conflicts={radarConflicts}
-        conflictsLoading={radarConflictsLoading}
-        filing={isCommittingToLedger}
-        onFileAll={async () => {
-          await commitChatToLedger();
-          setRadarOpen(false);
-        }}
-      />
       <VoiceChat
         open={voiceChatOpen}
         onClose={closeVoiceChat}
@@ -8199,7 +8048,6 @@ export default function ChatApp() {
         {/* A spoken request in Ask first can wait on the user; the card above the composer is behind this panel. */}
         {voiceChatOpen ? approvalCard : null}
       </VoiceChat>
-      {/* Portaled to body, so the Dock and the shortcut can open it on either tab. */}
       <SettingsSheet
         open={settingsOpen}
         section={settingsSection}

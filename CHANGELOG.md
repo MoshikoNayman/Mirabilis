@@ -2,6 +2,20 @@
 
 Versions use Junos-style tags. Newest first.
 
+## [Unreleased]
+
+- IntelLedger is removed: the Ledger tab, To Ledger, Commitment Radar,
+  While you were away, the reminder worker, the `/api/intelledger` API and
+  `POST /api/recall/contradictions`. `MIRABILIS_CONTRADICTION_MODEL` is
+  ignored. An existing `intelledger.json` and `intelledger-media/` stay on
+  disk, untouched.
+- Dictation and voice chat read `MIRABILIS_TRANSCRIBE_PROVIDER`,
+  `MIRABILIS_TRANSCRIBE_MODEL` and `MIRABILIS_WHISPER_CLI_MODEL`. The old
+  `INTELLEDGER_` names still work.
+- Composer chips show values only, in two units: provider and model, effort
+  and access. Web and Uncensored are on/off pills in the message box.
+- Logo: the top-left petal sits closer to the others.
+
 ## [26.4R1-S4] - 2026-11-13
 
 - Ultra effort: the goal is split in code, one agent per part works in

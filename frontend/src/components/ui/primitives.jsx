@@ -213,16 +213,6 @@ export function MenuDotsIcon(props) {
     </Svg>
   );
 }
-export function RadarIcon(props) {
-  return (
-    <Svg {...props}>
-      <circle cx="12" cy="12" r="9" />
-      <circle cx="12" cy="12" r="4.5" />
-      <path d="M12 12 18.4 5.6" />
-      <circle cx="16" cy="8" r="1.1" fill="currentColor" stroke="none" />
-    </Svg>
-  );
-}
 export function BellIcon(props) {
   return (
     <Svg {...props}>
@@ -252,17 +242,6 @@ export function WaveIcon(props) {
       <path d="M12 4v16" />
       <path d="M16 8v8" />
       <path d="M20 11v2" />
-    </Svg>
-  );
-}
-// Opposed arrows for a reversed or superseded decision.
-export function ContradictionIcon(props) {
-  return (
-    <Svg {...props}>
-      <path d="M4 8h13" />
-      <path d="m13 4 4 4-4 4" />
-      <path d="M20 16H7" />
-      <path d="m11 12-4 4 4 4" />
     </Svg>
   );
 }

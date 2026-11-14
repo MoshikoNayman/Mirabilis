@@ -33,7 +33,6 @@ export const config = {
   tavilySearchDepth: process.env.TAVILY_SEARCH_DEPTH || 'advanced',
   dataDir: resolvedDataDir,
   chatStorePath: path.join(resolvedDataDir, 'chats.json'),
-  intelLedgerStorePath: path.join(resolvedDataDir, 'intelledger.json'),
   configVaultStorePath: path.join(resolvedDataDir, 'config-vault.json'),
   // Host-header allowlist against DNS rebinding. Add proxy host names via
   // MIRABILIS_ALLOWED_HOSTS (comma-separated).

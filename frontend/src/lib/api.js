@@ -63,4 +63,3 @@ export async function apiFetch(path, { method = 'GET', body, signal, timeoutMs =
 
 export const getJSON = (path, opts) => apiFetch(path, { ...opts, method: 'GET' });
 export const postJSON = (path, body, opts) => apiFetch(path, { ...opts, method: 'POST', body });
-export const patchJSON = (path, body, opts) => apiFetch(path, { ...opts, method: 'PATCH', body });

@@ -23,7 +23,7 @@ Backend defaults come from `backend/src/config.js` and the modules named below.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `MIRABILIS_DATA_DIR` | `../mirabilis-data` beside the repo | Chats, IntelLedger, config vault, Access settings, connectors, agent run logs, MCP token, MCP server switch and model caches. |
+| `MIRABILIS_DATA_DIR` | `../mirabilis-data` beside the repo | Chats, config vault, Access settings, connectors, agent run logs, MCP token, MCP server switch and model caches. |
 | `DATA_DIR` | (unset) | Older alias. `MIRABILIS_DATA_DIR` wins. The desktop app sets it to its per-app data folder. |
 
 ## Providers
@@ -96,12 +96,15 @@ deleting need the session token; reading does not.
 
 Go Dark blocks web search regardless of the key.
 
-## Local speech to text
+## Speech to text
 
 | Variable | Default | What it does |
 |---|---|---|
+| `MIRABILIS_TRANSCRIBE_PROVIDER` | `auto` | `auto` sends audio to `OPENAI_BASE_URL` (`/audio/transcriptions`) when `OPENAI_API_KEY` is set, else local. `openai` forces that endpoint, `whisper-py` the Python `whisper` CLI; any other value forces local (whisper.cpp, then the Python `whisper` CLI). |
+| `MIRABILIS_TRANSCRIBE_MODEL` | `whisper-1` | Model sent to `OPENAI_BASE_URL` for transcription. |
 | `WHISPER_CPP_BINARY` | auto-detected | Path to `whisper-cli`, `whisper-cpp` or `main`. |
 | `WHISPER_CPP_MODEL` | auto-detected | Path to a `ggml-*.bin` model. |
+| `MIRABILIS_WHISPER_CLI_MODEL` | `base` | Model for the Python `whisper` CLI. |
 
 ## Inference tuning
 
@@ -110,7 +113,6 @@ Go Dark blocks web search regardless of the key.
 | `MIRABILIS_MAX_HISTORY_TOKENS` | `8000` | Ceiling on history tokens per request, minimum 400. |
 | `MIRABILIS_MAX_HISTORY_MESSAGES` | `100` | Ceiling on history messages per request, minimum 6. |
 | `MIRABILIS_HISTORY_CTX_FRACTION` | `0.65` | Share of the context window history may use, clamped to 0.1 to 0.9. |
-| `MIRABILIS_CONTRADICTION_MODEL` | (unset) | Model for the contradiction detector. |
 
 ## Agent runs and Access
 
@@ -276,30 +278,6 @@ temp file and a rename.
 | `IMAGE_MODEL` | `sd-legacy/stable-diffusion-v1-5` | Hugging Face model the image service loads. |
 | `IMAGE_SERVICE_PORT` | `7860` | Image service port. The launcher always sets 7860. |
 
-## IntelLedger
-
-| Variable | Default | What it does |
-|---|---|---|
-| `INTELLEDGER_REQUIRE_AUTH_CONTEXT` | `0` | `1` requires an authenticated tenant context on ledger routes. |
-| `INTELLEDGER_RATE_LIMIT_STORE` | `memory` | `redis` shares limits across processes. |
-| `INTELLEDGER_RATE_LIMIT_REDIS_URL` | (unset) | Redis URL when the store is `redis`. |
-| `INTELLEDGER_MAX_TEXT_INGEST_CHARS` | `50000` | Cap on one text ingest. |
-| `INTELLEDGER_MAX_SYNTHESIS_QUERY_CHARS` | `2000` | Cap on a synthesis query. |
-| `INTELLEDGER_MAX_CROSS_SYNTH_SESSIONS` | `20` | Sessions per cross-session synthesis. |
-| `INTELLEDGER_MEDIA_MAX_BYTES` | 150 MB | Largest media upload, minimum 5 MB. |
-| `INTELLEDGER_MEDIA_MAX_DURATION_SEC` | `5400` | Longest media duration, minimum 60. |
-| `INTELLEDGER_MEDIA_MAX_CONCURRENT` | `1` | Media jobs transcribing at once. |
-| `INTELLEDGER_MEDIA_MAX_QUEUE` | `12` | Queue depth before new jobs are refused. |
-| `INTELLEDGER_TRANSCRIBE_PROVIDER` | `auto` | `auto` uses the OpenAI API when `OPENAI_API_KEY` is set, else local. `openai` forces the API; any other value forces local (whisper.cpp, then the Python `whisper` CLI). |
-| `INTELLEDGER_TRANSCRIBE_MODEL` | `whisper-1` | Model for the OpenAI transcription API. |
-| `INTELLEDGER_WHISPER_CLI_MODEL` | `base` | Model for the Python `whisper` CLI. |
-| `INTELLEDGER_REMINDER_WORKER_ENABLED` | `1` | `0` disables the reminder worker. |
-| `INTELLEDGER_REMINDER_WORKER_INTERVAL_MS` | `60000` | Worker tick, minimum 10000. |
-| `INTELLEDGER_REMINDER_WORKER_BATCH_SIZE` | `25` | Reminders per tick, 1 to 500. |
-| `INTELLEDGER_REMINDER_MIN_INTERVAL_MS` | `900000` | Minimum gap between reminders for one item, minimum 60000. |
-| `INTELLEDGER_REMINDER_WEBHOOK_URL` | (unset) | Where reminders are POSTed. |
-| `INTELLEDGER_REMINDER_WEBHOOK_SECRET` | (unset) | Signs the webhook payload. |
-
 ## Desktop
 
 | Variable | Default | What it does |
@@ -322,11 +300,12 @@ backend.
 
 ## File permissions
 
-Data files are written `0600` and the data directory `0700`: chats, IntelLedger,
-config vault index, homelab roster, personal memory, provider keys, Access
-settings, the MCP server switch, connectors, model caches and agent run logs. Startup tightens existing files that are looser and logs how many it
-changed. This is a file mode, not encryption; use whole-disk encryption
-(FileVault, BitLocker, LUKS) for offline protection.
+Data files are written `0600` and the data directory `0700`: chats, config
+vault index, homelab roster, personal memory, provider keys, Access settings,
+the MCP server switch, connectors, model caches and agent run logs. Startup
+tightens existing files that are looser and logs how many it changed. This is a
+file mode, not encryption; use whole-disk encryption (FileVault, BitLocker,
+LUKS) for offline protection.
 
 ## Dependency overrides
 

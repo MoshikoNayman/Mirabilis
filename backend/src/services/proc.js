@@ -1,5 +1,5 @@
 // @ts-check
-// Child-process helpers shared by the chat and IntelLedger paths.
+// Child-process helpers shared by dictation, voice chat and the agent tools.
 
 import { spawn, exec } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -20,7 +20,7 @@ export async function commandExists(command) {
 
 /**
  * Run a command to completion, capturing stdout/stderr.
- * Always bounded by a timeout so a hung tool cannot stall the single-slot media queue.
+ * Always bounded by a timeout so a hung tool cannot stall its caller.
  * @param {string} command
  * @param {string[]} args
  * @param {{cwd?: string, env?: Record<string,string>, timeoutMs?: number, signal?: AbortSignal}} [opts]

@@ -5,9 +5,7 @@ Version 26.4R1-S4. Author: Moshiko Nayman.
 Mirabilis is a local-first AI chat app. It runs a model on your own machine
 through Ollama or another local engine, or talks to a cloud provider with your
 own key, chosen per conversation. Chats and other data stay on disk locally
-unless you pick a remote provider. It ships with IntelLedger, a workspace that
-pulls decisions, risks, asks and commitments out of conversations and tracks
-them.
+unless you pick a remote provider.
 
 ## Requirements
 
@@ -133,7 +131,7 @@ and its tools leave agent runs.
 - Answer styles (Instant to Deep) and autonomous runs (High effort, 1 hour,
   5 hours, Ultra) with a hard budget and up to 8 parallel agents
 - Config Vault: cited local retrieval over a folder you choose
-- Recall over past chats and IntelLedger signals, on-device embeddings
+- Recall over past chats, on-device embeddings
 - Inference controls for Ollama models and per-reply tokens/sec
 - Voice chat with local whisper.cpp and Piper voices
 - Web search through Tavily (needs `TAVILY_API_KEY`)
@@ -166,9 +164,9 @@ Signing, updates and release details are in [docs/DESKTOP.md](docs/DESKTOP.md).
 
 All app data is in one folder: `../mirabilis-data` beside the repo when run from
 source, or the per-app data folder when run as the desktop app. Set
-`MIRABILIS_DATA_DIR` to move it. It holds chats, IntelLedger, the config vault
-index, personal memory, provider keys, Access settings, connectors, agent run
-logs and the MCP token. Files are written `0600` and the folder `0700`.
+`MIRABILIS_DATA_DIR` to move it. It holds chats, the config vault index,
+personal memory, provider keys, Access settings, connectors, agent run logs and
+the MCP token. Files are written `0600` and the folder `0700`.
 
 ## Configuration
 

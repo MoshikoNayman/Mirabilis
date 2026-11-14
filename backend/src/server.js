@@ -39,7 +39,6 @@ import { probeAllHosts } from './homelab.js';
 import * as workspace from './workspace.js';
 import { createConnectorManager } from './mcp/connectors.js';
 import { createMcpServerHandler } from './mcp/mcpServer.js';
-import { createIntelLedgerStorage } from './storage/intelLedger.js';
 import { createRecall } from './recall.js';
 import { createConfigVault } from './configVault.js';
 import { makeHostGuard, makeMcpAuthGuard, makePrivilegedGuard, isLoopbackRequest, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
@@ -65,8 +64,6 @@ import { createConnectorsRouter } from './routes/connectors.js';
 import { createModelsRouter } from './routes/models.js';
 import { createMcpEndpointStore } from './mcpEndpoint.js';
 import { createMcpEndpointRouter, makeMcpEndpointGate } from './routes/mcpEndpoint.js';
-import { createIntelLedgerRoutes, extractStructuredSignals } from './routes/intelLedger.js';
-import { shouldSuppressReminder, buildReminderWebhookHeaders } from './intelLedgerReminderUtils.js';
 import { expandHome } from './paths.js';
 
 // Go Dark is enforced here, below every route: while it is on, fetch() refuses
@@ -130,7 +127,7 @@ app.use(cors({
     return cb(new Error('CORS origin denied'));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-provider-key', 'x-mirabilis-mcp-token', 'x-mirabilis-reminder-timestamp', 'x-mirabilis-reminder-signature'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-provider-key', 'x-mirabilis-mcp-token'],
   maxAge: 600
 }));
 
@@ -538,9 +535,10 @@ async function transcribeWithWhisperCli({ audioPath, outputStem, model = 'base' 
 }
 
 async function transcribeDictationAudio({ sourcePath }) {
-  const providerPref = String(process.env.INTELLEDGER_TRANSCRIBE_PROVIDER || 'auto').toLowerCase();
-  const transcribeModel = process.env.INTELLEDGER_TRANSCRIBE_MODEL || 'whisper-1';
-  const whisperCliModel = process.env.INTELLEDGER_WHISPER_CLI_MODEL || 'base';
+  // Each falls back to its older name, then to the default.
+  const providerPref = String(process.env.MIRABILIS_TRANSCRIBE_PROVIDER || process.env.INTELLEDGER_TRANSCRIBE_PROVIDER || 'auto').toLowerCase();
+  const transcribeModel = process.env.MIRABILIS_TRANSCRIBE_MODEL || process.env.INTELLEDGER_TRANSCRIBE_MODEL || 'whisper-1';
+  const whisperCliModel = process.env.MIRABILIS_WHISPER_CLI_MODEL || process.env.INTELLEDGER_WHISPER_CLI_MODEL || 'base';
   const hasOpenAI = Boolean(config.openAIApiKey);
 
   const stem = String(sourcePath).replace(/\.[^.]+$/, '');
@@ -2966,19 +2964,10 @@ app.delete('/api/providers/local/:provider', async (req, res) => {
 
 await ensureStoreFile(config.chatStorePath);
 
-const intelLedgerStorage = createIntelLedgerStorage(config.intelLedgerStorePath);
-await intelLedgerStorage.ensureStore();
-app.use('/api/intelledger', createIntelLedgerRoutes(intelLedgerStorage, {
-  streamWithProvider,
-  getEffectiveModel,
-  config
-}));
-
-// Recall Orb: local semantic recall over the user's own chats + ledger signals.
+// Recall Orb: local semantic recall over the user's own chats.
 const recall = createRecall({
   config,
-  chatStorePath: config.chatStorePath,
-  intelLedgerStorePath: config.intelLedgerStorePath
+  chatStorePath: config.chatStorePath
 });
 
 // Config Vault: cited RAG over a local folder of config files, on the recall
@@ -3053,362 +3042,6 @@ app.post('/api/recall', async (req, res) => {
   }
 });
 
-// "Your Past Self Disagrees": finds decisions here that contradict earlier ones.
-// Takes statements or a raw transcript. Always 200; conflicts is empty when
-// Ollama is down.
-app.post('/api/recall/contradictions', async (req, res) => {
-  try {
-    const text = String(req.body?.text || '').trim();
-    let statements = Array.isArray(req.body?.statements) ? req.body.statements : null;
-
-    if (!statements) {
-      if (!text) {
-        res.status(400).json({ ok: false, error: 'text or statements is required', conflicts: [] });
-        return;
-      }
-      statements = extractStructuredSignals(text)
-        .filter((signal) => signal.type === 'decision' || signal.type === 'commitment')
-        .map((signal) => signal.value)
-        .filter(Boolean);
-    } else {
-      statements = statements
-        .map((item) => (typeof item === 'string' ? item : String(item?.value || item?.text || '')))
-        .filter(Boolean);
-    }
-
-    // Transcripts prefix each line with a role label ("User:" / "Assistant:").
-    // Strip it so the surfaced "current" statement reads as a plain sentence.
-    statements = statements.map((item) => String(item).replace(/^\s*(?:user|assistant)\s*:\s*/i, '').trim());
-
-    statements = statements.slice(0, 12);
-    if (statements.length === 0) {
-      res.json({ ok: true, conflicts: [] });
-      return;
-    }
-
-    const outcome = await recall.findContradictions(statements, {
-      model: req.body?.model || undefined
-    });
-    res.json({
-      ok: true,
-      model: outcome?.model || null,
-      conflicts: Array.isArray(outcome?.conflicts) ? outcome.conflicts : []
-    });
-  } catch (error) {
-    res.status(500).json({ ok: false, error: `Contradiction scan failed: ${error.message}`, conflicts: [] });
-  }
-});
-
-const INTELLEDGER_REMINDER_WORKER_ENABLED = String(process.env.INTELLEDGER_REMINDER_WORKER_ENABLED || '1') !== '0';
-const INTELLEDGER_REMINDER_WORKER_INTERVAL_MS = Math.max(10000, Number(process.env.INTELLEDGER_REMINDER_WORKER_INTERVAL_MS || 60000));
-const INTELLEDGER_REMINDER_WORKER_BATCH_SIZE = Math.max(1, Math.min(Number(process.env.INTELLEDGER_REMINDER_WORKER_BATCH_SIZE || 25), 500));
-const INTELLEDGER_REMINDER_MIN_INTERVAL_MS = Math.max(60000, Number(process.env.INTELLEDGER_REMINDER_MIN_INTERVAL_MS || 15 * 60 * 1000));
-const INTELLEDGER_REMINDER_WEBHOOK_URL = String(process.env.INTELLEDGER_REMINDER_WEBHOOK_URL || '').trim();
-const INTELLEDGER_REMINDER_WEBHOOK_SECRET = String(process.env.INTELLEDGER_REMINDER_WEBHOOK_SECRET || '');
-const intelLedgerServiceStartedAtMs = Date.now();
-const intelLedgerServiceStartedAt = new Date(intelLedgerServiceStartedAtMs).toISOString();
-
-let intelLedgerReminderWorkerTimer = null;
-const intelLedgerReminderWorkerState = {
-  enabled: INTELLEDGER_REMINDER_WORKER_ENABLED,
-  interval_ms: INTELLEDGER_REMINDER_WORKER_INTERVAL_MS,
-  batch_size: INTELLEDGER_REMINDER_WORKER_BATCH_SIZE,
-  min_interval_ms: INTELLEDGER_REMINDER_MIN_INTERVAL_MS,
-  webhook_configured: Boolean(INTELLEDGER_REMINDER_WEBHOOK_URL),
-  webhook_signing_enabled: Boolean(INTELLEDGER_REMINDER_WEBHOOK_SECRET),
-  last_cycle_started_at: null,
-  last_cycle_completed_at: null,
-  last_cycle_due_count: 0,
-  last_cycle_processed_count: 0,
-  last_cycle_suppressed_count: 0,
-  last_trigger: null,
-  last_success_at: null,
-  last_error: null,
-  total_cycles: 0,
-  total_processed_count: 0,
-  total_suppressed_count: 0,
-  total_error_count: 0,
-  dispatches: []
-};
-
-function buildReminderStatusPayload(previewDue) {
-  const safePreview = Array.isArray(previewDue) ? previewDue : [];
-  return {
-    worker: {
-      ...intelLedgerReminderWorkerState,
-      dispatches: intelLedgerReminderWorkerState.dispatches.slice(-20)
-    },
-    due_preview_count: safePreview.length,
-    due_preview: safePreview.map((item) => ({
-      session_id: item.session_id,
-      action_id: item.id,
-      title: item.title,
-      urgency_score: item.urgency_score,
-      escalation_level: item.escalation_level,
-      next_reminder_at: item.next_reminder_at,
-      is_overdue: Boolean(item.is_overdue)
-    }))
-  };
-}
-
-function buildIntelLedgerOpsStatusPayload(previewDue) {
-  const safePreview = Array.isArray(previewDue) ? previewDue : [];
-  const memory = process.memoryUsage();
-  return {
-    status: 'ok',
-    service: {
-      started_at: intelLedgerServiceStartedAt,
-      uptime_ms: Math.max(0, Date.now() - intelLedgerServiceStartedAtMs),
-      pid: process.pid,
-      node_version: process.version,
-      memory: {
-        rss: memory.rss,
-        heap_total: memory.heapTotal,
-        heap_used: memory.heapUsed,
-        external: memory.external,
-        array_buffers: memory.arrayBuffers
-      }
-    },
-    ...buildReminderStatusPayload(safePreview)
-  };
-}
-
-function rememberReminderDispatch(entry) {
-  const next = [...intelLedgerReminderWorkerState.dispatches, entry].slice(-120);
-  intelLedgerReminderWorkerState.dispatches = next;
-}
-
-function computeNextReminderAfterDispatch(action, deliveryOk = true) {
-  const now = new Date();
-  const next = new Date(now);
-  const escalation = String(action?.escalation_level || 'low').toLowerCase();
-
-  if (!deliveryOk) {
-    next.setMinutes(next.getMinutes() + 5);
-    return next.toISOString();
-  }
-
-  if (escalation === 'high') {
-    next.setHours(next.getHours() + 2);
-  } else if (escalation === 'medium') {
-    next.setHours(next.getHours() + 12);
-  } else {
-    next.setHours(next.getHours() + 24);
-  }
-
-  return next.toISOString();
-}
-
-async function dispatchIntelLedgerReminder(action) {
-  if (!INTELLEDGER_REMINDER_WEBHOOK_URL) {
-    return {
-      ok: true,
-      channel: 'log',
-      status: 'simulated',
-      response_code: null,
-      error: null
-    };
-  }
-
-  const payload = {
-    dispatched_at: new Date().toISOString(),
-    session_id: action.session_id,
-    action_id: action.id,
-    title: action.title,
-    status: action.status,
-    priority: action.priority,
-    urgency_score: action.urgency_score,
-    escalation_level: action.escalation_level,
-    due_date: action.due_date,
-    is_overdue: Boolean(action.is_overdue),
-    next_reminder_at: action.next_reminder_at
-  };
-
-  const payloadBody = JSON.stringify(payload);
-  const { headers } = buildReminderWebhookHeaders(payloadBody, INTELLEDGER_REMINDER_WEBHOOK_SECRET);
-
-  try {
-    const response = await fetch(INTELLEDGER_REMINDER_WEBHOOK_URL, {
-      method: 'POST',
-      headers,
-      body: payloadBody,
-      signal: AbortSignal.timeout(6000)
-    });
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        channel: 'webhook',
-        status: 'failed',
-        response_code: response.status,
-        error: `webhook returned ${response.status}`
-      };
-    }
-
-    return {
-      ok: true,
-      channel: 'webhook',
-      status: 'sent',
-      response_code: response.status,
-      error: null
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      channel: 'webhook',
-      status: 'failed',
-      response_code: null,
-      error: error?.message || 'webhook request failed'
-    };
-  }
-}
-
-async function runIntelLedgerReminderCycle(trigger = 'timer') {
-  intelLedgerReminderWorkerState.last_trigger = trigger;
-  intelLedgerReminderWorkerState.total_cycles += 1;
-  try {
-    intelLedgerReminderWorkerState.last_cycle_started_at = new Date().toISOString();
-    const due = await intelLedgerStorage.getDueReminderActions({
-      limit: INTELLEDGER_REMINDER_WORKER_BATCH_SIZE
-    });
-    intelLedgerReminderWorkerState.last_cycle_due_count = Array.isArray(due) ? due.length : 0;
-    intelLedgerReminderWorkerState.last_cycle_processed_count = 0;
-    intelLedgerReminderWorkerState.last_cycle_suppressed_count = 0;
-
-    if (!Array.isArray(due) || due.length === 0) {
-      intelLedgerReminderWorkerState.last_cycle_completed_at = new Date().toISOString();
-      return {
-        ok: true,
-        due_count: 0,
-        processed_count: 0,
-        suppressed_count: 0,
-        trigger
-      };
-    }
-
-    for (const action of due) {
-      const sessionId = action?.session_id;
-      const actionId = action?.id;
-      if (!sessionId || !actionId) continue;
-
-      if (shouldSuppressReminder(action, INTELLEDGER_REMINDER_MIN_INTERVAL_MS)) {
-        intelLedgerReminderWorkerState.last_cycle_suppressed_count += 1;
-        intelLedgerReminderWorkerState.total_suppressed_count += 1;
-        rememberReminderDispatch({
-          at: new Date().toISOString(),
-          session_id: sessionId,
-          action_id: actionId,
-          title: action.title,
-          channel: action.last_reminder_channel || (INTELLEDGER_REMINDER_WEBHOOK_URL ? 'webhook' : 'log'),
-          status: 'suppressed',
-          response_code: null,
-          error: `suppressed: min interval ${INTELLEDGER_REMINDER_MIN_INTERVAL_MS}ms`
-        });
-        continue;
-      }
-
-      const delivery = await dispatchIntelLedgerReminder(action);
-      intelLedgerReminderWorkerState.last_cycle_processed_count += 1;
-      intelLedgerReminderWorkerState.total_processed_count += 1;
-
-      // Placeholder dispatch channel for V2.3; real delivery hooks can replace this log.
-      console.log('[IntelLedger reminder]', {
-        sessionId,
-        actionId,
-        title: action.title,
-        channel: delivery.channel,
-        delivery_status: delivery.status,
-        escalation: action.escalation_level || 'low',
-        overdue: Boolean(action.is_overdue)
-      });
-
-      const nextReminderAt = computeNextReminderAfterDispatch(action, delivery.ok);
-      await intelLedgerStorage.markActionReminderDispatched(sessionId, actionId, nextReminderAt, {
-        channel: delivery.channel,
-        status: delivery.status,
-        response_code: delivery.response_code,
-        error: delivery.error
-      });
-
-      rememberReminderDispatch({
-        at: new Date().toISOString(),
-        session_id: sessionId,
-        action_id: actionId,
-        title: action.title,
-        channel: delivery.channel,
-        status: delivery.status,
-        response_code: delivery.response_code,
-        error: delivery.error
-      });
-    }
-
-    intelLedgerReminderWorkerState.last_success_at = new Date().toISOString();
-    intelLedgerReminderWorkerState.last_error = null;
-    intelLedgerReminderWorkerState.last_cycle_completed_at = new Date().toISOString();
-    return {
-      ok: true,
-      due_count: intelLedgerReminderWorkerState.last_cycle_due_count,
-      processed_count: intelLedgerReminderWorkerState.last_cycle_processed_count,
-      suppressed_count: intelLedgerReminderWorkerState.last_cycle_suppressed_count,
-      trigger
-    };
-  } catch (error) {
-    intelLedgerReminderWorkerState.total_error_count += 1;
-    intelLedgerReminderWorkerState.last_error = error?.message || String(error);
-    intelLedgerReminderWorkerState.last_cycle_completed_at = new Date().toISOString();
-    console.error('[IntelLedger reminder worker] cycle error:', error?.message || error);
-    return {
-      ok: false,
-      due_count: intelLedgerReminderWorkerState.last_cycle_due_count,
-      processed_count: intelLedgerReminderWorkerState.last_cycle_processed_count,
-      suppressed_count: intelLedgerReminderWorkerState.last_cycle_suppressed_count,
-      trigger,
-      error: intelLedgerReminderWorkerState.last_error
-    };
-  }
-}
-
-app.get('/api/intelledger/reminders/status', async (_req, res) => {
-  try {
-    const previewDue = await intelLedgerStorage.getDueReminderActions({ limit: 10 });
-    res.json(buildReminderStatusPayload(previewDue));
-  } catch (error) {
-    res.status(500).json({ error: error?.message || 'Failed to read reminder status' });
-  }
-});
-
-app.get('/api/intelledger/ops/status', async (_req, res) => {
-  try {
-    const previewDue = await intelLedgerStorage.getDueReminderActions({ limit: 10 });
-    res.json(buildIntelLedgerOpsStatusPayload(previewDue));
-  } catch (error) {
-    res.status(500).json({ error: error?.message || 'Failed to read IntelLedger ops status' });
-  }
-});
-
-app.post('/api/intelledger/reminders/run', async (_req, res) => {
-  try {
-    const cycle = await runIntelLedgerReminderCycle('manual');
-    const previewDue = await intelLedgerStorage.getDueReminderActions({ limit: 10 });
-    const payload = {
-      trigger: 'manual',
-      cycle,
-      ...buildReminderStatusPayload(previewDue)
-    };
-
-    if (cycle?.ok === false) {
-      return res.status(500).json(payload);
-    }
-
-    return res.json(payload);
-  } catch (error) {
-    return res.status(500).json({
-      trigger: 'manual',
-      error: error?.message || 'Failed to run reminder cycle'
-    });
-  }
-});
-
 app.use((error, _req, res, _next) => {
   if (error?.message === 'CORS origin denied') {
     return res.status(403).json({ error: 'Origin not allowed' });
@@ -3430,19 +3063,6 @@ app.use((error, _req, res, _next) => {
   }
   return res.status(status).json({ error: message });
 });
-
-if (INTELLEDGER_REMINDER_WORKER_ENABLED) {
-  intelLedgerReminderWorkerTimer = setInterval(() => {
-    runIntelLedgerReminderCycle();
-  }, INTELLEDGER_REMINDER_WORKER_INTERVAL_MS);
-
-  // Allow process to exit normally if this is the only active timer.
-  intelLedgerReminderWorkerTimer.unref?.();
-  runIntelLedgerReminderCycle();
-  console.log(`[IntelLedger reminder worker] enabled (interval=${INTELLEDGER_REMINDER_WORKER_INTERVAL_MS}ms, batch=${INTELLEDGER_REMINDER_WORKER_BATCH_SIZE}, minInterval=${INTELLEDGER_REMINDER_MIN_INTERVAL_MS}ms, webhook=${INTELLEDGER_REMINDER_WEBHOOK_URL ? 'on' : 'off'}, signed=${INTELLEDGER_REMINDER_WEBHOOK_SECRET ? 'on' : 'off'})`);
-} else {
-  console.log('[IntelLedger reminder worker] disabled');
-}
 
 const server = app.listen(config.port, config.bindHost, () => {
   console.log(`Backend listening on http://${config.bindHost}:${config.port} (host=${config.bindHost})`);
@@ -3491,17 +3111,10 @@ server.on('error', (error) => {
 
 let isShuttingDown = false;
 
-function clearReminderWorkerTimer() {
-  if (!intelLedgerReminderWorkerTimer) return;
-  clearInterval(intelLedgerReminderWorkerTimer);
-  intelLedgerReminderWorkerTimer = null;
-}
-
 function shutdown(reason = 'signal', exitCode = 0) {
   if (isShuttingDown) return;
   isShuttingDown = true;
   console.log(`[backend] shutdown requested (${reason})`);
-  clearReminderWorkerTimer();
   // Connector programs are children of this process; stop them with their process groups.
   const connectorsStopped = connectors.shutdown().catch(() => {});
   server.close(() => {

@@ -44,7 +44,6 @@ let state = {
   recallOpen: false,
   voiceChatOpen: false,
   homelabOpen: false,
-  wywaOpen: false,
   workspaceOpen: false,
   // Watched folder and pinned relative paths, persisted to localStorage. ChatApp
   // folds the pinned files' current contents into each outbound message.
@@ -206,24 +205,6 @@ export const appStore = {
     }
     emit();
   },
-  openWywa() {
-    state.wywaOpen = true;
-    state.commandOpen = false;
-    state.searchOpen = false;
-    emit();
-  },
-  closeWywa() {
-    state.wywaOpen = false;
-    emit();
-  },
-  toggleWywa() {
-    state.wywaOpen = !state.wywaOpen;
-    if (state.wywaOpen) {
-      state.commandOpen = false;
-      state.searchOpen = false;
-    }
-    emit();
-  },
   openWorkspace() {
     state.workspaceOpen = true;
     state.commandOpen = false;
@@ -291,7 +272,6 @@ export const appStore = {
     state.recallOpen = false;
     state.voiceChatOpen = false;
     state.homelabOpen = false;
-    state.wywaOpen = false;
     state.workspaceOpen = false;
     emit();
   },

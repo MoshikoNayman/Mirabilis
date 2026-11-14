@@ -10,13 +10,12 @@ import WatchedWorkspace from './WatchedWorkspace';
 import CommandPalette from './CommandPalette';
 import OmniSearch from './OmniSearch';
 import RecallOrb from './RecallOrb';
-import WhileYouWereAway from './WhileYouWereAway';
 import Toaster from './Toaster';
 import usePresence from './usePresence';
 import { appStore, useAppStore } from '../../store/useAppStore';
 import { applyTheme, watchSystemTheme } from '../../lib/theme';
 
-export default function AuroraChrome({ activeTab, onTab }) {
+export default function AuroraChrome() {
   const [streaming, setStreaming] = useState(false);
   const [searching, setSearching] = useState(false);
   const { map: presence, warm, orbState } = usePresence({ streaming });
@@ -26,7 +25,6 @@ export default function AuroraChrome({ activeTab, onTab }) {
   const recallOpen = useAppStore((s) => s.recallOpen);
   const homelabOpen = useAppStore((s) => s.homelabOpen);
   const workspaceOpen = useAppStore((s) => s.workspaceOpen);
-  const wywaOpen = useAppStore((s) => s.wywaOpen);
 
   useEffect(() => {
     applyTheme();
@@ -72,7 +70,6 @@ export default function AuroraChrome({ activeTab, onTab }) {
   }, []);
 
   function handlePickProvider(p) {
-    onTab?.('chat');
     appStore.setBuddyOpen(false);
     try {
       window.dispatchEvent(new CustomEvent('mirabilis:set-provider', { detail: { provider: p.id } }));
@@ -89,10 +86,9 @@ export default function AuroraChrome({ activeTab, onTab }) {
       <BuddyList open={buddyOpen} presence={presence} warm={warm} />
       <HomelabRoster open={homelabOpen} />
       <WatchedWorkspace open={workspaceOpen} />
-      <CommandPalette open={commandOpen} onTab={onTab} />
-      <OmniSearch open={searchOpen} presence={presence} onTab={onTab} onPickProvider={handlePickProvider} />
-      <RecallOrb open={recallOpen} onTab={onTab} />
-      <WhileYouWereAway open={wywaOpen} />
+      <CommandPalette open={commandOpen} />
+      <OmniSearch open={searchOpen} presence={presence} onPickProvider={handlePickProvider} />
+      <RecallOrb open={recallOpen} />
       <Toaster />
     </>
   );
