@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync } from 'node:fs';
 import {
   EFFORT_OPTIONS, AGENTIC_EFFORTS, EFFORT_LABELS, AGENT_LIMITS, normalizeEffort, parseSavedAgents,
-  agentMax, agentCount, agentOverrides, effortChipText, effortChipParts
+  agentMax, agentCount, agentOverrides, effortChipText, effortChipParts, allowsThinking
 } from './effort.js';
 
 describe('EFFORT_OPTIONS', () => {
@@ -100,6 +100,21 @@ describe('agent count', () => {
     expect(effortChipParts('ultra', null, 'chat')).toEqual({ label: 'Ultra', agents: 4 });
     expect(effortChipParts('hour', null, 'chat')).toEqual({ label: '1 hour', agents: 0 });
     expect(effortChipParts('fast', 6, 'read')).toEqual({ label: 'Fast', agents: 0 });
+  });
+});
+
+describe('allowsThinking', () => {
+  it('skips thinking for the quick efforts, a stale value included', () => {
+    for (const id of ['instant', 'fast', 'balanced', 'bogus', undefined]) {
+      expect(allowsThinking(id), String(id)).toBe(false);
+    }
+  });
+
+  it('allows it for Thorough, Deep, the agentic tiers and the Deep Thinking switch', () => {
+    for (const id of ['thorough', 'deep', 'high', 'hour', 'session', 'ultra']) {
+      expect(allowsThinking(id), id).toBe(true);
+    }
+    expect(allowsThinking('instant', true)).toBe(true);
   });
 });
 

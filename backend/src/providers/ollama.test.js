@@ -133,7 +133,29 @@ test('streamOllamaChat sends think only when asked', async () => {
     };
     assert.equal(await run({ think: false }), 'ok');
     assert.equal(await run({}), 'ok');
-    assert.equal(bodies[0].think, false, 'an agent step asks a thinking model not to think');
-    assert.equal('think' in bodies[1], false, 'chat leaves the model default alone');
+    assert.equal(bodies[0].think, false, 'a quick chat or an agent step asks a thinking model not to think');
+    assert.equal('think' in bodies[1], false, 'a Thorough or Deep chat leaves the model default alone');
+  } finally { await up.close(); }
+});
+
+test('streamOllamaChat reports thinking but streams only the answer', async () => {
+  const up = await upstream((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    res.end([
+      { message: { content: '', thinking: 'Let me see.' }, done: false },
+      { message: { content: '', thinking: ' Fine.' }, done: false },
+      { message: { content: 'ok' }, done: false },
+      { done: true, eval_count: 3 }
+    ].map((line) => JSON.stringify(line)).join('\n') + '\n');
+  });
+  try {
+    let text = '';
+    let thinking = 0;
+    await streamOllamaChat({
+      baseUrl: up.baseUrl, model: 'qwen3:8b', messages: [{ role: 'user', content: 'x' }],
+      onToken: (t) => { text += t; }, onThinking: () => { thinking += 1; }
+    });
+    assert.equal(text, 'ok', 'thoughts never reach the reply');
+    assert.equal(thinking, 2);
   } finally { await up.close(); }
 });

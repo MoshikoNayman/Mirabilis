@@ -91,7 +91,7 @@ deleting need the session token; reading does not.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `TAVILY_API_KEY` | (empty) | Enables the `www` web-search chip. Without it search is off. |
+| `TAVILY_API_KEY` | (empty) | Key for web search. Turn search on with the Web pill in the message box, or in Settings, Chat tools. Without the key only news questions are searched, from RSS feeds. |
 | `TAVILY_SEARCH_DEPTH` | `advanced` | `basic` or `advanced`. |
 
 Go Dark blocks web search regardless of the key.

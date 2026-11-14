@@ -56,6 +56,21 @@ export function normalizeEffort(id) {
   return hit ? hit.value : 'balanced';
 }
 
+/** Efforts that answer without a thinking model's hidden thoughts. */
+const QUICK_EFFORTS = new Set(['instant', 'fast', 'balanced']);
+
+/**
+ * Whether a chat turn lets a thinking model think first. qwen3 thinks by default
+ * and spends a minute on it, so Instant, Fast and Balanced skip it unless
+ * Deep Thinking is on.
+ * @param {unknown} effort
+ * @param {boolean} [deep]  the Deep Thinking switch
+ * @returns {boolean}
+ */
+export function allowsThinking(effort, deep = false) {
+  return deep === true || !QUICK_EFFORTS.has(normalizeEffort(effort));
+}
+
 /**
  * The saved agent count, '1' to '8' in storage; anything else is null.
  * @param {unknown} raw

@@ -2139,7 +2139,7 @@ app.delete('/api/chats', async (_req, res) => {
 });
 
 app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
-  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens, localOnly, ollamaOptions, openaiParams, pinModel } = req.body || {};
+  const { content, model, provider, systemPrompt, uncensoredMode, trainingMode = 'off', usePersonalMemory = true, providerBaseUrl, providerApiKey, temperature, maxTokens, localOnly, ollamaOptions, openaiParams, pinModel, think } = req.body || {};
   const chatId = req.params.chatId;
 
   if (!content || typeof content !== 'string') {
@@ -2353,6 +2353,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   let firstTokenAt = null;
   let ollamaStats = null;
   let tunedNotice = null; // set if OOM auto-retry reduced the runtime options
+  let thinkingSent = false; // one 'thinking' event per reply is enough
 
   try {
     sendSSE(res, 'meta', {
@@ -2382,6 +2383,13 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       ollamaOptions: tuning.options,
       openaiParams,
       keepAlive: pinModel === true ? -1 : '30m',
+      // Only false is passed on: a model without thinking refuses think: true.
+      think: think === false ? false : undefined,
+      onThinking: () => {
+        if (thinkingSent) return;
+        thinkingSent = true;
+        sendSSE(res, 'thinking', {});
+      },
       onToken: (token) => {
         if (firstTokenAt === null) firstTokenAt = Date.now();
         assistantText += token;

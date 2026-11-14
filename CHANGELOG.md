@@ -15,6 +15,12 @@ Versions use Junos-style tags. Newest first.
 - Composer chips show values only, in two units: provider and model, effort
   and access. Web and Uncensored are on/off pills in the message box.
 - Logo: the top-left petal sits closer to the others.
+- Instant, Fast and Balanced answer without a thinking model's hidden
+  thoughts; qwen3 spent a minute on them. Thorough, Deep and Deep Thinking
+  keep them, and the status reads Thinking meanwhile.
+- Fixed: the Effort and Access menus showed under code blocks, the message
+  box row overflowed on narrow windows, Search kept a stale chat list, and the
+  token count could read 1000.0k.
 
 ## [26.4R1-S4] - 2026-11-13
 

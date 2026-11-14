@@ -31,16 +31,18 @@ export default function OmniSearch({ open, presence, onPickProvider }) {
   const debounced = useDebounced(query, 180);
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(false);
-  const loadedRef = useRef(false);
 
+  // Fetched on every open, so new, renamed and deleted chats show. The last list
+  // stays up while the new one loads.
   useEffect(() => {
-    if (!open || loadedRef.current) return;
-    loadedRef.current = true;
+    if (!open) return undefined;
+    let alive = true;
     setLoading(true);
     getJSON('/api/chats')
-      .then((p) => setChats(normalizeChats(p)))
-      .catch(() => setChats([]))
-      .finally(() => setLoading(false));
+      .then((p) => { if (alive) setChats(normalizeChats(p)); })
+      .catch(() => { if (alive) setChats([]); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, [open]);
 
   useEffect(() => {

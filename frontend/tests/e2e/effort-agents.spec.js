@@ -80,20 +80,27 @@ test('the effort rows sit inside the scrolling list, so a focus ring shows whole
   expect(inset).toBeGreaterThanOrEqual(3);
 });
 
-test('on a narrow screen the effort chip stays on one line inside its unit', async ({ page }) => {
+test('on a narrow screen effort and access share one line inside their unit', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/');
   await pickEffort(page, 'Ultra');
   await expect(chip(page)).toHaveAccessibleName('Effort: Ultra, 4 agents');
   const fit = await chip(page).evaluate((el) => {
     const group = el.parentElement.parentElement;
+    const access = group.querySelector('[data-menu-trigger="access"]');
+    const box = el.getBoundingClientRect();
+    const unit = group.getBoundingClientRect();
     return {
       nowrap: getComputedStyle(el).whiteSpace === 'nowrap',
       oneLine: el.scrollHeight <= el.clientHeight,
-      inside: el.getBoundingClientRect().right <= group.getBoundingClientRect().right + 0.5
+      inside: box.right <= unit.right + 0.5,
+      // No wrap inside the unit: a wrapped Access leaves the divider hanging.
+      sameLine: Math.abs(access.getBoundingClientRect().top - box.top) < 1,
+      accessInside: access.getBoundingClientRect().right <= unit.right + 0.5,
+      unitInView: unit.right <= window.innerWidth
     };
   });
-  expect(fit).toEqual({ nowrap: true, oneLine: true, inside: true });
+  expect(fit).toEqual({ nowrap: true, oneLine: true, inside: true, sameLine: true, accessInside: true, unitInView: true });
 });
 
 test('chips show values; Web and Uncensored are on/off pills in the message box', async ({ page }) => {

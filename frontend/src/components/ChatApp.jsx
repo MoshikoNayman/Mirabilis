@@ -37,7 +37,7 @@ import { hasUsableKey, providerNeedsKey, missingKeyMessage } from '../lib/provid
 import { needsServerModelSwitch } from '../lib/providerCapabilities';
 import {
   EFFORT_OPTIONS, AGENTIC_EFFORTS, normalizeEffort, parseSavedAgents, agentMax, agentCount, agentOverrides,
-  effortChipParts
+  effortChipParts, allowsThinking
 } from '../lib/effort';
 import { isLocalImageSrc, remoteImageLink } from '../lib/markdownMedia';
 import {
@@ -481,7 +481,7 @@ function classifyWebSearch(text) {
 
   if (hasLiveSignal) return 'search';
   if (hasSkipVerb) return 'skip';
-  // Default to search when www is on; the model decides if the context helps.
+  // Default to search when Web is on; the model decides if the context helps.
   return 'search';
 }
 
@@ -518,8 +518,9 @@ function messageTokens(message) {
 
 function formatTokenCount(value) {
   const amount = Number(value || 0);
-  // Compact past ten thousand, so a long chat does not widen the toolbar.
-  const text = amount >= 1e6 ? `${(amount / 1e6).toFixed(1)}M`
+  // Compact past ten thousand, so a long chat does not widen the toolbar. M from
+  // 999,950, where the k form would round up to 1000.0k.
+  const text = amount >= 999950 ? `${(amount / 1e6).toFixed(1)}M`
     : amount >= 1e4 ? `${(amount / 1e3).toFixed(1)}k`
     : amount.toLocaleString();
   return `${text} tok`;
@@ -5831,6 +5832,7 @@ export default function ChatApp() {
           providerApiKey: resolvedProvider.providerApiKey,
           localOnly: appStore.getGoDark(),
           ...(pinModel ? { pinModel: true } : {}),
+          ...(resolvedProvider.provider === 'ollama' && !allowsThinking(effortLevel, deepThinkingEnabled) ? { think: false } : {}),
           ...(temperature !== null && isFinite(temperature) ? { temperature } : {}),
           ...(maxTokens !== null && isFinite(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
           ...(resolvedProvider.provider === 'ollama' && ollamaParams && Object.values(ollamaParams).some((v) => v != null)
@@ -5892,8 +5894,9 @@ export default function ChatApp() {
       // Status line: token count, tok/s and elapsed time; a loading state before the first token.
       let liveTokenCount = 0;
       let liveFirstTokenTs = null;
+      let liveThinking = false;
       liveProgressTimer = setInterval(() => {
-        if (liveFirstTokenTs == null) { setStatusText('Loading model...'); return; }
+        if (liveFirstTokenTs == null) { setStatusText(liveThinking ? 'Thinking...' : 'Loading model...'); return; }
         const elapsed = (Date.now() - liveFirstTokenTs) / 1000;
         const tps = elapsed > 0 ? liveTokenCount / elapsed : 0;
         setStatusText(`${liveTokenCount.toLocaleString()} tok | ${tps >= 10 ? tps.toFixed(0) : tps.toFixed(1)} tok/s | ${elapsed.toFixed(0)}s`);
@@ -5971,6 +5974,8 @@ export default function ChatApp() {
             if (liveFirstTokenTs == null) liveFirstTokenTs = Date.now();
             scheduleFlush();
           }
+
+          if (event === 'thinking') liveThinking = true;
 
           if (event === 'notice' && payload.message) {
             // For example, an OOM retry reduced the runtime settings.
@@ -6907,9 +6912,11 @@ export default function ChatApp() {
                 sit in the message box row.
                 Right: active modes + tokens, which drop to their own line before the controls would wrap. */}
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {/* Model unit: provider and model triggers read as one pill */}
-                <div className="flex items-center gap-0.5 rounded-[var(--r-md)] au-hairline au-material px-0.5">
+              <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+                {/* Model unit: provider and model triggers read as one pill. A flat fill, not
+                    au-material: a backdrop-filter makes a stacking context that sinks the menus
+                    under code headers and the scroll button. */}
+                <div className="flex items-center gap-0.5 rounded-[var(--r-md)] au-hairline bg-[var(--material-regular)] px-0.5">
                 <div data-menu-container="true" className="relative flex items-center gap-1">
                 <div data-menu-container="true" className="relative">
                   <button
@@ -7600,9 +7607,10 @@ export default function ChatApp() {
                 )}
                 </div>
                 {/* Run unit: effort and access read as one pill, like the model unit. Each
-                    shows its value; the icon says which setting it is. */}
-                <div className="flex items-center gap-0.5 rounded-[var(--r-md)] au-hairline au-material px-0.5">
-                <div data-menu-container="true" className="relative">
+                    shows its value; the icon says which setting it is. The unit stays one line:
+                    on a phone the icons drop, and only the access label may truncate. */}
+                <div className="flex min-w-0 max-w-full items-center gap-0.5 rounded-[var(--r-md)] au-hairline bg-[var(--material-regular)] px-0.5">
+                <div data-menu-container="true" className="relative shrink-0">
                   <button
                     type="button"
                     data-menu-trigger="effort"
@@ -7612,14 +7620,14 @@ export default function ChatApp() {
                     onClick={openEffortMenu}
                     className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
                   >
-                    <GaugeIcon size={13} className="shrink-0 text-[color:var(--text-muted)]" />
+                    <GaugeIcon size={13} className="shrink-0 text-[color:var(--text-muted)] max-[420px]:hidden" />
                     <span>{effortChip.label}</span>
                     {effortChip.agents > 0 && (
-                      <span className="inline-flex items-center gap-0.5 tabular-nums text-[color:var(--text-muted)]">
+                      <span className="inline-flex shrink-0 items-center gap-0.5 tabular-nums text-[color:var(--text-muted)]">
                         <UsersIcon size={11} />{effortChip.agents}
                       </span>
                     )}
-                    <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
+                    <svg viewBox="0 0 20 20" className="h-3 w-3 shrink-0" fill="currentColor" aria-hidden="true">
                       <path d="M5.25 7.5L10 12.25 14.75 7.5" />
                     </svg>
                   </button>
@@ -7709,7 +7717,7 @@ export default function ChatApp() {
                 </div>
                 <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-[var(--hairline)]" />
                 {/* Access: what the assistant may do on this computer. The backend owns the level. */}
-                <div data-menu-container="true" className="relative">
+                <div data-menu-container="true" className="relative min-w-0">
                   <button
                     type="button"
                     data-menu-trigger="access"
@@ -7717,7 +7725,7 @@ export default function ChatApp() {
                     aria-expanded={isAccessMenuOpen}
                     onClick={openAccessMenu}
                     aria-label={`Access: ${currentAccess.label}`}
-                    className={`inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium transition ${
+                    className={`inline-flex h-7 min-w-0 max-w-full items-center gap-1 whitespace-nowrap rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium transition ${
                       bypassOn ? 'text-rose-600 hover:brightness-105 dark:text-rose-300' : 'text-[color:var(--text-main)] hover:bg-[color:var(--hairline)]'
                     }`}
                     style={bypassOn ? { background: 'rgba(244,63,94,0.12)' } : undefined}
@@ -7725,12 +7733,12 @@ export default function ChatApp() {
                     {accessSaving ? (
                       <Spinner size={10} />
                     ) : (
-                      <span className="inline-flex shrink-0" style={{ color: ACCESS_TONE_COLOR[currentAccess.tone] }}>
+                      <span className="inline-flex shrink-0 max-[420px]:hidden" style={{ color: ACCESS_TONE_COLOR[currentAccess.tone] }}>
                         <ShieldIcon size={13} />
                       </span>
                     )}
-                    <span>{currentAccess.label}</span>
-                    <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
+                    <span className="min-w-0 truncate">{currentAccess.label}</span>
+                    <svg viewBox="0 0 20 20" className="h-3 w-3 shrink-0" fill="currentColor" aria-hidden="true">
                       <path d="M5.25 7.5L10 12.25 14.75 7.5" />
                     </svg>
                   </button>
@@ -7939,8 +7947,9 @@ export default function ChatApp() {
                 rows={3}
                 className="w-full resize-none bg-transparent border-0 px-3.5 pt-2.5 pb-1 text-[length:var(--text-md)] text-[color:var(--text-main)] outline-none placeholder:text-[color:var(--text-muted)]"
               />
-              <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
-                <div className="flex items-center gap-0.5">
+              {/* Wraps on a narrow screen so Send stays in view; ml-auto keeps it at the right. */}
+              <div className="flex flex-wrap items-center justify-between gap-y-1 px-2 pb-1.5 pt-0.5">
+                <div className="flex flex-wrap items-center gap-0.5">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -8018,7 +8027,7 @@ export default function ChatApp() {
                 <button
                   onClick={isStreaming ? stopStreaming : sendMessage}
                   disabled={!isStreaming && !input.trim()}
-                  className={`au-focus shrink-0 rounded-[var(--r-md)] px-4 h-8 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition active:scale-[0.98] enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${isStreaming ? 'bg-red-500' : ''}`}
+                  className={`au-focus ml-auto shrink-0 rounded-[var(--r-md)] px-4 h-8 text-[length:var(--text-sm)] font-semibold text-white shadow-[var(--shadow-2)] transition active:scale-[0.98] enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50 ${isStreaming ? 'bg-red-500' : ''}`}
                   style={isStreaming ? undefined : { background: 'var(--accent)' }}
                 >
                   {isStreaming ? 'Stop' : 'Send'}
