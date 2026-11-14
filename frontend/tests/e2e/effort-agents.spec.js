@@ -96,16 +96,15 @@ test('on a narrow screen the effort chip stays on one line inside its unit', asy
   expect(fit).toEqual({ nowrap: true, oneLine: true, inside: true });
 });
 
-test('chips show values, and the on/off modes are icons', async ({ page }) => {
+test('chips show values; Web and Uncensored are on/off pills in the message box', async ({ page }) => {
   await page.goto('/');
   // The name keeps the setting for screen readers; the chip shows only the value.
   await expect(page.getByRole('button', { name: 'Access: Chat only', exact: true })).toHaveText('Chat only');
   await expect(chip(page)).toHaveText('Balanced');
-  const web = page.getByRole('button', { name: 'Web search', exact: true });
-  await expect(web).toHaveText('');
+  const web = page.getByRole('button', { name: 'Web', exact: true });
   await expect(web).toHaveAttribute('aria-pressed', 'false');
   await web.click();
   await expect(web).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'Uncensored', exact: true })).toHaveText('');
+  await expect(page.getByRole('button', { name: 'Uncensored', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByRole('button', { name: 'Settings', exact: true })).toHaveText('');
 });

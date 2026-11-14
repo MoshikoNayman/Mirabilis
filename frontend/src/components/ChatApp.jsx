@@ -13,7 +13,7 @@ import {
   Badge, Button, SegmentedControl, Spinner, Switch,
   IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon, CheckIcon,
   GearIcon, ShieldIcon, PlugIcon, MicIcon, TerminalIcon, FlaskIcon, AlertIcon, CubeIcon, ChevronRightIcon,
-  PlusIcon, MinusIcon, GaugeIcon, GlobeIcon, UnlockIcon, UsersIcon
+  PlusIcon, MinusIcon, GaugeIcon, GlobeIcon, UsersIcon
 } from './ui/primitives';
 import TabSwitch from './shell/TabSwitch';
 import CommitmentRadar from './shell/CommitmentRadar';
@@ -63,8 +63,10 @@ const BROWSER_VOICE_HINTS = {
 // Effort menu agent stepper. Plain buttons: IconButton always sets a title tooltip.
 const AGENT_STEP_CLASS = 'au-focus inline-flex h-5 w-5 items-center justify-center rounded-[var(--r-xs)] text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 dark:hover:bg-[var(--material-thin)]';
 
-/** Icon toggles in the composer's modes unit. */
-const MODE_TOGGLE_CLASS = 'au-focus inline-flex h-7 w-7 items-center justify-center rounded-[var(--r-sm)] transition hover:bg-[color:var(--hairline)]';
+/** On/off pills in the message box row. */
+const COMPOSER_PILL_CLASS = 'au-focus inline-flex h-6 items-center gap-1 rounded-full border px-2.5 text-[length:var(--text-2xs)] font-medium transition';
+const COMPOSER_PILL_OFF = 'border-[var(--hairline)] text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]';
+const COMPOSER_PILL_ON = 'border-[color:var(--accent)] bg-[color:var(--accent)] text-white';
 
 /** The composer Access menu's width (w-56). */
 const ACCESS_MENU_WIDTH = 224;
@@ -7037,7 +7039,8 @@ export default function ChatApp() {
                 {approvalCard}
               </div>
             )}
-            {/* Toolbar. Left: model unit, run unit (effort, access), modes unit, settings.
+            {/* Toolbar. Left: model unit, run unit (effort, access), settings. Web and Uncensored
+                sit in the message box row.
                 Right: active modes + tokens, which drop to their own line before the controls would wrap. */}
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -7921,39 +7924,6 @@ export default function ChatApp() {
                   )}
                 </div>
                 </div>
-                {/* Modes unit: per-chat on/off, icons only. On is accent; off stays quiet. */}
-                <div className="flex items-center gap-0.5 rounded-[var(--r-md)] au-hairline au-material px-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setDeepWebEnabled((prev) => !prev)}
-                    aria-pressed={deepWebEnabled}
-                    aria-label="Web search"
-                    title={webSearchStatus === 'error' ? 'Last search failed' : 'Web search'}
-                    className={`${MODE_TOGGLE_CLASS} ${
-                      webSearchStatus === 'searching'
-                        ? 'animate-pulse text-[color:var(--presence-away)]'
-                        : webSearchStatus === 'error'
-                        ? 'text-rose-600 dark:text-rose-300'
-                        : deepWebEnabled ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]'
-                    }`}
-                    style={deepWebEnabled && webSearchStatus === 'idle' ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)' } : undefined}
-                  >
-                    <GlobeIcon size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={toggleUncensoredMode}
-                    aria-pressed={uncensoredMode}
-                    aria-label="Uncensored"
-                    title="Uncensored"
-                    className={`${MODE_TOGGLE_CLASS} ${
-                      uncensoredMode ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]'
-                    }`}
-                    style={uncensoredMode ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)' } : undefined}
-                  >
-                    <UnlockIcon size={14} />
-                  </button>
-                </div>
                 {/* Everything that is not a per-message choice lives in Settings. */}
                 <button
                   type="button"
@@ -8144,6 +8114,32 @@ export default function ChatApp() {
                     title="Voice chat"
                   >
                     <WaveIcon size={16} className="h-4 w-4" />
+                  </button>
+                  {/* Per-message switches, next to Send: outlined off, filled when on. */}
+                  <span aria-hidden="true" className="mx-1 h-4 w-px bg-[var(--hairline)]" />
+                  <button
+                    type="button"
+                    onClick={() => setDeepWebEnabled((prev) => !prev)}
+                    aria-pressed={deepWebEnabled}
+                    title={webSearchStatus === 'error' ? 'Last search failed' : undefined}
+                    className={`${COMPOSER_PILL_CLASS} ${
+                      webSearchStatus === 'searching'
+                        ? 'animate-pulse border-[color:var(--presence-away)] text-[color:var(--presence-away)]'
+                        : webSearchStatus === 'error'
+                        ? 'border-rose-400/60 text-rose-600 dark:text-rose-300'
+                        : deepWebEnabled ? COMPOSER_PILL_ON : COMPOSER_PILL_OFF
+                    }`}
+                  >
+                    <GlobeIcon size={13} />
+                    Web
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleUncensoredMode}
+                    aria-pressed={uncensoredMode}
+                    className={`${COMPOSER_PILL_CLASS} ${uncensoredMode ? COMPOSER_PILL_ON : COMPOSER_PILL_OFF}`}
+                  >
+                    Uncensored
                   </button>
                 </div>
                 {/* min-w-0 so a long last-event line truncates instead of pushing Send off. */}
