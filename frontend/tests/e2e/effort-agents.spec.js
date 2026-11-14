@@ -18,7 +18,7 @@ test('the Effort menu sets the agent count, the chip shows it and a reload keeps
   await expect(chip(page)).toBeVisible();
 
   await pickEffort(page, 'Ultra');
-  await expect(chip(page)).toHaveText('Effort: Ultra, 4 agents');
+  await expect(chip(page)).toHaveAccessibleName('Effort: Ultra, 4 agents');
 
   await chip(page).click();
   const agents = agentsGroup(page);
@@ -27,16 +27,16 @@ test('the Effort menu sets the agent count, the chip shows it and a reload keeps
   await expect(agents.locator('output')).toHaveText('5 agents');
   // A stepper press keeps the menu open; the chip takes the new count when it closes.
   await expect(agents).toBeVisible();
-  await expect(chip(page)).toHaveText('Effort: Ultra, 4 agents');
+  await expect(chip(page)).toHaveAccessibleName('Effort: Ultra, 4 agents');
   await page.keyboard.press('Escape');
-  await expect(chip(page)).toHaveText('Effort: Ultra, 5 agents');
+  await expect(chip(page)).toHaveAccessibleName('Effort: Ultra, 5 agents');
 
   await page.reload();
-  await expect(chip(page)).toHaveText('Effort: Ultra, 5 agents');
+  await expect(chip(page)).toHaveAccessibleName('Effort: Ultra, 5 agents');
 
   await expect(page.getByRole('button', { name: 'Access: Chat only', exact: true })).toBeVisible();
   await pickEffort(page, '1 hour');
-  await expect(chip(page)).toHaveText('Effort: 1 hour');
+  await expect(chip(page)).toHaveAccessibleName('Effort: 1 hour');
   await chip(page).click();
   await expect(effortMenu(page)).toBeVisible();
   await expect(agentsGroup(page)).toHaveCount(0);
@@ -63,7 +63,7 @@ test('stepper presses leave the chip and the menu where they are', async ({ page
   expect(await chip(page).boundingBox()).toEqual(chipBox);
   expect(await more.boundingBox()).toEqual(moreBox);
   await page.keyboard.press('Escape');
-  await expect(chip(page)).toHaveText('Effort: Ultra, 3 agents');
+  await expect(chip(page)).toHaveAccessibleName('Effort: Ultra, 3 agents');
 });
 
 test('the effort rows sit inside the scrolling list, so a focus ring shows whole', async ({ page }) => {
@@ -80,11 +80,10 @@ test('the effort rows sit inside the scrolling list, so a focus ring shows whole
   expect(inset).toBeGreaterThanOrEqual(3);
 });
 
-test('on a narrow screen the chip hides its prefix and stays on one line', async ({ page }) => {
+test('on a narrow screen the effort chip stays on one line inside its unit', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 740 });
   await page.goto('/');
   await pickEffort(page, 'Ultra');
-  // Hidden from view only: the prefix stays in the name.
   await expect(chip(page)).toHaveAccessibleName('Effort: Ultra, 4 agents');
   const fit = await chip(page).evaluate((el) => {
     const group = el.parentElement.parentElement;
@@ -95,4 +94,18 @@ test('on a narrow screen the chip hides its prefix and stays on one line', async
     };
   });
   expect(fit).toEqual({ nowrap: true, oneLine: true, inside: true });
+});
+
+test('chips show values, and the on/off modes are icons', async ({ page }) => {
+  await page.goto('/');
+  // The name keeps the setting for screen readers; the chip shows only the value.
+  await expect(page.getByRole('button', { name: 'Access: Chat only', exact: true })).toHaveText('Chat only');
+  await expect(chip(page)).toHaveText('Balanced');
+  const web = page.getByRole('button', { name: 'Web search', exact: true });
+  await expect(web).toHaveText('');
+  await expect(web).toHaveAttribute('aria-pressed', 'false');
+  await web.click();
+  await expect(web).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('button', { name: 'Uncensored', exact: true })).toHaveText('');
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toHaveText('');
 });

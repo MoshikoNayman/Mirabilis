@@ -11,7 +11,6 @@ import { apiFetch } from './api.js';
  * @typedef {object} AccessLevel
  * @property {AccessLevelId} id
  * @property {string} label        full name, e.g. "Ask first"
- * @property {string} short        composer chip text, e.g. "Access: Ask"
  * @property {AccessTone} tone
  * @property {boolean} canRead     reads files and system state
  * @property {'no'|'approval'|'yes'} canChange
@@ -37,7 +36,6 @@ export const ACCESS_LEVELS = Object.freeze([
   Object.freeze({
     id: 'chat',
     label: 'Chat only',
-    short: 'Chat',
     tone: 'neutral',
     canRead: false,
     canChange: 'no',
@@ -46,7 +44,6 @@ export const ACCESS_LEVELS = Object.freeze([
   Object.freeze({
     id: 'read',
     label: 'Read only',
-    short: 'Read',
     tone: 'info',
     canRead: true,
     canChange: 'no',
@@ -55,7 +52,6 @@ export const ACCESS_LEVELS = Object.freeze([
   Object.freeze({
     id: 'ask',
     label: 'Ask first',
-    short: 'Ask',
     tone: 'accent',
     canRead: true,
     canChange: 'approval',
@@ -64,7 +60,6 @@ export const ACCESS_LEVELS = Object.freeze([
   Object.freeze({
     id: 'bypass',
     label: 'Bypass permissions',
-    short: 'Bypass permissions',
     tone: 'danger',
     canRead: true,
     canChange: 'yes',

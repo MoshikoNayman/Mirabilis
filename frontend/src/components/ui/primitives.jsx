@@ -278,6 +278,12 @@ export function GearIcon(props) {
 export function ShieldIcon(props) {
   return <Svg {...props}><path d="M12 3 5 5.8v5.4c0 4.3 2.9 8 7 9.8 4.1-1.8 7-5.5 7-9.8V5.8L12 3Z" /></Svg>;
 }
+export function GaugeIcon(props) {
+  return <Svg {...props}><path d="M4 16.5a8 8 0 1 1 16 0" /><path d="m12 16.5 4-5" /><circle cx="12" cy="16.5" r="1.2" fill="currentColor" stroke="none" /></Svg>;
+}
+export function UnlockIcon(props) {
+  return <Svg {...props}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8.5 11V7.5a3.5 3.5 0 0 1 6.8-1.2" /></Svg>;
+}
 export function PlugIcon(props) {
   return <Svg {...props}><path d="M9 3v4.5M15 3v4.5" /><path d="M6.5 7.5h11V11a5.5 5.5 0 0 1-11 0V7.5Z" /><path d="M12 16.5V21" /></Svg>;
 }

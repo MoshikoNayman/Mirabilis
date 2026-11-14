@@ -11,14 +11,12 @@ describe('ACCESS_LEVELS', () => {
     expect(ACCESS_LEVELS.map((l) => l.id)).toEqual(['chat', 'read', 'ask', 'bypass']);
   });
 
-  it('gives every level a label, a short chip label and a known tone', () => {
+  it('gives every level a label and a known tone', () => {
     const ids = new Set();
     for (const level of ACCESS_LEVELS) {
       expect(ids.has(level.id)).toBe(false);
       ids.add(level.id);
       expect(level.label.trim()).not.toBe('');
-      expect(level.short.trim()).not.toBe('');
-      expect(level.short.length).toBeLessThanOrEqual(level.label.length);
       expect(Object.keys(ACCESS_TONE_COLOR)).toContain(level.tone);
     }
   });
@@ -44,7 +42,7 @@ describe('ACCESS_LEVELS', () => {
 
   it('keeps UI text plain ASCII', () => {
     for (const level of ACCESS_LEVELS) {
-      for (const text of [level.label, level.short]) {
+      for (const text of [level.label]) {
         expect(/^[\x20-\x7e]*$/.test(text)).toBe(true);
       }
     }
@@ -72,7 +70,7 @@ describe('accessMeta', () => {
   it('returns the matching level', () => {
     for (const level of ACCESS_LEVELS) expect(accessMeta(level.id)).toBe(level);
     expect(accessMeta('bypass').label).toBe('Bypass permissions');
-    expect(accessMeta('ask').short).toBe('Ask');
+    expect(accessMeta('ask').label).toBe('Ask first');
   });
 
   it('falls back to Chat only for anything unknown', () => {

@@ -108,15 +108,27 @@ export function agentOverrides(effort, saved, access) {
 }
 
 /**
- * Composer chip text after "Effort: ", e.g. "Ultra, 4 agents". Spelled out: "x3"
- * after "1 hour" reads as three hours.
+ * What the composer chip shows: the effort's name, plus the agent count when
+ * more than one agent runs (0 otherwise).
+ * @param {unknown} effort
+ * @param {number|null|undefined} saved
+ * @param {unknown} access
+ * @returns {{ label: string, agents: number }}
+ */
+export function effortChipParts(effort, saved, access) {
+  const n = agentCount(effort, saved, access);
+  return { label: EFFORT_LABELS[normalizeEffort(effort)], agents: n > 1 ? n : 0 };
+}
+
+/**
+ * The chip as words, for its accessible name: "Ultra, 4 agents". Spelled out:
+ * "x3" after "1 hour" reads as three hours.
  * @param {unknown} effort
  * @param {number|null|undefined} saved
  * @param {unknown} access
  * @returns {string}
  */
 export function effortChipText(effort, saved, access) {
-  const label = EFFORT_LABELS[normalizeEffort(effort)];
-  const n = agentCount(effort, saved, access);
-  return n > 1 ? `${label}, ${n} agents` : label;
+  const { label, agents } = effortChipParts(effort, saved, access);
+  return agents ? `${label}, ${agents} agents` : label;
 }

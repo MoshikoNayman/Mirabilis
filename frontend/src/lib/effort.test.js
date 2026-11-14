@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync } from 'node:fs';
 import {
   EFFORT_OPTIONS, AGENTIC_EFFORTS, EFFORT_LABELS, AGENT_LIMITS, normalizeEffort, parseSavedAgents,
-  agentMax, agentCount, agentOverrides, effortChipText
+  agentMax, agentCount, agentOverrides, effortChipText, effortChipParts
 } from './effort.js';
 
 describe('EFFORT_OPTIONS', () => {
@@ -96,6 +96,10 @@ describe('agent count', () => {
     expect(effortChipText('ultra', 1, 'read')).toBe('Ultra');
     expect(effortChipText('high', 4, 'read')).toBe('High');
     expect(effortChipText('nope', 4, 'read')).toBe('Balanced');
+    // The chip shows the name and the count apart; one agent shows no count.
+    expect(effortChipParts('ultra', null, 'chat')).toEqual({ label: 'Ultra', agents: 4 });
+    expect(effortChipParts('hour', null, 'chat')).toEqual({ label: '1 hour', agents: 0 });
+    expect(effortChipParts('fast', 6, 'read')).toEqual({ label: 'Fast', agents: 0 });
   });
 });
 

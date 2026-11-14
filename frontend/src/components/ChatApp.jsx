@@ -13,7 +13,7 @@ import {
   Badge, Button, SegmentedControl, Spinner, Switch,
   IncognitoIcon, RadarIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon, CheckIcon,
   GearIcon, ShieldIcon, PlugIcon, MicIcon, TerminalIcon, FlaskIcon, AlertIcon, CubeIcon, ChevronRightIcon,
-  PlusIcon, MinusIcon
+  PlusIcon, MinusIcon, GaugeIcon, GlobeIcon, UnlockIcon, UsersIcon
 } from './ui/primitives';
 import TabSwitch from './shell/TabSwitch';
 import CommitmentRadar from './shell/CommitmentRadar';
@@ -40,7 +40,7 @@ import { hasUsableKey, providerNeedsKey, missingKeyMessage } from '../lib/provid
 import { needsServerModelSwitch } from '../lib/providerCapabilities';
 import {
   EFFORT_OPTIONS, AGENTIC_EFFORTS, normalizeEffort, parseSavedAgents, agentMax, agentCount, agentOverrides,
-  effortChipText
+  effortChipParts
 } from '../lib/effort';
 import { isLocalImageSrc, remoteImageLink } from '../lib/markdownMedia';
 import {
@@ -62,6 +62,9 @@ const BROWSER_VOICE_HINTS = {
 
 // Effort menu agent stepper. Plain buttons: IconButton always sets a title tooltip.
 const AGENT_STEP_CLASS = 'au-focus inline-flex h-5 w-5 items-center justify-center rounded-[var(--r-xs)] text-[color:var(--text-muted)] transition hover:bg-black/5 hover:text-[color:var(--text-main)] aria-disabled:cursor-not-allowed aria-disabled:opacity-40 dark:hover:bg-[var(--material-thin)]';
+
+/** Icon toggles in the composer's modes unit. */
+const MODE_TOGGLE_CLASS = 'au-focus inline-flex h-7 w-7 items-center justify-center rounded-[var(--r-sm)] transition hover:bg-[color:var(--hairline)]';
 
 /** The composer Access menu's width (w-56). */
 const ACCESS_MENU_WIDTH = 224;
@@ -516,7 +519,11 @@ function messageTokens(message) {
 
 function formatTokenCount(value) {
   const amount = Number(value || 0);
-  return `${amount.toLocaleString()} tok`;
+  // Compact past ten thousand, so a long chat does not widen the toolbar.
+  const text = amount >= 1e6 ? `${(amount / 1e6).toFixed(1)}M`
+    : amount >= 1e4 ? `${(amount / 1e3).toFixed(1)}k`
+    : amount.toLocaleString();
+  return `${text} tok`;
 }
 
 // Picker fit chip colors; lib/models.js modelFit decides the fit, as in Settings > Models.
@@ -1793,7 +1800,7 @@ export default function ChatApp() {
   const [effortMenuMaxHeight, setEffortMenuMaxHeight] = useState(undefined);
   // The chip's text while its menu is open: a new agent count waits for the close, so the
   // chip keeps its width and the menu does not move under the pointer.
-  const [effortChipHeld, setEffortChipHeld] = useState('');
+  const [effortChipHeld, setEffortChipHeld] = useState(/** @type {{ label: string, agents: number } | null} */ (null));
   const [isAccessMenuOpen, setIsAccessMenuOpen] = useState(false);
   // Where the Access menu sits so it stays inside the window: a left shift and a height cap.
   const [accessMenuPlace, setAccessMenuPlace] = useState({ left: 0, maxHeight: undefined });
@@ -5745,7 +5752,7 @@ export default function ChatApp() {
       if (trigger instanceof HTMLElement) {
         setEffortMenuMaxHeight(Math.max(160, Math.floor(trigger.getBoundingClientRect().top - 64)));
       }
-      setEffortChipHeld(effortChipText(effortLevel, agentsPref, accessMeta(accessLevel).id));
+      setEffortChipHeld(effortChipParts(effortLevel, agentsPref, accessMeta(accessLevel).id));
     }
     setIsEffortMenuOpen(open);
   }
@@ -6178,7 +6185,8 @@ export default function ChatApp() {
   const agentsShown = agentCount(effortLevel, agentsPref, currentAccess.id);
   const effortChip = isEffortMenuOpen && effortChipHeld
     ? effortChipHeld
-    : effortChipText(effortLevel, agentsPref, currentAccess.id);
+    : effortChipParts(effortLevel, agentsPref, currentAccess.id);
+  const effortName = effortChip.agents ? `${effortChip.label}, ${effortChip.agents} agents` : effortChip.label;
   // A press at a bound changes and saves nothing.
   function setAgentsTo(n) {
     if (agentsMax === 0) return;
@@ -7029,8 +7037,8 @@ export default function ChatApp() {
                 {approvalCard}
               </div>
             )}
-            {/* Toolbar. Left: model, effort, access and settings. Right: active modes + tokens,
-                which drop to their own line before the controls would wrap. */}
+            {/* Toolbar. Left: model unit, run unit (effort, access), modes unit, settings.
+                Right: active modes + tokens, which drop to their own line before the controls would wrap. */}
             <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
               <div className="flex flex-wrap items-center gap-1.5">
                 {/* Model unit: provider and model triggers read as one pill */}
@@ -7724,18 +7732,26 @@ export default function ChatApp() {
                 </div>
                 )}
                 </div>
-                {/* Effort: answer styles, autonomous tiers, agent count */}
+                {/* Run unit: effort and access read as one pill, like the model unit. Each
+                    shows its value; the icon says which setting it is. */}
+                <div className="flex items-center gap-0.5 rounded-[var(--r-md)] au-hairline au-material px-0.5">
                 <div data-menu-container="true" className="relative">
                   <button
                     type="button"
                     data-menu-trigger="effort"
                     aria-haspopup="true"
                     aria-expanded={isEffortMenuOpen}
+                    aria-label={`Effort: ${effortName}`}
                     onClick={openEffortMenu}
-                    className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
+                    className="inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
                   >
-                    {/* A narrow screen hides the prefix, as the Access chip does; it stays in the name. */}
-                    <span><span className="sr-only sm:not-sr-only">Effort: </span>{effortChip}</span>
+                    <GaugeIcon size={13} className="shrink-0 text-[color:var(--text-muted)]" />
+                    <span>{effortChip.label}</span>
+                    {effortChip.agents > 0 && (
+                      <span className="inline-flex items-center gap-0.5 tabular-nums text-[color:var(--text-muted)]">
+                        <UsersIcon size={11} />{effortChip.agents}
+                      </span>
+                    )}
                     <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
                       <path d="M5.25 7.5L10 12.25 14.75 7.5" />
                     </svg>
@@ -7824,6 +7840,7 @@ export default function ChatApp() {
                     </div>
                   )}
                 </div>
+                <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-[var(--hairline)]" />
                 {/* Access: what the assistant may do on this computer. The backend owns the level. */}
                 <div data-menu-container="true" className="relative">
                   <button
@@ -7833,21 +7850,19 @@ export default function ChatApp() {
                     aria-expanded={isAccessMenuOpen}
                     onClick={openAccessMenu}
                     aria-label={`Access: ${currentAccess.label}`}
-                    className={`inline-flex h-7 items-center gap-1.5 rounded-[var(--r-md)] px-2.5 text-[length:var(--text-2xs)] font-medium transition hover:brightness-105 ${
-                      bypassOn ? 'border text-rose-600 dark:text-rose-300' : 'au-hairline au-material text-[color:var(--text-main)]'
+                    className={`inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-[var(--r-sm)] px-2 text-[length:var(--text-2xs)] font-medium transition ${
+                      bypassOn ? 'text-rose-600 hover:brightness-105 dark:text-rose-300' : 'text-[color:var(--text-main)] hover:bg-[color:var(--hairline)]'
                     }`}
-                    style={bypassOn ? { borderColor: 'rgba(244,63,94,0.45)', background: 'rgba(244,63,94,0.12)' } : undefined}
+                    style={bypassOn ? { background: 'rgba(244,63,94,0.12)' } : undefined}
                   >
                     {accessSaving ? (
                       <Spinner size={10} />
                     ) : (
-                      <span
-                        aria-hidden="true"
-                        className="h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ background: ACCESS_TONE_COLOR[currentAccess.tone] }}
-                      />
+                      <span className="inline-flex shrink-0" style={{ color: ACCESS_TONE_COLOR[currentAccess.tone] }}>
+                        <ShieldIcon size={13} />
+                      </span>
                     )}
-                    <span><span className="hidden sm:inline">Access: </span>{currentAccess.short}</span>
+                    <span>{currentAccess.label}</span>
                     <svg viewBox="0 0 20 20" className="h-3 w-3" fill="currentColor" aria-hidden="true">
                       <path d="M5.25 7.5L10 12.25 14.75 7.5" />
                     </svg>
@@ -7905,43 +7920,40 @@ export default function ChatApp() {
                     </div>
                   )}
                 </div>
-                {/* Uncensored is a plain on/off, so it gets a toolbar toggle; other modes live in Settings. */}
-                <button
-                  type="button"
-                  onClick={toggleUncensoredMode}
-                  aria-pressed={uncensoredMode}
-                  className={`inline-flex h-7 items-center rounded-[var(--r-md)] px-2.5 text-[length:var(--text-2xs)] font-medium transition hover:brightness-105 ${
-                    uncensoredMode
-                      ? 'border text-[color:var(--accent)]'
-                      : 'au-hairline au-material text-[color:var(--text-main)]'
-                  }`}
-                  style={uncensoredMode ? { borderColor: 'color-mix(in srgb, var(--accent) 55%, var(--hairline))', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' } : undefined}
-                >
-                  Uncensored
-                </button>
-                {/* The "www" web-search chip; only the off state tints. */}
-                <button
-                  type="button"
-                  onClick={() => setDeepWebEnabled((prev) => !prev)}
-                  aria-pressed={deepWebEnabled}
-                  title={webSearchStatus === 'error' ? 'Last search failed' : 'Web search'}
-                  className={`inline-flex h-7 items-center rounded-[var(--r-md)] px-2.5 text-[length:var(--text-2xs)] font-medium transition hover:brightness-105 ${
-                    webSearchStatus === 'searching'
-                      ? 'border text-[color:var(--presence-away)] animate-pulse'
-                      : (!deepWebEnabled || webSearchStatus === 'error')
-                      ? 'border text-rose-600 dark:text-rose-300'
-                      : 'au-hairline au-material text-[color:var(--text-main)]'
-                  }`}
-                  style={
-                    webSearchStatus === 'searching'
-                      ? { borderColor: 'color-mix(in srgb, var(--presence-away) 55%, var(--hairline))', background: 'color-mix(in srgb, var(--presence-away) 12%, transparent)' }
-                      : (!deepWebEnabled || webSearchStatus === 'error')
-                      ? { borderColor: 'rgba(244,63,94,0.45)', background: 'rgba(244,63,94,0.12)' }
-                      : undefined
-                  }
-                >
-                  www
-                </button>
+                </div>
+                {/* Modes unit: per-chat on/off, icons only. On is accent; off stays quiet. */}
+                <div className="flex items-center gap-0.5 rounded-[var(--r-md)] au-hairline au-material px-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setDeepWebEnabled((prev) => !prev)}
+                    aria-pressed={deepWebEnabled}
+                    aria-label="Web search"
+                    title={webSearchStatus === 'error' ? 'Last search failed' : 'Web search'}
+                    className={`${MODE_TOGGLE_CLASS} ${
+                      webSearchStatus === 'searching'
+                        ? 'animate-pulse text-[color:var(--presence-away)]'
+                        : webSearchStatus === 'error'
+                        ? 'text-rose-600 dark:text-rose-300'
+                        : deepWebEnabled ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]'
+                    }`}
+                    style={deepWebEnabled && webSearchStatus === 'idle' ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)' } : undefined}
+                  >
+                    <GlobeIcon size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={toggleUncensoredMode}
+                    aria-pressed={uncensoredMode}
+                    aria-label="Uncensored"
+                    title="Uncensored"
+                    className={`${MODE_TOGGLE_CLASS} ${
+                      uncensoredMode ? 'text-[color:var(--accent)]' : 'text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]'
+                    }`}
+                    style={uncensoredMode ? { background: 'color-mix(in srgb, var(--accent) 14%, transparent)' } : undefined}
+                  >
+                    <UnlockIcon size={14} />
+                  </button>
+                </div>
                 {/* Everything that is not a per-message choice lives in Settings. */}
                 <button
                   type="button"
@@ -7949,20 +7961,19 @@ export default function ChatApp() {
                   aria-haspopup="dialog"
                   aria-label="Settings"
                   title={`Settings (${shortcutLabel})`}
-                  className="inline-flex h-7 items-center gap-1.5 rounded-[var(--r-md)] au-hairline au-material px-2.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:brightness-105"
+                  className="au-focus inline-flex h-7 w-7 items-center justify-center rounded-[var(--r-md)] au-hairline au-material text-[color:var(--text-main)] transition hover:brightness-105"
                 >
-                  <GearIcon size={13} />
-                  <span className="hidden sm:inline">Settings</span>
+                  <GearIcon size={14} />
                 </button>
               </div>
               <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
               {/* Modes that change every answer. Each chip opens the setting that turns it off. */}
               <div className="flex flex-wrap justify-end gap-1.5">
                 {[
-                  deepThinkingEnabled && { key: 'deep-thinking', label: 'Deep Thinking', section: 'labs' },
-                  guidedLearningEnabled && { key: 'guided', label: 'Guided Learning', section: 'labs' },
-                  trainingMode === 'fine-tuning' && { key: 'quick-learning', label: 'Quick Learning', section: 'labs' },
-                  trainingMode === 'full-training' && { key: 'deep-training', label: 'Deep Training', section: 'labs', tone: 'warn' },
+                  deepThinkingEnabled && { key: 'deep-thinking', label: 'Deep thinking', section: 'labs' },
+                  guidedLearningEnabled && { key: 'guided', label: 'Guided learning', section: 'labs' },
+                  trainingMode === 'fine-tuning' && { key: 'quick-learning', label: 'Quick learning', section: 'labs' },
+                  trainingMode === 'full-training' && { key: 'deep-training', label: 'Deep training', section: 'labs', tone: 'warn' },
                   canvasEnabled && { key: 'canvas', label: 'Canvas', section: 'labs' },
                   openClawMode && { key: 'openclaw', label: 'OpenClaw', section: 'labs', tone: 'danger' },
                   configVaultEnabled && { key: 'vault', label: 'Config Vault', section: 'chat-tools' }
@@ -7971,7 +7982,7 @@ export default function ChatApp() {
                     key={chip.key}
                     type="button"
                     onClick={() => appStore.openSettings(chip.section)}
-                    className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition ${
+                    className={`rounded-full border px-2 py-0.5 text-[length:var(--text-2xs)] font-medium transition ${
                       chip.tone === 'warn'
                         ? 'border-amber-300/60 bg-amber-100 text-amber-800 hover:brightness-95 dark:border-amber-400/40 dark:bg-amber-900/30 dark:text-amber-200'
                         : chip.tone === 'danger'
@@ -7987,7 +7998,7 @@ export default function ChatApp() {
                     type="button"
                     onClick={() => appStore.openSettings('remote')}
                     title="Remote Control"
-                    className="inline-flex items-center gap-1 rounded-full border border-emerald-300/50 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 transition hover:brightness-95 dark:border-emerald-400/30 dark:bg-emerald-900/20 dark:text-emerald-300"
+                    className="inline-flex items-center gap-1 rounded-full border border-emerald-300/50 bg-emerald-50 px-2 py-0.5 text-[length:var(--text-2xs)] font-medium text-emerald-700 transition hover:brightness-95 dark:border-emerald-400/30 dark:bg-emerald-900/20 dark:text-emerald-300"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                     {remoteTarget}
@@ -7997,7 +8008,7 @@ export default function ChatApp() {
                   <button
                     type="button"
                     onClick={() => appStore.openWorkspace()}
-                    className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
+                    className="inline-flex items-center gap-1 rounded-full border border-[var(--hairline)] bg-[var(--material-thin)] px-2 py-0.5 text-[length:var(--text-2xs)] font-medium text-[color:var(--text-main)] transition hover:bg-[color:var(--hairline)]"
                   >
                     <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} />
                     {workspacePins.length} workspace file{workspacePins.length === 1 ? '' : 's'}
@@ -8022,7 +8033,7 @@ export default function ChatApp() {
                           : 'text-[color:var(--text-muted)] hover:text-[color:var(--text-main)]'
                     }`}
                   >
-                    {(chatTokenSummary.input + chatTokenSummary.output).toLocaleString()} tokens
+                    {formatTokenCount(chatTokenSummary.input + chatTokenSummary.output)}
                   </button>
 
                   {isContextPanelOpen && (
