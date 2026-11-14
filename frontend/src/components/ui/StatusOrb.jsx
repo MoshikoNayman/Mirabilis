@@ -19,6 +19,12 @@ const ICQ_PETALS = [
   'm103.38 103.59s33.695 33.474 41.812 47.95c8.1173 14.476 5.3388 30.4-1.7262 35.866s-18.627 2.975-30.496-11.508c-11.869-14.483-9.59-72.308-9.59-72.308z',
   'm104.47 106.23s9.8769 64.267 0.54797 79.273c-9.329 15.006-22.579 21.054-35.001 17.249s-20.905-12.366-19.065-32.592c1.8397-20.226 53.518-63.93 53.518-63.93z'
 ];
+// Without the black outline the top-left petal's gaps ran into the center and it
+// looked detached, so the outline-free mark widens that petal at its base.
+const ACCENT_PETALS = [
+  'M106.61 110.23C80 113 64.39 62.3 57.86 47.3C51.33 32.3 53.38 16.37 65.24 11.95C77.1 7.53 94.3 22.24 97.68 41.09C101.06 59.94 110 84 106.61 110.23Z',
+  ...ICQ_PETALS.slice(1)
+];
 const ICQ_PETAL_A = 'm103.44 107.4s-35.939 37.331-51.327 40.732c-15.388 3.4011-23.473 2.9458-28.129-4.9317s-5.067-16.321 7.6716-27.216 71.784-8.5849 71.784-8.5849z';
 const ICQ_PETAL_B = 'm102.01 107.02s-49.266 2.8098-69.592 0-24.215-11.647-23.745-23.745c0.46999-12.098 15.745-27.854 33.426-27.033s59.911 50.779 59.911 50.779z';
 
@@ -42,7 +48,7 @@ export function FlowerMark({ size = 22, variant = 'accent' }) {
   const light = 'color-mix(in srgb, var(--accent) 55%, #ffffff)';
   return (
     <svg width={size} height={size} viewBox="0 0 210 210" className="icq-mark-svg" style={{ width: size, height: size }} aria-hidden="true">
-      {ICQ_PETALS.map((d, i) => (
+      {ACCENT_PETALS.map((d, i) => (
         <path key={i} d={d} fill="var(--accent)" />
       ))}
       <path d={ICQ_PETAL_A} fill={light} />
