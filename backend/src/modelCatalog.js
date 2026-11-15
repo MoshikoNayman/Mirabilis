@@ -87,6 +87,34 @@ export function catalogRowFor(name, rows) {
   return row ? { row, exact: false } : null;
 }
 
+/**
+ * The installed model Uncensored mode runs: the requested one when it is
+ * uncensored, else the catalog's Uncensored group in models.json order, else
+ * any row flagged uncensored.
+ * @template {{ id: string, ollamaId?: string, group?: string, available?: boolean, uncensored?: boolean }} T
+ * @param {T[]} models  listModels(cfg, 'ollama') rows
+ * @param {string} [requested]  '' or 'auto' asks for no model in particular
+ * @param {{ exclude?: string }} [opts]  exclude: a pull name to pass over
+ * @returns {T | null}
+ */
+export function pickUncensoredRow(models, requested = '', { exclude = '' } = {}) {
+  const key = (name) => ollamaTag(name).toLowerCase();
+  const skip = exclude ? key(exclude) : '';
+  const installed = (Array.isArray(models) ? models : [])
+    .filter((row) => row?.available === true && (!skip || key(row.ollamaId || row.id) !== skip));
+  const want = String(requested || '').trim();
+  if (want && want.toLowerCase() !== 'auto') {
+    const wantKey = key(want);
+    // The picker sends the row id; other callers send the pull name.
+    const row = installed.find((r) => key(r.ollamaId || r.id) === wantKey || key(r.id) === wantKey);
+    if (row && (row.uncensored === true || row.group === 'Uncensored'
+      || UNCENSORED_NAME_RE.test(`${row.id} ${row.ollamaId || ''}`))) return row;
+  }
+  return installed.find((row) => row.group === 'Uncensored')
+    || installed.find((row) => row.uncensored === true)
+    || null;
+}
+
 /** Keep only entries that are complete and safe to offer. */
 function sanitize(models) {
   if (!Array.isArray(models)) return [];

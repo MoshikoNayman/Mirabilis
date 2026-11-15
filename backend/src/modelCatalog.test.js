@@ -254,3 +254,26 @@ test('an installed name finds its row by exact tag, else by another tag of the s
   assert.ok(UNCENSORED_NAME_RE.test('huihui_ai/qwen3.5-abliterated:9b'));
   assert.ok(!UNCENSORED_NAME_RE.test('qwen3.5:9b'));
 });
+
+test('Uncensored mode keeps an uncensored pick, else takes the group, then any flagged model', async () => {
+  const { pickUncensoredRow } = await freshCatalog();
+  const rows = [
+    { id: 'qwen3.5:9b', group: 'Small & Fast', available: true },
+    { id: 'huihui_ai/dolphin3-abliterated:8b', group: 'Uncensored', available: false, uncensored: true },
+    { id: 'dolphin-x1', ollamaId: 'hf.co/dphn/Dolphin-X1-8B-GGUF:Q4_K_M', group: 'Uncensored', available: true, uncensored: true },
+    { id: 'mcq-raw-8b', group: 'MCQ', available: true, uncensored: true },
+    { id: 'my-abliterated:7b', group: 'Installed locally', available: true }
+  ];
+  const pick = (requested, opts) => pickUncensoredRow(rows, requested, opts)?.id ?? null;
+  assert.equal(pick('mcq-raw-8b'), 'mcq-raw-8b', 'an installed uncensored pick stays');
+  assert.equal(pick('MY-ABLITERATED:7b'), 'my-abliterated:7b', 'the name says so, matched without case');
+  assert.equal(pick('hf.co/dphn/Dolphin-X1-8B-GGUF:Q4_K_M'), 'dolphin-x1', 'the pull name finds its row');
+  assert.equal(pick('qwen3.5:9b'), 'dolphin-x1', 'a censored pick gives way to the group');
+  assert.equal(pick('huihui_ai/dolphin3-abliterated:8b'), 'dolphin-x1', 'a pick that is not installed does too');
+  assert.equal(pick('auto'), 'dolphin-x1');
+  assert.equal(pick(''), 'dolphin-x1');
+  assert.equal(pick('', { exclude: 'hf.co/dphn/Dolphin-X1-8B-GGUF:Q4_K_M' }), 'mcq-raw-8b', 'excluded by pull name');
+  assert.equal(pick('mcq-raw-8b', { exclude: 'mcq-raw-8b' }), 'dolphin-x1', 'an excluded pick does not stay');
+  assert.equal(pickUncensoredRow([rows[0]], ''), null);
+  assert.equal(pickUncensoredRow(/** @type {any} */ (null), 'x'), null);
+});

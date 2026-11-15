@@ -1,9 +1,18 @@
 {
   "$schema": "https://raw.githubusercontent.com/MoshikoNayman/Mirabilis/main/backend/models.schema.json",
   "version": 1,
-  "updated": "2026-11-12",
-  "note": "Suggested local models and cloud fallback defaults. Edit and push to update every install; no app release needed. Cloud model lists are discovered live from each provider, so providerDefaults is only used when that listing fails.",
+  "updated": "2026-11-15",
+  "note": "Suggested local models and cloud fallback defaults. Edit and push to update every install; no app release needed. Cloud model lists are discovered live from each provider, so providerDefaults is only used when that listing fails. Up to 3 per group, the largest fitting a 32 GB GPU.",
   "ollama": [
+    {
+      "id": "mcq-raw-8b",
+      "label": "MCQ-Raw-8B",
+      "group": "MCQ",
+      "ollamaId": "mcq-raw-8b",
+      "size": "4.9 GB",
+      "uncensored": true,
+      "local": true
+    },
     {
       "id": "mcq-pro-12b",
       "label": "MCQ-Pro-12B",
@@ -21,89 +30,38 @@
       "local": true
     },
     {
-      "id": "mcq-raw-8b",
-      "label": "MCQ-Raw-8B",
-      "group": "MCQ",
-      "ollamaId": "mcq-raw-8b",
-      "size": "4.9 GB",
-      "uncensored": true,
-      "local": true
-    },
-    {
       "id": "lfm3:1.7b",
       "label": "LFM3 1.7B",
       "group": "Small & Fast",
       "ollamaId": "lfm3:1.7b",
-      "size": "1.1-1.7 GB"
+      "size": "1.1 GB"
     },
     {
       "id": "qwen3.5:4b",
       "label": "Qwen 3.5 4B",
       "group": "Small & Fast",
       "ollamaId": "qwen3.5:4b",
-      "size": "3.3-4.0 GB"
-    },
-    {
-      "id": "lfm2.5:8b",
-      "label": "LFM2.5 8B (MoE)",
-      "group": "Small & Fast",
-      "ollamaId": "lfm2.5:8b",
-      "size": "5.2 GB"
-    },
-    {
-      "id": "ministral-3:8b",
-      "label": "Ministral 3 8B",
-      "group": "Small & Fast",
-      "ollamaId": "ministral-3:8b",
-      "size": "6.0 GB"
+      "size": "3.3 GB"
     },
     {
       "id": "qwen3.5:9b",
       "label": "Qwen 3.5 9B",
       "group": "Small & Fast",
       "ollamaId": "qwen3.5:9b",
-      "size": "6.6-7.6 GB"
-    },
-    {
-      "id": "gemma4:e4b",
-      "label": "Gemma 4 E4B",
-      "group": "Small & Fast",
-      "ollamaId": "gemma4:e4b",
-      "size": "6.6-9.5 GB"
+      "size": "6.6 GB"
     },
     {
       "id": "gemma4:12b",
       "label": "Gemma 4 12B",
       "group": "Powerful",
       "ollamaId": "gemma4:12b",
-      "size": "7.7-8.0 GB"
+      "size": "7.7 GB"
     },
     {
       "id": "qwen3.8:27b",
       "label": "Qwen 3.8 27B",
       "group": "Powerful",
       "ollamaId": "qwen3.8:27b",
-      "size": "18 GB"
-    },
-    {
-      "id": "gemma4:26b",
-      "label": "Gemma 4 26B (MoE)",
-      "group": "Powerful",
-      "ollamaId": "gemma4:26b",
-      "size": "16-19 GB"
-    },
-    {
-      "id": "gemma4:31b",
-      "label": "Gemma 4 31B",
-      "group": "Powerful",
-      "ollamaId": "gemma4:31b",
-      "size": "19-20 GB"
-    },
-    {
-      "id": "muse-glimmer:30b",
-      "label": "Muse Glimmer 30B (Meta)",
-      "group": "Powerful",
-      "ollamaId": "muse-glimmer:30b",
       "size": "18 GB"
     },
     {
@@ -114,32 +72,11 @@
       "size": "23 GB"
     },
     {
-      "id": "qwen3.8:27b-q8_0",
-      "label": "Qwen 3.8 27B (8-bit)",
-      "group": "Powerful",
-      "ollamaId": "qwen3.8:27b-q8_0",
-      "size": "30 GB"
-    },
-    {
-      "id": "qwen3.5:122b",
-      "label": "Qwen 3.5 122B (MoE)",
-      "group": "Powerful",
-      "ollamaId": "qwen3.5:122b",
-      "size": "81 GB"
-    },
-    {
       "id": "rnj-1:8b",
       "label": "Rnj-1 8B",
       "group": "Coding",
       "ollamaId": "rnj-1:8b",
       "size": "5.1 GB"
-    },
-    {
-      "id": "mimo-v2.6:9b",
-      "label": "MiMo V2.6 9B (Xiaomi)",
-      "group": "Coding",
-      "ollamaId": "mimo-v2.6:9b",
-      "size": "6.6-8.7 GB"
     },
     {
       "id": "devstral-small-2:24b",
@@ -156,18 +93,11 @@
       "size": "23 GB"
     },
     {
-      "id": "qwen3-coder-next",
-      "label": "Qwen3 Coder Next 80B (MoE)",
-      "group": "Coding",
-      "ollamaId": "qwen3-coder-next",
-      "size": "52 GB"
-    },
-    {
       "id": "nemotron-3-nano:4b",
       "label": "Nemotron 3 Nano 4B (NVIDIA)",
       "group": "Reasoning",
       "ollamaId": "nemotron-3-nano:4b",
-      "size": "2.8-2.9 GB"
+      "size": "2.8 GB"
     },
     {
       "id": "gpt-oss:20b",
@@ -184,18 +114,11 @@
       "size": "19 GB"
     },
     {
-      "id": "gpt-oss:120b",
-      "label": "GPT-OSS 120B (OpenAI)",
-      "group": "Reasoning",
-      "ollamaId": "gpt-oss:120b",
-      "size": "65 GB"
-    },
-    {
       "id": "lfm3-vl:2b",
       "label": "LFM3 VL 2B",
       "group": "Vision",
       "ollamaId": "lfm3-vl:2b",
-      "size": "1.5-1.7 GB"
+      "size": "1.5 GB"
     },
     {
       "id": "glm-ocr",
@@ -209,46 +132,46 @@
       "label": "Nemotron 3 Nano Omni 33B",
       "group": "Vision",
       "ollamaId": "nemotron3:33b",
-      "size": "21-28 GB"
+      "size": "21 GB"
     },
     {
-      "id": "dolphin3",
-      "label": "Dolphin 3.0 8B",
+      "id": "huihui_ai/dolphin3-abliterated:8b",
+      "label": "Dolphin 3.0 8B Abliterated",
       "group": "Uncensored",
-      "ollamaId": "dolphin3",
+      "ollamaId": "huihui_ai/dolphin3-abliterated:8b",
       "size": "4.9 GB",
       "uncensored": true
     },
     {
-      "id": "hermes3:8b",
-      "label": "Hermes 3 8B",
+      "id": "hf.co/dphn/Dolphin-X1-8B-GGUF:Q4_K_M",
+      "label": "Dolphin X1 8B",
       "group": "Uncensored",
-      "ollamaId": "hermes3:8b",
-      "size": "4.7 GB",
+      "ollamaId": "hf.co/dphn/Dolphin-X1-8B-GGUF:Q4_K_M",
+      "size": "4.9 GB",
       "uncensored": true
     },
     {
-      "id": "dolphin-mixtral",
-      "label": "Dolphin Mixtral 8x7B",
+      "id": "huihui_ai/qwen3-abliterated:8b-v2",
+      "label": "Huihui Qwen3 8B Abliterated v2",
       "group": "Uncensored",
-      "ollamaId": "dolphin-mixtral:8x7b",
-      "size": "26 GB",
+      "ollamaId": "huihui_ai/qwen3-abliterated:8b-v2",
+      "size": "5.0 GB",
       "uncensored": true
     },
     {
-      "id": "hermes3:70b",
-      "label": "Hermes 3 70B",
-      "group": "Uncensored",
-      "ollamaId": "hermes3:70b",
-      "size": "40 GB",
+      "id": "hf.co/CyberBuddyAI/CyberBuddy-CyberOps-9B-GGUF:Q4_K_M-embQ8",
+      "label": "CyberBuddy CyberOps 9B",
+      "group": "Security",
+      "ollamaId": "hf.co/CyberBuddyAI/CyberBuddy-CyberOps-9B-GGUF:Q4_K_M-embQ8",
+      "size": "6.8 GB",
       "uncensored": true
     },
     {
-      "id": "r1-1776:70b",
-      "label": "R1 1776 70B (Perplexity)",
-      "group": "Uncensored",
-      "ollamaId": "r1-1776:70b",
-      "size": "43 GB",
+      "id": "huihui_ai/foundation-sec-abliterated:8b",
+      "label": "Foundation-Sec 8B Abliterated",
+      "group": "Security",
+      "ollamaId": "huihui_ai/foundation-sec-abliterated:8b",
+      "size": "4.9 GB",
       "uncensored": true
     }
   ],

@@ -1,13 +1,14 @@
 // @ts-check
 // /api/models: what is installed, whether it is current, what the Ollama library
-// offers, install jobs and uninstall. Reads are open, like GET /api/models;
-// installing, canceling and deleting need the session token.
+// offers, install jobs, uninstall and the Freedom test. Reads are open, like
+// GET /api/models; installing, canceling, deleting and testing need the session token.
 
 import express, { Router } from 'express';
 import { statfs } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { createFreedomResults, FreedomTestError, runFreedomTest } from '../freedomTest.js';
 import { catalogRowFor, getModels as getCatalogModels, UNCENSORED_NAME_RE } from '../modelCatalog.js';
 import { createInstallJobs, INSTALL_ERRORS, mcqSpecFor, SAFE_MODEL_RE } from '../modelInstallJobs.js';
 import { compareVersions, createModelUpdates, detectOllamaInstall, mapLimit } from '../modelUpdates.js';
@@ -29,6 +30,7 @@ const MESSAGES = {
   jobNotFound: 'Install job not found. Refresh the list.',
   notInstalled: 'Not installed. Refresh the list.',
   installRunning: 'Install running. Cancel it, then delete.',
+  testRunning: 'Another Freedom test is running. Wait for it.',
   ollamaSilent: 'Ollama did not answer. Retry.',
   failed: 'Model manager failed. Retry.'
 };
@@ -82,11 +84,12 @@ const first = (v) => (Array.isArray(v) ? v[0] : v);
  * @param {import('express').RequestHandler} deps.guard  the privileged-route guard
  * @param {() => string} [deps.ollamaBaseUrl]
  * @param {() => boolean} [deps.isGoDark]
- * @param {string} [deps.dataDir]  caches: ollama-library-cache.json, model-updates.json
+ * @param {string} [deps.dataDir]  caches: ollama-library-cache.json, model-updates.json, freedom-test.json
  * @param {string} [deps.rootDir]  holds training/mcq
  * @param {ReturnType<typeof createInstallJobs>} [deps.jobs]
  * @param {ReturnType<typeof createOllamaLibrary>} [deps.library]
  * @param {ReturnType<typeof createModelUpdates>} [deps.updates]
+ * @param {ReturnType<typeof createFreedomResults>} [deps.freedom]  Freedom test results
  * @param {(baseUrl: string) => Promise<any[]>} [deps.listInstalled]  Ollama's /api/tags, mapped by providers/ollama.js
  * @param {(baseUrl: string, name: string, opts?: { digest?: string | null }) => Promise<any>} [deps.modelInfo]  capabilities and context from /api/show
  * @param {() => any[]} [deps.catalog]
@@ -105,6 +108,7 @@ export function createModelsRouter({
   jobs = createInstallJobs({ ollamaBaseUrl, rootDir, isGoDark }),
   library = createOllamaLibrary({ dataDir, isGoDark }),
   updates = undefined,
+  freedom = createFreedomResults({ dataDir }),
   listInstalled = listOllamaModels,
   modelInfo = getOllamaModelInfo,
   detectInstall = detectOllamaInstall,
@@ -178,6 +182,10 @@ export function createModelsRouter({
         res.status(err.kind === 'not-found' ? 404 : 502).json({ error: err.message });
         return;
       }
+      if (err instanceof FreedomTestError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
       console.error('[models]', err?.stack || err?.message || err);
       res.status(500).json({ error: MESSAGES.failed });
     }
@@ -238,7 +246,9 @@ export function createModelsRouter({
         loaded: loaded.has(name.toLowerCase()),
         catalog: entry ? { id: entry.id, label: entry.label, group: entry.group } : null,
         uncensored: match?.row?.uncensored === true || match?.row?.group === 'Uncensored' || UNCENSORED_NAME_RE.test(name),
-        local: !!mcqSpecFor(name) || entry?.local === true
+        local: !!mcqSpecFor(name) || entry?.local === true,
+        // Null when untested, or when the model was pulled again since.
+        freedom: await freedom.get(name, digest)
       };
     });
     res.json({ runtime, disk, models });
@@ -317,6 +327,49 @@ export function createModelsRouter({
     }
     res.json(out);
   });
+
+  /** One Freedom test at a time: each loads a model and runs eight prompts. */
+  let testing = false;
+
+  // Local only, so Go Dark allows it: the prompts go to the Ollama daemon.
+  router.post('/freedom-test', guard, handle(async (req, res) => {
+    const name = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
+    if (!name || !SAFE_MODEL_RE.test(name) || name.includes('..')) {
+      res.status(400).json({ error: MESSAGES.badName });
+      return;
+    }
+    if (testing) {
+      res.status(409).json({ error: MESSAGES.testRunning });
+      return;
+    }
+    testing = true;
+    const abort = new AbortController();
+    // res, not req: req 'close' fires once the body is read, not when the client leaves.
+    res.on('close', () => {
+      if (!res.writableEnded) abort.abort();
+    });
+    try {
+      const listed = await listInstalled(base()).catch(() => []);
+      const all = (Array.isArray(listed) ? listed : []).filter((m) => m?.name);
+      const model = all.find((m) => withTag(m.name) === withTag(name));
+      if (!model) {
+        // An empty list can mean Ollama is down rather than the model gone.
+        const up = all.length > 0 || await ollamaJson('/api/version').then(() => true, () => false);
+        res.status(up ? 404 : 503).json({ error: up ? MESSAGES.notInstalled : INSTALL_ERRORS.ollamaDown });
+        return;
+      }
+      const installed = String(model.name);
+      const result = await runFreedomTest({ baseUrl: base(), model: installed, signal: abort.signal, fetchImpl });
+      await freedom.set({ name: installed, digest: model.digest }, result, all.map((m) => String(m.name)));
+      res.json({ freedom: result });
+    } catch (err) {
+      // The client left: the test stopped and nobody waits for the answer.
+      if (abort.signal.aborted) return;
+      throw err;
+    } finally {
+      testing = false;
+    }
+  }));
 
   // Express has already decoded the segment, so "hf.co%2Fuser%2Frepo%3AQ4" arrives whole.
   router.delete('/:modelId', guard, handle(async (req, res) => {

@@ -52,6 +52,7 @@ import { apiFetch } from './api.js';
  * @property {{ id: string, label: string, group: string }|null} catalog
  * @property {boolean} uncensored
  * @property {boolean} local           built on this machine, e.g. MCQ
+ * @property {{ refused: number, total: number, testedAt: string }|null} freedom  last Freedom test of this digest
  */
 
 /**
@@ -510,7 +511,7 @@ export function updateStatus(model, updates) {
 /** Catalog groups Auto draws from, in this order. */
 const AUTO_GROUPS = ['Small & Fast', 'Powerful', 'Reasoning'];
 /** Specialists Auto never takes; MCQ builds are picked by hand. */
-const AUTO_SKIP_GROUPS = new Set(['Uncensored', 'Vision', 'MCQ']);
+const AUTO_SKIP_GROUPS = new Set(['Uncensored', 'Security', 'Vision', 'MCQ']);
 
 /** Above this many tokens of conversation, Auto prefers a long context. */
 export const LARGE_CONTEXT_THRESHOLD = 6000;
@@ -581,12 +582,24 @@ export function pickAutoModel(models, contextTokens = 0) {
 }
 
 /**
- * The model Uncensored mode forces: the catalog's Uncensored group in order,
- * then anything flagged uncensored, then the name test.
+ * The model Uncensored mode forces. The current model stays when it is
+ * installed and already uncensored (flag, group or name); else the catalog's
+ * Uncensored group in order, then anything flagged uncensored, then the name
+ * test.
  * @param {CatalogRow[]} models
+ * @param {string} [current]  row id or pull name; '' and 'auto' name none
  * @returns {CatalogRow|null}
  */
-export function pickUncensoredModel(models) {
+export function pickUncensoredModel(models, current = '') {
+  const name = String(current ?? '').trim();
+  const want = name.toLowerCase() === 'auto' ? '' : normalizeModelName(name);
+  if (want) {
+    const rows = (Array.isArray(models) ? models : []).filter(Boolean);
+    // An exact id first: a catalog id can read like another row's pull name.
+    const mine = rows.find((m) => m.id === name)
+      || rows.find((m) => normalizeModelName(pullName(m)) === want || normalizeModelName(m.id) === want);
+    if (mine && mine.available !== false && (mine.uncensored === true || isUncensoredModelRecord(mine))) return mine;
+  }
   const list = installedOnly(models);
   return list.find((m) => m.group === 'Uncensored')
     || list.find((m) => m.uncensored === true)
@@ -615,6 +628,18 @@ export const CAPABILITY_LABELS = Object.freeze({
   tools: 'Tools', thinking: 'Thinking', vision: 'Vision', embedding: 'Embedding', audio: 'Audio'
 });
 
+/**
+ * A Freedom test result, or null when there is none or it does not add up.
+ * @param {any} raw
+ * @returns {InstalledModel['freedom']}
+ */
+function normalizeFreedom(raw) {
+  const f = raw && typeof raw === 'object' ? raw : {};
+  const { refused, total } = f;
+  if (!Number.isInteger(refused) || !Number.isInteger(total) || total <= 0 || refused < 0 || refused > total) return null;
+  return timeOf(f.testedAt) == null ? null : { refused, total, testedAt: f.testedAt };
+}
+
 /** @param {any} raw @returns {InstalledModel} */
 function normalizeInstalledModel(raw) {
   const m = raw && typeof raw === 'object' ? raw : {};
@@ -633,7 +658,8 @@ function normalizeInstalledModel(raw) {
     loaded: m.loaded === true,
     catalog: cat ? { id: str(cat.id), label: str(cat.label) || str(cat.id), group: str(cat.group) } : null,
     uncensored: m.uncensored === true,
-    local: m.local === true
+    local: m.local === true,
+    freedom: normalizeFreedom(m.freedom)
   };
 }
 

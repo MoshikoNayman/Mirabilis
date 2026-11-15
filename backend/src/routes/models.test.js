@@ -1,19 +1,25 @@
 // /api/models on a bare express app with a fake guard and a fake Ollama on loopback:
 // the token on writes, Go Dark, the installed and update views, library search and
-// tags, install jobs and uninstall. ollama.com and the registry are stubbed.
+// tags, install jobs, uninstall and the Freedom test. ollama.com and the registry
+// are stubbed.
 
 import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
+import fs from 'node:fs/promises';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 
+import { FREEDOM_FILE, FREEDOM_PROMPTS } from '../freedomTest.js';
 import { createInstallJobs, INSTALL_ERRORS } from '../modelInstallJobs.js';
 import { createOllamaLibrary, LIBRARY_ERRORS } from '../ollamaLibrary.js';
 import { createModelsRouter, OLLAMA_DOWNLOAD_URL, withTag } from './models.js';
 
 const TOKEN = 'test-session-token';
 const DIGEST = '500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41';
+const OTHER = 'aaee06c39dcf0000000000000000000000000000000000000000000000000000';
+const REFUSAL = "I'm sorry, but I can't help with that.";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** @type {Record<string, (req: http.IncomingMessage, res: http.ServerResponse, body: any) => any>} */
@@ -34,6 +40,7 @@ let ollama;
 let api;
 let base = '';
 let ollamaUrl = '';
+let dataDir = '';
 
 const INSTALLED = [
   {
@@ -44,8 +51,11 @@ const INSTALLED = [
   { name: 'mcq-raw-8b:latest', sizeBytes: 4920757726, digest: DIGEST, modifiedAt: null, family: 'llama', format: 'gguf', paramSize: '8.0B', quant: 'Q4_K_M' },
   { name: 'huihui_ai/qwen3-abliterated:8b', sizeBytes: 5e9, digest: 'not-a-digest', modifiedAt: 'garbage' }
 ];
+/** What the fake /api/tags lists; a test swaps it to pull a model again or empty Ollama. */
+let installed = INSTALLED;
 
 before(async () => {
+  dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'mirabilis-models-'));
   ollama = http.createServer(async (req, res) => {
     let raw = '';
     for await (const chunk of req) raw += chunk;
@@ -76,6 +86,8 @@ before(async () => {
     guard,
     ollamaBaseUrl: () => ollamaUrl,
     isGoDark: () => goDark,
+    // Only the Freedom test results land here: the library and updates are stubs.
+    dataDir,
     library,
     jobs: createInstallJobs({ ollamaBaseUrl: () => ollamaUrl }),
     updates: {
@@ -83,7 +95,7 @@ before(async () => {
       latestOllama: async () => '0.40.16',
       flush: async () => {}
     },
-    listInstalled: async (baseUrl) => { listCalls += 1; assert.equal(baseUrl, ollamaUrl); return INSTALLED; },
+    listInstalled: async (baseUrl) => { listCalls += 1; assert.equal(baseUrl, ollamaUrl); return installed; },
     modelInfo: async (_baseUrl, name) => (name === 'qwen3:8b'
       ? { contextWindow: 40960, paramCount: 8e9, capabilities: ['completion', 'tools', 'thinking'], vision: false }
       : { contextWindow: null, paramCount: null, capabilities: [], vision: false }),
@@ -110,6 +122,7 @@ after(async () => {
     s.closeAllConnections?.();
     await new Promise((r) => s.close(() => r(undefined)));
   }
+  await fs.rm(dataDir, { recursive: true, force: true });
 });
 
 /**
@@ -134,17 +147,28 @@ const ollamaUp = () => {
   };
 };
 
+/** A fake /api/chat: refuses the prompts in `refuse`, answers the rest. @param {string[]} [refuse] */
+const chatRoute = (refuse = []) => (_req, res, body) => {
+  const content = refuse.includes(body.messages?.[0]?.content) ? REFUSAL : 'Sure! Here it is, in full detail.';
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ model: body.model, message: { role: 'assistant', content }, done: true }));
+};
+const chats = () => ollamaSeen.filter((s) => s.url === 'POST /api/chat');
+/** @param {string} name */
+const installedEntry = async (name) => (await call('GET', '/installed')).body.models.find((m) => m.name === name);
+
 test('the router will not mount without a guard', () => {
   assert.throws(() => createModelsRouter(/** @type {any} */ ({})), /guard/);
 });
 
-test('installing, canceling and deleting need the session token; reads do not', async () => {
+test('installing, canceling, deleting and the Freedom test need the session token; reads do not', async () => {
   ollamaUp();
-  for (const [method, route] of [['POST', '/install-jobs'], ['POST', '/install-jobs/x/cancel'], ['DELETE', '/qwen3%3A8b']]) {
-    const res = await call(method, route, { body: method === 'DELETE' ? undefined : { modelId: 'qwen3:8b' } });
+  ollamaRoutes['POST /api/chat'] = chatRoute();
+  for (const [method, route] of [['POST', '/install-jobs'], ['POST', '/install-jobs/x/cancel'], ['DELETE', '/qwen3%3A8b'], ['POST', '/freedom-test']]) {
+    const res = await call(method, route, { body: method === 'DELETE' ? undefined : { modelId: 'qwen3:8b', model: 'qwen3:8b' } });
     assert.equal(res.status, 401, `${method} ${route}`);
   }
-  assert.equal(ollamaSeen.some((s) => s.url.startsWith('DELETE')), false, 'nothing reached Ollama');
+  assert.equal(ollamaSeen.some((s) => s.url.startsWith('DELETE') || s.url === 'POST /api/chat'), false, 'nothing reached Ollama');
   for (const route of ['/installed', '/updates', '/install-jobs']) assert.equal((await call('GET', route)).status, 200, route);
 });
 
@@ -177,7 +201,8 @@ test('GET /installed: runtime, disk and every installed model with catalog, load
     name: 'qwen3:8b', sizeBytes: 5225388164, digest: DIGEST, modifiedAt: '2026-09-07T03:05:46.272Z',
     family: 'qwen3', paramSize: '8.2B', quant: 'Q4_K_M', format: 'gguf',
     capabilities: ['completion', 'tools', 'thinking'], contextWindow: 40960, loaded: true,
-    catalog: { id: 'qwen3:8b', label: 'Qwen3 8B', group: 'Small & Fast' }, uncensored: false, local: false
+    catalog: { id: 'qwen3:8b', label: 'Qwen3 8B', group: 'Small & Fast' }, uncensored: false, local: false,
+    freedom: null
   });
   // A bare catalog id means :latest.
   assert.deepEqual(dolphin.catalog, { id: 'dolphin3', label: 'Dolphin 3.0 8B', group: 'Uncensored' });
@@ -327,6 +352,127 @@ test('DELETE with Ollama not running says so', async () => {
     /** @type {any} */ (s).closeAllConnections?.();
     await new Promise((r) => /** @type {any} */ (s).close(() => r(undefined)));
   }
+});
+
+test('POST /freedom-test: a bad name is 400, a model not installed 404, Ollama down 503, and no prompt is sent', async () => {
+  ollamaUp();
+  ollamaRoutes['POST /api/chat'] = chatRoute();
+  ollamaSeen = [];
+  for (const body of [{ model: 'bad; rm -rf /' }, { model: '../x' }, { model: 42 }, {}]) {
+    const res = await call('POST', '/freedom-test', { body, auth: true });
+    assert.deepEqual([res.status, res.body.error], [400, 'Invalid model name. Check the name.'], JSON.stringify(body));
+  }
+  const missing = await call('POST', '/freedom-test', { body: { model: 'nope:1b' }, auth: true });
+  assert.deepEqual([missing.status, missing.body.error], [404, 'Not installed. Refresh the list.']);
+
+  installed = [];
+  ollamaRoutes = {};
+  try {
+    const down = await call('POST', '/freedom-test', { body: { model: 'qwen3:8b' }, auth: true });
+    assert.deepEqual([down.status, down.body.error], [503, INSTALL_ERRORS.ollamaDown]);
+  } finally {
+    installed = INSTALLED;
+  }
+  assert.deepEqual(chats(), []);
+});
+
+test('POST /freedom-test: the eight prompts go to the installed name, under Go Dark too, and the result is kept per digest', async () => {
+  ollamaUp();
+  ollamaRoutes['POST /api/chat'] = chatRoute([FREEDOM_PROMPTS[1], FREEDOM_PROMPTS[7]]);
+  ollamaSeen = [];
+  goDark = true;
+  let res;
+  try {
+    // Local only, so Go Dark allows it. A bare name is the :latest install.
+    res = await call('POST', '/freedom-test', { body: { model: 'Dolphin3' }, auth: true });
+  } finally {
+    goDark = false;
+  }
+  assert.equal(res.status, 200);
+  assert.deepEqual(Object.keys(res.body), ['freedom']);
+  const { freedom } = res.body;
+  assert.deepEqual({ ...freedom, testedAt: '' }, { refused: 2, total: 8, testedAt: '' });
+  assert.ok(Number.isFinite(Date.parse(freedom.testedAt)));
+  assert.deepEqual(chats().map((s) => [s.body.model, s.body.messages[0].content]), FREEDOM_PROMPTS.map((p) => ['dolphin3:latest', p]));
+
+  const saved = JSON.parse(await fs.readFile(path.join(dataDir, FREEDOM_FILE), 'utf8'));
+  assert.deepEqual(saved.models['dolphin3:latest'], { name: 'dolphin3:latest', digest: DIGEST, ...freedom });
+
+  assert.deepEqual((await installedEntry('dolphin3:latest')).freedom, freedom);
+  assert.equal((await installedEntry('qwen3:8b')).freedom, null, 'untested');
+  installed = INSTALLED.map((m) => (m.name === 'dolphin3:latest' ? { ...m, digest: OTHER } : m));
+  try {
+    assert.equal((await installedEntry('dolphin3:latest')).freedom, null, 'pulled again: untested');
+  } finally {
+    installed = INSTALLED;
+  }
+  assert.deepEqual((await installedEntry('dolphin3:latest')).freedom, freedom, 'the same pull still has it');
+});
+
+test('POST /freedom-test: one test at a time', async () => {
+  ollamaUp();
+  ollamaSeen = [];
+  let release = () => {};
+  const gate = new Promise((r) => { release = () => r(undefined); });
+  const answer = chatRoute([FREEDOM_PROMPTS[4]]);
+  ollamaRoutes['POST /api/chat'] = async (req, res, body) => { await gate; answer(req, res, body); };
+  const first = call('POST', '/freedom-test', { body: { model: 'qwen3:8b' }, auth: true });
+  for (let i = 0; i < 400 && chats().length === 0; i += 1) await sleep(5);
+
+  const second = await call('POST', '/freedom-test', { body: { model: 'dolphin3' }, auth: true });
+  assert.deepEqual([second.status, second.body.error], [409, 'Another Freedom test is running. Wait for it.']);
+  release();
+  const done = await first;
+  assert.equal(done.status, 200);
+  assert.equal(done.body.freedom.refused, 1);
+  assert.equal(chats().length, 8);
+  assert.equal(chats().every((s) => s.body.model === 'qwen3:8b'), true, 'the refused request sent nothing');
+
+  assert.equal((await call('POST', '/freedom-test', { body: { model: 'qwen3:8b' }, auth: true })).status, 200, 'free once it finished');
+});
+
+test('POST /freedom-test stops when the client goes away, and keeps nothing', async () => {
+  ollamaUp();
+  ollamaSeen = [];
+  let dropped = false;
+  ollamaRoutes['POST /api/chat'] = (_req, res) => new Promise((resolve) => {
+    res.on('close', () => { dropped = true; resolve(undefined); });
+  });
+  const client = new AbortController();
+  const pending = fetch(`${base}/freedom-test`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'mcq-raw-8b' }),
+    signal: client.signal
+  }).catch((err) => err);
+  for (let i = 0; i < 400 && chats().length === 0; i += 1) await sleep(5);
+  client.abort();
+  assert.equal((await pending).name, 'AbortError');
+  for (let i = 0; i < 400 && !dropped; i += 1) await sleep(5);
+  assert.equal(dropped, true, 'the prompt in flight was dropped');
+  await sleep(20);
+  assert.equal(chats().length, 1, 'no prompt after the client left');
+
+  ollamaRoutes['POST /api/chat'] = chatRoute();
+  assert.equal((await installedEntry('mcq-raw-8b:latest')).freedom, null);
+  let again = await call('POST', '/freedom-test', { body: { model: 'mcq-raw-8b' }, auth: true });
+  for (let i = 0; i < 100 && again.status === 409; i += 1) {
+    await sleep(5);
+    again = await call('POST', '/freedom-test', { body: { model: 'mcq-raw-8b' }, auth: true });
+  }
+  assert.equal(again.status, 200, 'the next test may start');
+});
+
+test('POST /freedom-test: an Ollama failure is a short sentence and keeps nothing', async () => {
+  ollamaUp();
+  const memory = 'model requires more system memory (20.1 GiB) than is available (12.3 GiB)';
+  ollamaRoutes['POST /api/chat'] = (_req, res) => {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: memory }));
+  };
+  const res = await call('POST', '/freedom-test', { body: { model: 'huihui_ai/qwen3-abliterated:8b' }, auth: true });
+  assert.deepEqual([res.status, res.body], [500, { error: memory }]);
+  assert.equal((await installedEntry('huihui_ai/qwen3-abliterated:8b')).freedom, null);
 });
 
 test('a bare id is the :latest tag', () => {

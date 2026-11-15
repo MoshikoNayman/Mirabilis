@@ -60,6 +60,24 @@ async function startEngine() {
         // 200 with no content at all, then a clean done.
         return res.end(ndjson({ done: true }));
       }
+      if (engineMode === 'refuse-once') {
+        // The refusal shield re-asks with the reply begun (an assistant message
+        // last). Refuse the first ask, answer the prefilled retry. Decided on
+        // end, once this request's body is parsed into lastChatBody.
+        req.on('end', () => {
+          const msgs = lastChatBody?.messages || [];
+          const prefilled = msgs[msgs.length - 1]?.role === 'assistant';
+          if (prefilled) {
+            res.write(ndjson({ message: { content: "'s a brutal roast for your " } }));
+            res.write(ndjson({ message: { content: 'always-late friend.' } }));
+            res.end(ndjson({ done: true, eval_count: 5, eval_duration: 1e9 }));
+          } else {
+            res.write(ndjson({ message: { content: "I'm sorry, but I can't help with that." } }));
+            res.end(ndjson({ done: true }));
+          }
+        });
+        return;
+      }
       res.write(ndjson({ message: { content: 'Hello' } }));
       res.write(ndjson({ message: { content: ' there' } }));
       // Long enough that compression would kick in.
@@ -336,6 +354,29 @@ test('a client that disconnects mid-stream keeps its partial reply, marked trunc
   assert.ok(replies[0].content.length > 0, 'it should contain the tokens that were produced');
   assert.equal(replies[0].truncated, true, 'it must be flagged as cut short');
   assert.equal(replies[0].stopReason, 'client-disconnect');
+});
+
+test('Uncensored: a refused reply is re-asked and the answer is shown, marked Retried', async () => {
+  engineMode = 'refuse-once';
+  const chatId = await newChat();
+  const frames = parseSSE(await (await send(chatId, { uncensoredMode: true })).text());
+
+  const retry = frames.find((f) => f.event === 'retry');
+  assert.ok(retry, 'a retry event should announce the re-ask');
+  assert.equal(retry.data.attempt, 2);
+
+  const shown = frames.filter((f) => f.event === 'token').map((f) => f.data.token).join('');
+  assert.ok(shown.startsWith('Sure, here'), `the prefill should lead the reply: ${shown.slice(0, 20)}`);
+  assert.ok(shown.includes('brutal roast'), 'the answer should be shown');
+  assert.ok(!shown.includes("I'm sorry"), 'nothing of the refusal should be shown');
+
+  const done = frames.find((f) => f.event === 'done');
+  assert.equal(done.data.message.shield?.retries, 1, 'the saved reply records one retry');
+
+  const chat = await getChat(chatId);
+  const reply = chat.messages.find((m) => m.role === 'assistant');
+  assert.ok(reply.content.startsWith('Sure, here'));
+  assert.equal(reply.shield?.retries, 1);
 });
 
 test('an attached text file reaches the model, not just its name', async () => {

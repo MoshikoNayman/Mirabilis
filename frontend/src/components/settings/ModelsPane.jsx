@@ -1,6 +1,7 @@
-// Models: the Ollama models on this computer, with updates and delete, and a
-// search of the Ollama library to install from. Install jobs live in ChatApp so
-// they survive this pane closing; the pane shows and starts them.
+// Models: the Ollama models on this computer, with updates, delete and a
+// freedom test, and a search of the Ollama library to install from. Install
+// jobs live in ChatApp so they survive this pane closing; the pane shows and
+// starts them.
 'use client';
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -8,18 +9,23 @@ import {
   Badge, Button, IconButton, SegmentedControl, Spinner, Switch,
   AlertIcon, ChevronRightIcon, CloseIcon, CubeIcon, ExternalIcon, MoonIcon, RefreshIcon, SearchIcon, TrashIcon
 } from '../ui/primitives';
+import { apiFetch } from '../../lib/api';
 import { describeApiError } from '../../lib/access';
 import {
   fetchInstalled, fetchUpdates, fetchLibrary, fetchLibraryTags, lookupRegistry,
   formatBytes, formatContext, formatCount, formatAgo, jobProgressText, modelFit, fitDetail, fitBucket, itemSize,
   FIT_LABELS, CAPABILITY_FILTERS, CAPABILITY_LABELS, normalizeModelName, baseModelName, pullName, rowIdForName,
-  exactModelName, sortInstalled, sortTags, primaryTagCount, recommendedGroups, installedNameSet, updateStatus
+  exactModelName, sortInstalled, sortTags, primaryTagCount, recommendedGroups, installedNameSet, updateStatus,
+  isEmbeddingOnly
 } from '../../lib/models';
 import { SettingsGroup, SettingsList, SettingsRow, SettingsNotice, SettingsCopyButton } from './SettingsSheet';
 
 const FEATURE = 'Models';
 const SEARCH_DEBOUNCE_MS = 350;
 const CLOCK_MS = 30000;
+// Eight short replies, after what can be a cold load of a large model.
+const FREEDOM_TIMEOUT_MS = 10 * 60 * 1000;
+const MAX_ERROR_WORDS = 12;
 
 const VIEW_OPTIONS = [{ value: 'installed', label: 'Installed' }, { value: 'discover', label: 'Discover' }];
 const ORDER_OPTIONS = [{ value: 'popular', label: 'Popular' }, { value: 'newest', label: 'Newest' }];
@@ -157,7 +163,24 @@ function RuntimeList({ runtime, disk }) {
   );
 }
 
-function InstalledRow({ model, label, rowId, status, job, error, goDark, onInstall, onCancel, onDelete, onDismissError }) {
+/** "Refused 2/8": the last freedom test of this exact download. */
+function FreedomBadge({ freedom, now }) {
+  const ago = formatAgo(freedom.testedAt, now);
+  return (
+    <span className="inline-flex" title={ago ? `Tested ${ago}` : undefined}>
+      <Badge tone={freedom.refused === 0 ? 'success' : 'warn'}>{`Refused ${freedom.refused}/${freedom.total}`}</Badge>
+    </span>
+  );
+}
+
+/**
+ * testing is the name whose freedom test runs, or ''; one runs at a time, so
+ * the other rows' buttons wait.
+ */
+function InstalledRow({
+  model, label, rowId, status, job, error, goDark, now, testing, testError,
+  onInstall, onCancel, onDelete, onDismissError, onFreedomTest, onDismissTestError
+}) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
@@ -222,14 +245,19 @@ function InstalledRow({ model, label, rowId, status, job, error, goDark, onInsta
   }
 
   const size = formatBytes(model.sizeBytes);
+  // Embedding models cannot chat, so there is nothing to test.
+  const testable = !isEmbeddingOnly({ id: model.name, capabilities: model.capabilities });
+  const running = testing === model.name;
   return (
     <div className="px-4 py-3">
-      <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1">
+      {/* Wraps in a narrow window: the actions drop below the name rather than squeeze it. */}
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-1.5">
+        <div className="min-w-[10rem] flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="min-w-0 break-words text-[length:var(--text-sm)] font-medium text-[color:var(--text-main)]">{label}</span>
             {model.loaded ? <Badge tone="success">Loaded</Badge> : null}
             {model.uncensored ? <Badge tone="warn">Uncensored</Badge> : null}
+            {model.freedom ? <FreedomBadge freedom={model.freedom} now={now} /> : null}
           </div>
           <div className={`mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 ${muted2xs}`}>
             {differs(label, model.name) ? <span className="break-all font-mono">{model.name}</span> : null}
@@ -239,19 +267,45 @@ function InstalledRow({ model, label, rowId, status, job, error, goDark, onInsta
           </div>
           {job ? <JobProgress job={job} name={model.name} /> : null}
           {error && !job ? <RowError error={error} onDismiss={() => onDismissError(rowId)} /> : null}
+          {testError ? <RowError error={testError} onDismiss={() => onDismissTestError(model.name)} /> : null}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-1">
           {job ? (
             <CancelJob name={model.name} rowId={rowId} onCancel={onCancel} />
           ) : (
             <>
+              {testable ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => { if (!running) onFreedomTest(model.name); }}
+                  disabled={Boolean(testing) && !running}
+                  aria-disabled={running || undefined}
+                  aria-label={`${running ? 'Testing' : 'Freedom test'} ${model.name}`}
+                >
+                  {running ? <Spinner size={12} /> : null}
+                  {running ? 'Testing...' : 'Freedom test'}
+                </Button>
+              ) : null}
               {status === 'update' && !goDark ? (
-                <Button size="sm" variant="soft" onClick={() => onInstall(model.name)} aria-label={`${error ? 'Retry' : 'Update'} ${model.name}`}>
+                <Button
+                  size="sm"
+                  variant="soft"
+                  onClick={() => { if (!running) onInstall(model.name); }}
+                  aria-disabled={running || undefined}
+                  aria-label={`${error ? 'Retry' : 'Update'} ${model.name}`}
+                >
                   {error ? 'Retry' : 'Update'}
                 </Button>
               ) : null}
               <span ref={trashRef} className="inline-flex">
-                <IconButton size="sm" label={`Delete ${model.name}`} onClick={() => setConfirming(true)} data-model-delete="">
+                <IconButton
+                  size="sm"
+                  label={`Delete ${model.name}`}
+                  onClick={() => { if (!running) setConfirming(true); }}
+                  aria-disabled={running || undefined}
+                  data-model-delete=""
+                >
                   <TrashIcon size={14} />
                 </IconButton>
               </span>
@@ -283,8 +337,8 @@ function PendingRow({ name, label, rowId, job, error, goDark, onInstall, onCance
 }
 
 export function InstalledView({
-  state, error, data, updates, checking, checkError, now, catalog, jobs, installErrors, goDark,
-  onRetry, onCheck, onInstall, onCancel, onDelete, onDismissError, onDiscover
+  state, error, data, updates, checking, checkError, now, catalog, jobs, installErrors, goDark, testing, testErrors,
+  onRetry, onCheck, onInstall, onCancel, onDelete, onDismissError, onDiscover, onFreedomTest, onDismissTestError
 }) {
   const rootRef = useRef(null);
   const [focusIndex, setFocusIndex] = useState(null);
@@ -344,7 +398,8 @@ export function InstalledView({
 
   const blocked = goDark || updates?.goDark === true;
   const statusOf = (m) => updateStatus(m, updates);
-  const updatable = models.filter((m) => statusOf(m) === 'update' && !jobs?.[keyOf(m.name)]);
+  // The row under test is left out: updating it would hide its "Testing..." state.
+  const updatable = models.filter((m) => statusOf(m) === 'update' && !jobs?.[keyOf(m.name)] && m.name !== testing);
   const checked = updates?.checkedAt ? formatAgo(updates.checkedAt, now) : '';
   // A check that could verify nothing says why, rather than looking like all is current.
   const verdicts = Object.values(updates?.results || {});
@@ -425,10 +480,15 @@ export function InstalledView({
                   job={jobs?.[rowId]}
                   error={installErrors?.[rowId]?.error || ''}
                   goDark={blocked}
+                  now={now}
+                  testing={testing || ''}
+                  testError={testErrors?.[m.name] || ''}
                   onInstall={onInstall}
                   onCancel={onCancel}
                   onDelete={() => remove(m)}
                   onDismissError={onDismissError}
+                  onFreedomTest={onFreedomTest}
+                  onDismissTestError={onDismissTestError}
                 />
               );
             })}
@@ -966,6 +1026,69 @@ function DiscoverTab({ ramGb, goDark, ...rest }) {
 /* Pane */
 
 /**
+ * The freedom test in flight. It lives outside the pane, as install jobs live in
+ * ChatApp, so switching sections and back still shows it and one runs at a time.
+ * done resolves to '' or the sentence the row shows; it never rejects.
+ * @type {{ name: string, done: Promise<string> }|null}
+ */
+let freedomRun = null;
+
+/**
+ * The last failure that has not been shown yet, { name, text }, or null. A test
+ * that ends while this pane is unmounted sets it, and the next mount shows it.
+ * @type {{ name: string, text: string }|null}
+ */
+let lastFreedomFailure = null;
+
+/** The backend's sentence when it is short enough for a row. */
+function testErrorText(err) {
+  const text = describeApiError(err, 'Freedom test');
+  if (/fetch failed|ECONNREFUSED/i.test(text)) return 'Ollama is not running. Start it, then retry.';
+  return text.split(/\s+/).length <= MAX_ERROR_WORDS ? text : 'Freedom test failed. Retry.';
+}
+
+/** The backend keeps the result by digest, so the list reload shows it. */
+function startFreedomRun(name) {
+  const run = {
+    name,
+    done: apiFetch('/api/models/freedom-test', { method: 'POST', body: { model: name }, timeoutMs: FREEDOM_TIMEOUT_MS })
+      .then(() => '', testErrorText)
+      .then((failure) => {
+        if (freedomRun === run) freedomRun = null;
+        // Held until a mounted pane shows it, in case this one is gone by now.
+        if (failure) lastFreedomFailure = { name, text: failure };
+        return failure;
+      })
+  };
+  freedomRun = run;
+  return run;
+}
+
+/** The map without key; the same map when key is not in it. */
+function dropKey(map, key) {
+  if (!Object.hasOwn(map, key)) return map;
+  const { [key]: _gone, ...rest } = map;
+  return rest;
+}
+
+/** What a test hits when its model was deleted mid-run; stale once it is back. */
+const NOT_INSTALLED_ERROR = 'Not installed. Refresh the list.';
+
+/**
+ * Drops the stale "Not installed" error for a model that is on disk again,
+ * leaving every other failure. @param {Record<string, string>} map @param {Set<string>} names
+ */
+function pruneStaleErrors(map, names) {
+  let changed = false;
+  const out = {};
+  for (const [k, v] of Object.entries(map)) {
+    if (v === NOT_INSTALLED_ERROR && names.has(k)) { changed = true; continue; }
+    out[k] = v;
+  }
+  return changed ? out : map;
+}
+
+/**
  * @param {object} props
  * @param {'installed'|'discover'} props.view
  * @param {(view: string) => void} props.onViewChange
@@ -993,6 +1116,8 @@ export default function ModelsPane({
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState('');
   const [now, setNow] = useState(() => Date.now());
+  const [testing, setTesting] = useState(() => freedomRun?.name || '');
+  const [testErrors, setTestErrors] = useState({});
   // Each view mounts on first visit and then stays, so a search survives switching.
   const [seen, setSeen] = useState(() => ({ installed: view === 'installed', discover: view === 'discover' }));
   const mounted = useRef(false);
@@ -1009,13 +1134,18 @@ export default function ModelsPane({
     setSeen((s) => (s[view] ? s : { ...s, [view]: true }));
   }, [view]);
 
-  const loadInstalled = useCallback(async ({ quiet = false } = {}) => {
+  const loadInstalled = useCallback(async ({ quiet = false, pruneErrors = false } = {}) => {
     const seq = ++loadSeq.current;
     if (!quiet) setState((s) => (s === 'ready' ? s : 'loading'));
     try {
       const next = await fetchInstalled();
       if (!mounted.current || seq !== loadSeq.current) return;
       setData(next);
+      // A model back on disk sheds a stale "Not installed" from a test it outran.
+      if (pruneErrors) {
+        const names = new Set((next?.models || []).map((m) => m.name));
+        setTestErrors((m) => pruneStaleErrors(m, names));
+      }
       setState('ready');
       setError('');
     } catch (err) {
@@ -1053,7 +1183,7 @@ export default function ModelsPane({
   useEffect(() => {
     if (revision === firstRevision.current) return;
     firstRevision.current = revision;
-    loadInstalled({ quiet: true });
+    loadInstalled({ quiet: true, pruneErrors: true });
     if (updatesAsked.current) loadUpdates(false);
   }, [revision, loadInstalled, loadUpdates]);
 
@@ -1061,6 +1191,39 @@ export default function ModelsPane({
     const t = setInterval(() => setNow(Date.now()), CLOCK_MS);
     return () => clearInterval(t);
   }, []);
+
+  // Shows a run until it ends, then its failure and the list with its result.
+  const followTest = useCallback(async (run) => {
+    setTesting(run.name);
+    const failure = await run.done;
+    if (!mounted.current) return;
+    setTesting('');
+    if (failure) setTestErrors((m) => ({ ...m, [run.name]: failure }));
+    // Shown here, so the next mount does not show it again.
+    if (lastFreedomFailure?.name === run.name) lastFreedomFailure = null;
+    loadInstalled({ quiet: true });
+  }, [loadInstalled]);
+
+  // A test started before this pane mounted, if it has not ended since the first
+  // render; else a failure that ended while the pane was away is shown now.
+  useEffect(() => {
+    if (freedomRun) {
+      followTest(freedomRun);
+    } else {
+      setTesting('');
+      if (lastFreedomFailure) {
+        const { name, text } = lastFreedomFailure;
+        lastFreedomFailure = null;
+        setTestErrors((m) => ({ ...m, [name]: text }));
+      }
+    }
+  }, [followTest]);
+
+  function startTest(name) {
+    if (freedomRun) return;
+    setTestErrors((m) => dropKey(m, name));
+    followTest(startFreedomRun(name));
+  }
 
   const installedSet = useMemo(() => {
     const set = installedNameSet(data?.models || []);
@@ -1073,6 +1236,7 @@ export default function ModelsPane({
     const failure = await onDelete(name);
     if (!failure && mounted.current) {
       setData((d) => (d ? { ...d, models: d.models.filter((m) => m.name !== name) } : d));
+      setTestErrors((m) => dropKey(m, name));
     }
     return failure;
   }
@@ -1105,11 +1269,15 @@ export default function ModelsPane({
             checking={checking}
             checkError={checkError}
             now={now}
+            testing={testing}
+            testErrors={testErrors}
             onRetry={retry}
             onCheck={() => loadUpdates(true)}
             onDelete={remove}
             onDismissError={onDismissError}
             onDiscover={() => onViewChange('discover')}
+            onFreedomTest={startTest}
+            onDismissTestError={(name) => setTestErrors((m) => dropKey(m, name))}
           />
         </div>
       ) : null}

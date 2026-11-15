@@ -43,7 +43,9 @@ import { createRecall } from './recall.js';
 import { createConfigVault } from './configVault.js';
 import { makeHostGuard, makeMcpAuthGuard, makePrivilegedGuard, isLoopbackRequest, loadOrCreateMcpToken, assertSafeProviderUrl } from './security.js';
 import { classifyProviderScope } from './providerScope.js';
-import { refreshCatalog, ollamaTag } from './modelCatalog.js';
+import { refreshCatalog, ollamaTag, pickUncensoredRow } from './modelCatalog.js';
+import { prefillMessage } from './refusal.js';
+import { streamShielded } from './refusalShield.js';
 import { lookupModel } from './ollamaRegistry.js';
 import { describeEngineError } from './engineErrors.js';
 import { createProviderKeyStore } from './providerKeys.js';
@@ -265,16 +267,32 @@ async function generateChatTitle({ content, provider, model, config: cfg, ollama
     .trim() || null;
 }
 
-// The catalog's Uncensored group in models.json order, then any model listModels
-// flags uncensored (MCQ-Raw, another tag of an uncensored row, an abliterated build).
-async function pickMostUncensoredOllamaModel(cfg) {
+// The requested model when it is installed and uncensored, else the catalog's
+// Uncensored group in models.json order, then any model listModels flags
+// uncensored (MCQ-Raw, another tag of an uncensored row, an abliterated build).
+async function pickMostUncensoredOllamaModel(cfg, requested = '') {
   const models = await listModels(cfg, 'ollama');
-  const installed = (models || []).filter((item) => item?.available === true);
-  const pick = installed.find((item) => item.group === 'Uncensored')
-    || installed.find((item) => item.uncensored === true);
+  const pick = pickUncensoredRow(models || [], requested);
   if (!pick) return null;
   // A row is installed only under its own tag, so this is the tag that runs.
   return ollamaTag(pick.ollamaId || pick.id);
+}
+
+// The refusal shield's attempts in Uncensored mode: the model as asked, the same
+// model with the reply begun, then the next installed uncensored model the same way.
+async function refusalShieldPlan(cfg, model) {
+  const plan = [{ model, prefill: false }, { model, prefill: true }];
+  try {
+    const next = pickUncensoredRow((await listModels(cfg, 'ollama')) || [], '', { exclude: model });
+    if (next) plan.push({ model: ollamaTag(next.ollamaId || next.id), prefill: true });
+  } catch { /* no other model to try */ }
+  return plan;
+}
+
+// A model that can think needs an empty think block before a prefill (refusal.js).
+async function ollamaCanThink(baseUrl, model) {
+  const info = await getOllamaModelInfo(baseUrl, model).catch(() => null);
+  return Array.isArray(info?.capabilities) && info.capabilities.includes('thinking');
 }
 
 // Installed Ollama models as the router reads them. The router takes groups
@@ -2230,15 +2248,18 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       if (routed.model) effectiveModel = routed.model;
     } catch { /* keep the default effectiveModel */ }
   }
+  // Uncensored with Ollama: the refusal shield asks a refused reply again.
+  let shieldPlan = null;
   if (chatUncensoredMode && effectiveProvider === 'ollama') {
     try {
-      const forcedModel = await pickMostUncensoredOllamaModel(config);
+      const forcedModel = await pickMostUncensoredOllamaModel(config, model === 'auto' || !model ? '' : String(model));
       if (forcedModel) {
         effectiveModel = forcedModel;
       }
     } catch {
       // Best effort only: if model discovery fails, continue with selected model.
     }
+    shieldPlan = await refusalShieldPlan(config, effectiveModel);
   }
 
   // Title generation runs after the main stream (see the done handler) so it does
@@ -2348,6 +2369,9 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
   const promptTokenEstimate = outgoingMessages.reduce((total, message) => total + estimateTokens(message.content), 0);
 
   let assistantText = '';
+  // The model whose reply is shown; the refusal shield can end on another one.
+  let replyModel = effectiveModel;
+  let shield = null; // { retries } once the refusal shield asked again
   // Performance Receipt timing: start, time-to-first-token, Ollama eval metrics.
   const streamStartedAt = Date.now();
   let firstTokenAt = null;
@@ -2367,12 +2391,13 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
 
     if (visionNotice) sendSSE(res, 'notice', { message: visionNotice });
 
-    await streamWithProvider({
+    // One provider stream; the refusal shield runs it once per attempt.
+    const streamReply = ({ model: streamModel, messages, think: streamThink, signal, onToken }) => streamWithProvider({
       provider: effectiveProvider,
-      model: effectiveModel,
-      messages: outgoingMessages,
+      model: streamModel,
+      messages,
       config,
-      signal: abortController.signal,
+      signal,
       overrideBaseUrl: typeof providerBaseUrl === 'string' && providerBaseUrl.trim() ? providerBaseUrl.trim() : undefined,
       // Prefer the backend-held key. External callers may pass their own.
       overrideApiKey: (typeof providerApiKey === 'string' && providerApiKey.trim())
@@ -2383,21 +2408,47 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       ollamaOptions: tuning.options,
       openaiParams,
       keepAlive: pinModel === true ? -1 : '30m',
-      // Only false is passed on: a model without thinking refuses think: true.
-      think: think === false ? false : undefined,
+      think: streamThink,
       onThinking: () => {
         if (thinkingSent) return;
         thinkingSent = true;
         sendSSE(res, 'thinking', {});
       },
-      onToken: (token) => {
-        if (firstTokenAt === null) firstTokenAt = Date.now();
-        assistantText += token;
-        sendSSE(res, 'token', { token });
-      },
+      onToken,
       onStats: (stats) => { ollamaStats = stats; },
       onNotice: (message) => { tunedNotice = message; sendSSE(res, 'notice', { message }); }
     });
+    const showToken = (token) => {
+      if (firstTokenAt === null) firstTokenAt = Date.now();
+      assistantText += token;
+      sendSSE(res, 'token', { token });
+    };
+    // Only false is passed on: a model without thinking refuses think: true.
+    const askedThink = think === false ? false : undefined;
+
+    if (shieldPlan) {
+      const shielded = await streamShielded({
+        plan: shieldPlan,
+        signal: abortController.signal,
+        onToken: showToken,
+        onRetry: (retry) => sendSSE(res, 'retry', retry),
+        run: async (attempt, { signal, onToken }) => {
+          replyModel = attempt.model;
+          ollamaStats = null;
+          // Prefilled: the prompt ends with the reply begun, and thinking is off.
+          const messages = attempt.prefill
+            ? [...outgoingMessages, prefillMessage(await ollamaCanThink(ollamaBaseUrl, attempt.model))]
+            : outgoingMessages;
+          await streamReply({ model: attempt.model, messages, think: attempt.prefill ? false : askedThink, signal, onToken });
+        }
+      });
+      replyModel = shielded.model;
+      if (shielded.retries > 0) shield = { retries: shielded.retries };
+    } else {
+      await streamReply({
+        model: effectiveModel, messages: outgoingMessages, think: askedThink, signal: abortController.signal, onToken: showToken
+      });
+    }
 
     // An empty stream is a failure: saving it leaves a blank bubble and poisons
     // the next request's history. `notice` covers a deliberate no-output case.
@@ -2434,9 +2485,10 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
         totalTokens: promptTokenEstimate + estimateTokens(assistantText),
         isEstimate: true
       },
-      model: effectiveModel,
+      model: replyModel,
       provider: effectiveProvider,
       performance: perfReceipt,
+      ...(shield ? { shield } : {}),
       ...(clientGone ? { truncated: true, stopReason: 'client-disconnect' } : {})
     };
 
@@ -2452,7 +2504,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
         type: 'chat-example',
         user: content,
         assistant: assistantText,
-        model: effectiveModel
+        model: replyModel
       };
       await mkdir(dataDir, { recursive: true });
       await appendFile(trainingExamplesPath, `${JSON.stringify(record)}\n`, 'utf8');
@@ -2464,7 +2516,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
     // keep_alive so the model stays warm instead of reloading.
     if (chatWasNew) {
       const aiTitle = await generateChatTitle({
-        content, provider: effectiveProvider, model: effectiveModel, config,
+        content, provider: effectiveProvider, model: replyModel, config,
         ollamaOptions: tuning.options, keepAlive: pinModel === true ? -1 : '30m'
       }).catch(() => null);
       // Skip if clearChats ran since this request started.
@@ -2490,7 +2542,7 @@ app.post('/api/chats/:chatId/messages/stream', async (req, res) => {
       error: describeEngineError(error, {
         provider: effectiveProvider,
         baseUrl: providerBaseUrl || undefined,
-        model: effectiveModel
+        model: replyModel
       })
     });
     res.end();

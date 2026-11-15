@@ -1161,6 +1161,15 @@ const MessageRow = memo(function MessageRow({
                     </span>
                   );
                 })() : null}
+                {/* The refusal shield asked this turn again before it answered. */}
+                {message.shield?.retries > 0 ? (
+                  <span
+                    title={message.shield.retries === 1 ? '1 retry' : `${message.shield.retries} retries`}
+                    className="mr-1.5 inline-flex items-center rounded-[var(--r-pill)] bg-black/[0.05] px-1.5 py-[2px] align-middle text-[9px] font-semibold normal-case tracking-normal text-[color:var(--text-muted)] dark:bg-white/[0.06]"
+                  >
+                    Retried
+                  </span>
+                ) : null}
                 {(() => {
                   // Exact count from Ollama eval metrics when present, else the char/4 estimate.
                   const p = message.performance;
@@ -1994,6 +2003,8 @@ export default function ChatApp() {
   const [remoteError, setRemoteError] = useState('');
   const [execResults, setExecResults] = useState({}); // codeBlockKey -> { stdout, stderr, exitCode, running }
   const [uncensoredMode, setUncensoredMode] = useState(false);
+  // The model the Uncensored pill replaced, { from, to }, so turning it off restores it.
+  const uncensoredSwapRef = useRef(null);
   const [chatSearch, setChatSearch] = useState('');
   const [pinnedChatIds, setPinnedChatIds] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -3908,14 +3919,42 @@ export default function ChatApp() {
     await loadChat(payload.chat.id);
   }
 
+  // What an Ollama send starts from: the picked model, or Auto's pick.
+  function ollamaBaseModel() {
+    return model === 'auto' ? (pickAutoModel(models, contextUsage?.totalTokens || 0)?.id || '') : model;
+  }
+
+  // On, an uncensored model replaces the current one unless it already is one.
+  // Off, the replaced model comes back if no other was picked since. Returns
+  // the row switched to, or null.
+  function swapUncensoredModel(on) {
+    if (!on) {
+      const swap = uncensoredSwapRef.current;
+      uncensoredSwapRef.current = null;
+      if (swap && model === swap.to) {
+        // As refreshModels does, Auto stands in for a model removed since.
+        const kept = swap.from === 'auto' || models.some((item) => item.id === swap.from && item.available !== false);
+        setModel(kept ? swap.from : 'auto');
+      }
+      return null;
+    }
+    if (provider !== 'ollama') return null;
+    const best = pickUncensoredModel(models, ollamaBaseModel());
+    if (!best?.id || best.id === model) return null;
+    uncensoredSwapRef.current = { from: model, to: best.id };
+    setModel(best.id);
+    return best;
+  }
+
   async function toggleUncensoredMode() {
     const next = !uncensoredMode;
     setUncensoredMode(next);
     if (!next) {
       setOpenClawMode(false);
     }
+    const statusFor = (best) => (best ? `Uncensored on: ${best.label || best.id}` : next ? 'Uncensored on' : 'Uncensored off');
     if (!activeChatId) {
-      setStatusText(next ? 'Uncensored on' : 'Uncensored off');
+      setStatusText(statusFor(swapUncensoredModel(next)));
       return;
     }
     try {
@@ -3923,16 +3962,7 @@ export default function ChatApp() {
         method: 'PATCH',
         body: JSON.stringify({ uncensoredMode: next })
       });
-      if (next && provider === 'ollama') {
-        const best = pickUncensoredModel(models);
-        if (best?.id && best.id !== model) {
-          setModel(best.id);
-          setStatusText(`Uncensored on: ${best.label || best.id}`);
-          await refreshChats();
-          return;
-        }
-      }
-      setStatusText(next ? 'Uncensored on' : 'Uncensored off');
+      setStatusText(statusFor(swapUncensoredModel(next)));
       await refreshChats();
     } catch (error) {
       setStatusText(`Mode update failed: ${error.message}`);
@@ -3986,6 +4016,8 @@ export default function ChatApp() {
         body: JSON.stringify({ uncensoredMode: false })
       });
       setUncensoredMode(false);
+      // Turning the pill off this way restores the model it replaced too.
+      swapUncensoredModel(false);
       setStatusText('OpenClaw off');
       await refreshChats();
     } catch (error) {
@@ -4388,11 +4420,11 @@ export default function ChatApp() {
 
   async function resolveProviderForSend() {
     if (provider === 'ollama') {
-      const forcedUncensored = uncensoredMode ? pickUncensoredModel(models) : null;
-      const contextTokens = contextUsage?.totalTokens || 0;
-      const resolvedAuto = model === 'auto' ? (pickAutoModel(models, contextTokens)?.id || '') : model;
+      const resolvedAuto = ollamaBaseModel();
+      const forcedUncensored = uncensoredMode ? pickUncensoredModel(models, resolvedAuto) : null;
       const effectiveModel = forcedUncensored?.id || resolvedAuto;
       if (uncensoredMode && forcedUncensored?.id && model !== forcedUncensored.id) {
+        uncensoredSwapRef.current = { from: model, to: forcedUncensored.id };
         setModel(forcedUncensored.id);
       }
       return { provider: 'ollama', model: effectiveModel, providerBaseUrl: undefined, providerApiKey: undefined };
@@ -5337,7 +5369,7 @@ export default function ChatApp() {
 
     try {
       // Uncensored runs on the model the chat path would force.
-      const forced = uncensoredMode && provider === 'ollama' ? pickUncensoredModel(models) : null;
+      const forced = uncensoredMode && provider === 'ollama' ? pickUncensoredModel(models, ollamaBaseModel()) : null;
 
       // Create the chat up front so the backend can write the result into it. It
       // carries the same modes as a chat-path chat, or reloading it would reset them.
@@ -5895,8 +5927,12 @@ export default function ChatApp() {
       let liveTokenCount = 0;
       let liveFirstTokenTs = null;
       let liveThinking = false;
+      let liveRetrying = false; // a refused start is being asked again
       liveProgressTimer = setInterval(() => {
-        if (liveFirstTokenTs == null) { setStatusText(liveThinking ? 'Thinking...' : 'Loading model...'); return; }
+        if (liveFirstTokenTs == null) {
+          setStatusText(liveRetrying ? 'Retrying...' : liveThinking ? 'Thinking...' : 'Loading model...');
+          return;
+        }
         const elapsed = (Date.now() - liveFirstTokenTs) / 1000;
         const tps = elapsed > 0 ? liveTokenCount / elapsed : 0;
         setStatusText(`${liveTokenCount.toLocaleString()} tok | ${tps >= 10 ? tps.toFixed(0) : tps.toFixed(1)} tok/s | ${elapsed.toFixed(0)}s`);
@@ -5976,6 +6012,21 @@ export default function ChatApp() {
           }
 
           if (event === 'thinking') liveThinking = true;
+
+          // Uncensored: the reply opened with a refusal, so the turn is asked
+          // again, maybe on another model. Nothing of the refusal was shown.
+          if (event === 'retry') {
+            liveRetrying = true;
+            setStatusText('Retrying...');
+            if (payload.model) {
+              setMessages((prev) => {
+                const next = [...prev];
+                const last = next[next.length - 1];
+                if (last?.role === 'assistant') next[next.length - 1] = { ...last, effectiveModel: payload.model };
+                return next;
+              });
+            }
+          }
 
           if (event === 'notice' && payload.message) {
             // For example, an OOM retry reduced the runtime settings.
@@ -7291,7 +7342,7 @@ export default function ChatApp() {
                         <div className="group/row relative flex items-center">
                           <button
                             type="button"
-                            onClick={() => { setModel('auto'); setIsModelMenuOpen(false); }}
+                            onClick={() => { uncensoredSwapRef.current = null; setModel('auto'); setIsModelMenuOpen(false); }}
                             className={`flex min-w-0 flex-1 items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs transition ${
                               model === 'auto'
                                 ? 'bg-accentSoft text-ink dark:bg-accent/20 dark:text-accent'
@@ -7335,6 +7386,8 @@ export default function ChatApp() {
                                       // Only local GGUF servers need switch-model; elsewhere the
                                       // id travels with each request and the route returns 400.
                                       if (!needsServerModelSwitch(provider)) {
+                                        // A hand pick is the user's choice: drop any pill swap to restore.
+                                        uncensoredSwapRef.current = null;
                                         setModel(item.id);
                                         setStatusText(`Model: ${item.label}`);
                                         setIsModelMenuOpen(false);
@@ -7350,6 +7403,7 @@ export default function ChatApp() {
                                         })
                                           .then(async () => {
                                             await refreshModels();
+                                            uncensoredSwapRef.current = null;
                                             setModel(item.id);
                                             setStatusText(`Model: ${item.label}`);
                                             setIsModelMenuOpen(false);

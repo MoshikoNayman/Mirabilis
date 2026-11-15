@@ -40,7 +40,9 @@ including the image service, which needs several GB; `--no-image` skips it.
   troubleshooting
 - Go Dark: the app's own requests stay on this machine and the local network
 - Web search through Tavily (needs `TAVILY_API_KEY`)
-- Uncensored mode for local models
+- Uncensored mode for local models: keeps an uncensored model or switches to
+  one, and its refusal shield re-asks a model that refuses. Settings > Models
+  has a Freedom test.
 - Voice chat and dictation with local whisper.cpp and Piper voices
 - Attachments, image input, LaTeX math, branches and snapshots
 - Models manager for installing and updating Ollama models

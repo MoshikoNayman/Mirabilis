@@ -15,6 +15,18 @@ Versions use Junos-style tags. Newest first.
 - Composer chips show values only, in two units: provider and model, effort
   and access. Web and Uncensored are on/off pills in the message box.
 - Logo: the top-left petal sits closer to the others.
+- Suggested models: up to 3 per group, from about 8B to the largest that fits
+  a 32 GB GPU; models over 32 GB are gone. Uncensored is Dolphin 3.0 8B
+  Abliterated, Dolphin X1 8B and Huihui Qwen3 8B Abliterated v2. A new
+  Security group has CyberBuddy CyberOps 9B and Foundation-Sec 8B
+  Abliterated; Auto never picks from it.
+- Uncensored keeps the chosen model when it is already uncensored, else
+  switches to the first installed uncensored one; turning it off restores the
+  model it replaced. With Ollama, a reply that opens with a refusal is asked
+  again with the reply already started, then on the next installed uncensored
+  model; the answer shows Retried.
+- Settings > Models, Installed: Freedom test sends a model 8 edgy but harmless
+  prompts and shows Refused N/8.
 - Instant, Fast and Balanced answer without a thinking model's hidden
   thoughts; qwen3 spent a minute on them. Thorough, Deep and Deep Thinking
   keep them, and the status reads Thinking meanwhile.

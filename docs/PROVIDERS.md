@@ -143,10 +143,54 @@ and an install can be cancelled.
 
 ## Uncensored mode
 
-The Uncensored toggle in the composer is off by default and is stored per chat.
-When on, the chat switches to an installed uncensored local model if one exists
-(the first installed model of the catalog's Uncensored group, else MCQ-Raw-8B
-or another model flagged uncensored),
-and a directive at the top of the system prompt removes the app's content
-restrictions. OpenClaw goes further: uncensored, no personal memory and no app
-system prompt.
+The Uncensored pill in the message box is off by default and is stored per
+chat. When on, a directive at the top of the system prompt removes the app's
+content restrictions. OpenClaw goes further: uncensored, no personal memory and
+no app system prompt.
+
+With Ollama, turning it on keeps the current model when it counts as
+uncensored: in the catalog's Uncensored group, flagged `"uncensored": true`, or
+with `uncensored`, `abliterated`, `heretic` or `dolphin` in its name. Otherwise
+the chat switches to the first installed model of the Uncensored group, else
+MCQ-Raw-8B or another model flagged uncensored. Turning it off brings back the
+model it replaced, unless another one was picked since.
+
+### Refusal shield
+
+With Ollama, the start of each chat reply in Uncensored mode is held back
+until its first sentence, at most 160 characters, shows whether it answers or
+refuses. An answer then streams as usual. A refusal is dropped and the turn is
+asked again:
+
+1. The same model, with thinking off and the reply already started as
+   `Sure, here`.
+2. The next installed uncensored model in the order above, if any, the same
+   way.
+
+The status reads Retrying... meanwhile. A retried reply starts with
+`Sure, here`, shows Retried and names the model that answered. If every try
+refuses, the last reply is shown as it is. Cloud providers and agent runs are
+not shielded.
+
+### Freedom test
+
+Settings, Models, Installed has a Freedom test for each chat model. It sends 8
+fixed prompts that are edgy but harmless, such as a roast or a dark joke
+(`backend/src/freedomTest.js`), one at a time, and shows Refused N/8: how many
+replies open with a refusal. A result is dropped when the model's digest
+changes, so an updated model reads as untested. It is for reference only: it
+does not flag the model, and Auto and the pill ignore it.
+
+### With a new model
+
+1. Install it: Settings, Models, Discover, or `ollama pull <name>`.
+2. Optional: run its Freedom test.
+3. Pick it in the model menu, then turn on Uncensored.
+
+The pill keeps a model only when it counts as uncensored (above). For a model
+that does not, add a row to `~/.mirabilis/models.json`, with `<name>` as
+`ollama list` shows it. Mirabilis reads the file at start and then hourly.
+
+```json
+{ "ollama": [{ "id": "<name>", "group": "Uncensored", "uncensored": true }] }
+```

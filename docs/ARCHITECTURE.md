@@ -74,14 +74,16 @@ Elsewhere: `desktop/main.js` (Electron shell), `run.js` (launcher), `scripts/` (
 1. `ChatApp.jsx` posts `{ content, provider, model, ... }` to `/api/chats/:chatId/messages/stream`.
 2. With Go Dark on, the route refuses a provider that would leave the device (403).
 3. The user message is appended and the chat saved. On Ollama, model "Auto" lets
-   `backend/src/modelRouter.js` pick an installed model for the task, and Uncensored mode picks an
-   uncensored one.
+   `backend/src/modelRouter.js` pick an installed model for the task, and Uncensored mode keeps an
+   uncensored model or picks one.
 4. The prompt is built: platform context, up to 20 personal memory items (not in Uncensored mode),
    the system prompt sent with the message, then a history window (`backend/src/historyWindow.js`)
    sized to the model's context. The window start is kept stable so the engine's prompt cache keeps
    hitting. Text attachments are inlined.
 5. `streamWithProvider` streams tokens. The route sends SSE events `meta`, `token`, `notice`,
-   `done` (the saved assistant message), `titleUpdate` and `error`.
+   `done` (the saved assistant message), `titleUpdate` and `error`. In Uncensored mode with Ollama,
+   `backend/src/refusalShield.js` holds back the start of the reply; a refusal is asked again, with a
+   `retry` event first.
 6. The reply is saved. A new chat then gets a short title from the same model.
 
 ## Agent runs

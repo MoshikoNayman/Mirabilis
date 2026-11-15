@@ -334,6 +334,8 @@ describe('Auto picks from the catalog', () => {
         { id: 'nomic-embed-text:latest', capabilities: ['embedding'] },
         { id: 'mxbai-embed-large:latest' },
         { id: 'huihui_ai/qwen3-abliterated:8b', capabilities: ['completion'] },
+        // Skipped for its group alone: no flag, and the name says nothing.
+        { id: 'foundation-sec:8b', group: 'Security', capabilities: ['completion'] },
         { id: 'phi5:latest', capabilities: ['completion'] }
       ]
     );
@@ -371,6 +373,40 @@ describe('Auto picks from the catalog', () => {
     expect(isUncensoredModelRecord({ id: 'qwen3:8b', group: 'Powerful' })).toBe(false);
   });
 
+  it('keeps a current model that is already uncensored, and replaces one that is not', () => {
+    const list = listWith(
+      { dolphin3: {}, 'hermes3:8b': {}, 'dolphin-mixtral': {}, 'qwen3.5:9b': {} },
+      [
+        { id: 'huihui_ai/qwen3-abliterated:8b' },
+        // Kept for its flag alone: the name says nothing.
+        { id: 'hf.co/CyberBuddyAI/CyberBuddy-CyberOps-9B-GGUF:Q4_K_M-embQ8', group: 'Security', uncensored: true },
+        { id: 'foundation-sec:8b', group: 'Security' }
+      ]
+    );
+    expect(pickUncensoredModel(list, 'hermes3:8b')?.id).toBe('hermes3:8b');
+    expect(pickUncensoredModel(list, 'huihui_ai/qwen3-abliterated:8b')?.id).toBe('huihui_ai/qwen3-abliterated:8b');
+    expect(pickUncensoredModel(list, 'hf.co/CyberBuddyAI/CyberBuddy-CyberOps-9B-GGUF:Q4_K_M-embQ8')?.id)
+      .toBe('hf.co/CyberBuddyAI/CyberBuddy-CyberOps-9B-GGUF:Q4_K_M-embQ8');
+    // By pull name too, whatever the case and the latest tag.
+    expect(pickUncensoredModel(list, 'dolphin-mixtral:8x7b')?.id).toBe('dolphin-mixtral');
+    expect(pickUncensoredModel(list, 'Dolphin3:latest')?.id).toBe('dolphin3');
+    for (const current of ['qwen3.5:9b', 'foundation-sec:8b', 'gone:1b', 'auto', 'AUTO', '', undefined]) {
+      expect(pickUncensoredModel(list, current)?.id, String(current)).toBe('dolphin3');
+    }
+    expect(pickUncensoredModel(list)?.id).toBe('dolphin3');
+  });
+
+  it('replaces an uncensored current model that is not installed', () => {
+    expect(pickUncensoredModel(listWith({ dolphin3: {} }), 'hermes3:8b')?.id).toBe('dolphin3');
+    expect(pickUncensoredModel(listWith({}), 'hermes3:8b')).toBeNull();
+  });
+
+  it('matches the exact id before a name that only reads the same', () => {
+    // dolphin-mixtral pulls the 8x7b tag; dolphin-mixtral:latest is another install.
+    const list = listWith({ dolphin3: {} }, [{ id: 'dolphin-mixtral:latest' }]);
+    expect(pickUncensoredModel(list, 'dolphin-mixtral:latest')?.id).toBe('dolphin-mixtral:latest');
+  });
+
   it('tells embedding models apart by capability, or by name without one', () => {
     expect(isEmbeddingOnly({ id: 'x', capabilities: ['embedding'] })).toBe(true);
     expect(isEmbeddingOnly({ id: 'x-embed', capabilities: ['completion', 'embedding'] })).toBe(false);
@@ -405,6 +441,27 @@ describe('payloads', () => {
     expect(p.models).toHaveLength(1);
     expect(p.models[0]).toMatchObject({ name: 'dolphin3:latest', loaded: true, uncensored: true, capabilities: ['completion'], catalog: { id: 'dolphin3', label: 'Dolphin 3.0 8B', group: 'Uncensored' } });
     expect(normalizeInstalled({ models: [{ name: 'a:1b', catalog: { label: 'no id' } }] }).models[0].catalog).toBeNull();
+  });
+
+  it('keeps a Freedom test result and nulls junk', () => {
+    const at = '2026-11-15T10:00:00.000Z';
+    const p = normalizeInstalled({ models: [
+      { name: 'a:1b', freedom: { refused: 2, total: 8, testedAt: at, extra: true } },
+      { name: 'b:1b', freedom: { refused: 0, total: 8, testedAt: at } },
+      { name: 'c:1b' },
+      { name: 'd:1b', freedom: null },
+      { name: 'e:1b', freedom: 'Refused 2/8' },
+      { name: 'f:1b', freedom: { refused: '2', total: 8, testedAt: at } },
+      { name: 'g:1b', freedom: { refused: 9, total: 8, testedAt: at } },
+      { name: 'h:1b', freedom: { refused: -1, total: 8, testedAt: at } },
+      { name: 'i:1b', freedom: { refused: 0, total: 0, testedAt: at } },
+      { name: 'j:1b', freedom: { refused: 1.5, total: 8, testedAt: at } },
+      { name: 'k:1b', freedom: { refused: 2, total: 8 } },
+      { name: 'l:1b', freedom: { refused: 2, total: 8, testedAt: 'yesterday' } }
+    ] });
+    expect(p.models[0].freedom).toEqual({ refused: 2, total: 8, testedAt: at });
+    expect(p.models[1].freedom).toEqual({ refused: 0, total: 8, testedAt: at });
+    expect(p.models.slice(2).map((m) => m.freedom)).toEqual(Array(10).fill(null));
   });
 
   it('keeps known capabilities and the paging flags of a library page', () => {
