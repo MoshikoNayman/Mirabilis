@@ -13,7 +13,7 @@ import {
   Badge, Button, SegmentedControl, Spinner, Switch,
   IncognitoIcon, SlidersIcon, WaveIcon, CloseIcon, ArrowDownIcon, CheckIcon,
   GearIcon, ShieldIcon, PlugIcon, MicIcon, TerminalIcon, FlaskIcon, AlertIcon, CubeIcon, ChevronRightIcon,
-  PlusIcon, MinusIcon, GaugeIcon, GlobeIcon, UsersIcon
+  PlusIcon, MinusIcon, GaugeIcon, GlobeIcon, UnlockIcon, UsersIcon
 } from './ui/primitives';
 import VoiceChat from './shell/VoiceChat';
 import AgentRunPanel from './shell/AgentRunPanel';
@@ -8066,6 +8066,7 @@ export default function ChatApp() {
                     aria-pressed={uncensoredMode}
                     className={`${COMPOSER_PILL_CLASS} ${uncensoredMode ? COMPOSER_PILL_ON : COMPOSER_PILL_OFF}`}
                   >
+                    <UnlockIcon size={13} />
                     Uncensored
                   </button>
                 </div>

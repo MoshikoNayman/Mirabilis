@@ -159,6 +159,9 @@ export function ChatIcon(props) {
 export function GlobeIcon(props) {
   return <Svg {...props}><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></Svg>;
 }
+export function UnlockIcon(props) {
+  return <Svg {...props}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.75-1.4M12 15v2" /></Svg>;
+}
 export function PaletteIcon(props) {
   return <Svg {...props}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.5-.8 1.5-1.6 0-1.4 1-2.4 2.4-2.4H18a3 3 0 0 0 3-3A9 9 0 0 0 12 3Z" /><path d="M7.5 11h.01M10 7.5h.01M14 7.5h.01" /></Svg>;
 }
