@@ -12,14 +12,22 @@ import { createOllamaLibrary, LibraryError } from '../backend/src/ollamaLibrary.
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CATALOG = path.join(ROOT, 'backend', 'models.json');
-const REGISTRY = 'https://registry.ollama.ai/v2/library';
+const REGISTRY = 'https://registry.ollama.ai/v2';
+const HF_REGISTRY = 'https://hf.co/v2';
 const MANIFEST_ACCEPT = 'application/vnd.docker.distribution.manifest.v2+json';
 
 /** @returns {Promise<number>} HTTP status, or 0 when unreachable */
 async function manifestStatus(modelId) {
-  const [name, tag = 'latest'] = String(modelId).split(':');
+  const id = String(modelId);
+  const cut = id.indexOf(':', id.lastIndexOf('/') + 1);
+  const name = cut === -1 ? id : id.slice(0, cut);
+  const tag = cut === -1 ? 'latest' : id.slice(cut + 1);
+  // hf.co/user/repo is served by Hugging Face; user/name is a namespace on ours.
+  const url = name.startsWith('hf.co/')
+    ? `${HF_REGISTRY}/${name.slice('hf.co/'.length)}/manifests/${encodeURIComponent(tag)}`
+    : `${REGISTRY}/${name.includes('/') ? name : `library/${name}`}/manifests/${encodeURIComponent(tag)}`;
   try {
-    const res = await fetch(`${REGISTRY}/${encodeURIComponent(name)}/manifests/${encodeURIComponent(tag)}`, {
+    const res = await fetch(url, {
       headers: { Accept: MANIFEST_ACCEPT },
       signal: AbortSignal.timeout(15000)
     });

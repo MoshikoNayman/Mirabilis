@@ -81,9 +81,8 @@ Elsewhere: `desktop/main.js` (Electron shell), `run.js` (launcher), `scripts/` (
    sized to the model's context. The window start is kept stable so the engine's prompt cache keeps
    hitting. Text attachments are inlined.
 5. `streamWithProvider` streams tokens. The route sends SSE events `meta`, `token`, `notice`,
-   `done` (the saved assistant message), `titleUpdate` and `error`. In Uncensored mode with Ollama,
-   `backend/src/refusalShield.js` holds back the start of the reply; a refusal is asked again, with a
-   `retry` event first.
+   `done` (the saved assistant message), `titleUpdate`, `error`, and `retry` when
+   `backend/src/refusalShield.js` re-asks a refusal in Uncensored mode.
 6. The reply is saved. A new chat then gets a short title from the same model.
 
 ## Agent runs
