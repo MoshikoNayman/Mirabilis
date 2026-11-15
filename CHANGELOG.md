@@ -2,7 +2,7 @@
 
 Versions use Junos-style tags. Newest first.
 
-## [Unreleased]
+## [26.4R1-S5] - 2026-11-15
 
 - IntelLedger is removed: the Ledger tab, To Ledger, Commitment Radar,
   While you were away, the reminder worker, the `/api/intelledger` API and
